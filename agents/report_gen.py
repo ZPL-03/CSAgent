@@ -421,10 +421,6 @@ class ReportGenAgent(BaseAgent):
             "",
             narrative,
             "",
-            "## 工程解释与制造建议",
-            "",
-            engineering_explanation,
-            "",
             "## 代理模型初筛说明",
         ]
         if candidates:
@@ -470,6 +466,14 @@ class ReportGenAgent(BaseAgent):
                     f"- 模态云图数据：{result.get('visualization_json') or '-'}",
                 ]
             )
+        lines.extend(
+            [
+                "",
+                "## 工程解释与制造建议",
+                "",
+                engineering_explanation,
+            ]
+        )
         return "\n".join(lines)
 
     def _reportlab(self):

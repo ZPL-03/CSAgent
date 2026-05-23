@@ -527,6 +527,27 @@ class MainWindow(QMainWindow):
         evaluated = set(self.session.results_by_session_id.keys())
         return [candidate for candidate in candidates if candidate.get("candidate_id") not in evaluated]
 
+    def _report_candidate_set(self) -> list[dict]:
+        evaluated = set(self.session.results_by_session_id.keys())
+        return [
+            candidate
+            for candidate in self.session.current_candidates
+            if str(candidate.get("candidate_id")) in evaluated
+        ]
+
+    def _ordered_report_results(self) -> list[dict]:
+        ordered_results: list[dict] = []
+        used_keys: set[str] = set()
+        for candidate in self.session.current_candidates:
+            candidate_id = str(candidate.get("candidate_id") or "")
+            if candidate_id in self.session.results_by_session_id:
+                ordered_results.append(self.session.results_by_session_id[candidate_id])
+                used_keys.add(candidate_id)
+        for key, result in self.session.results_by_session_id.items():
+            if key not in used_keys:
+                ordered_results.append(result)
+        return ordered_results
+
     def _start_screen(self) -> None:
         if not self.session.task or not self.session.candidates:
             return
@@ -568,12 +589,16 @@ class MainWindow(QMainWindow):
     def _start_report(self) -> None:
         if not self.session.task or not self.session.results_by_session_id:
             return
+        report_candidates = self._report_candidate_set()
+        ordered_results = self._ordered_report_results()
+        if not ordered_results:
+            return
         self._run_action(
             "report",
             {
                 "task": self.session.task,
-                "results": list(self.session.results_by_session_id.values()),
-                "candidates": self.session.evaluated_candidates or self.session.current_candidates,
+                "results": ordered_results,
+                "candidates": report_candidates,
             },
             "正在生成报告",
         )

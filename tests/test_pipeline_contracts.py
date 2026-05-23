@@ -144,7 +144,8 @@ def test_candidate_generation_uses_three_initial_sources(monkeypatch):
 def test_candidate_generation_changes_actual_source_counts_when_transfer_cases_are_fewer(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = TaskParser().parse_instruction("生成 10 个候选，初筛保留 4 个候选")
-    agent = CandidateGenAgent()
+    messages = []
+    agent = CandidateGenAgent(progress_callback=lambda _agent, message, _event=None: messages.append(message))
 
     def controlled_source(source: str, task_payload: dict, start_index: int, desired_count: int, actual_count: int):
         candidates = agent.doe_sampler.sample_candidates(
@@ -174,6 +175,8 @@ def test_candidate_generation_changes_actual_source_counts_when_transfer_cases_a
 
     assert len(candidates) == 10
     assert Counter(candidate["source"] for candidate in candidates) == Counter({"LLM": 5, "CASE_TRANSFER": 1, "DOE": 4})
+    assert "初始配额 LLM=5 / 案例迁移=3 / DOE=2" in messages[-1]
+    assert "有效进入候选池 LLM=5，案例迁移=1，DOE补足=4" in messages[-1]
 
 
 def test_llm_candidates_are_extracted_from_sft_style_natural_answer(monkeypatch):
@@ -393,6 +396,7 @@ def test_report_falls_back_to_structured_engineering_explanation(monkeypatch):
     assert "## 工程解释与制造建议" in markdown
     assert "### 制造工艺适配性" in markdown
     assert "缺陷与质量控制" in markdown
+    assert markdown.index("## 有限元校核结果") < markdown.index("## 工程解释与制造建议")
     assert agent._last_llm_explanation_used is False
 
 

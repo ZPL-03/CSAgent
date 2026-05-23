@@ -1,8 +1,6 @@
 """项目路径与目录工具。"""
 
 from __future__ import annotations
-
-import shutil
 from pathlib import Path
 
 
@@ -15,8 +13,6 @@ TASKS_DIR = DATA_DIR / "tasks"
 RESULTS_DIR = DATA_DIR / "results"
 CASES_DIR = DATA_DIR / "cases"
 ABAQUS_RUNS_DIR = DATA_DIR / "abaqus_runs"
-LEGACY_ARTIFACTS_DIR = DATA_DIR / "artifacts"
-LEGACY_ABAQUS_RUNS_DIR = LEGACY_ARTIFACTS_DIR / "abaqus_runs"
 KNOWLEDGE_DIR = ROOT_DIR / "knowledge"
 EXTERNAL_KNOWLEDGE_DIR = KNOWLEDGE_DIR / "external"
 KNOWLEDGE_BASE_DIR = EXTERNAL_KNOWLEDGE_DIR / "rag"
@@ -27,24 +23,6 @@ MODELS_DIR = ROOT_DIR / "models"
 DOCS_DIR = ROOT_DIR / "docs"
 ABAQUS_DIR = ROOT_DIR / "abaqus"
 ABAQUS_TEMPLATE_DIR = ABAQUS_DIR / "templates"
-
-
-def _migrate_legacy_abaqus_runs() -> None:
-    """将旧版 data/artifacts/abaqus_runs 迁移到 data/abaqus_runs。"""
-    if not LEGACY_ABAQUS_RUNS_DIR.exists():
-        return
-
-    ABAQUS_RUNS_DIR.mkdir(parents=True, exist_ok=True)
-    for path in LEGACY_ABAQUS_RUNS_DIR.iterdir():
-        target = ABAQUS_RUNS_DIR / path.name
-        if target.exists():
-            continue
-        shutil.move(str(path), str(target))
-
-    if LEGACY_ABAQUS_RUNS_DIR.exists() and not any(LEGACY_ABAQUS_RUNS_DIR.iterdir()):
-        LEGACY_ABAQUS_RUNS_DIR.rmdir()
-    if LEGACY_ARTIFACTS_DIR.exists() and not any(LEGACY_ARTIFACTS_DIR.iterdir()):
-        LEGACY_ARTIFACTS_DIR.rmdir()
 
 
 def ensure_project_dirs() -> None:
@@ -68,5 +46,3 @@ def ensure_project_dirs() -> None:
         ABAQUS_TEMPLATE_DIR,
     ]:
         path.mkdir(parents=True, exist_ok=True)
-
-    _migrate_legacy_abaqus_runs()

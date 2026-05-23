@@ -1,4 +1,4 @@
-﻿# CSDM_cph
+# CSDM_cph
 
 复合材料耐压壳智能设计系统面向外压圆柱复合材料压力壳，主链路为：
 
@@ -13,6 +13,7 @@
 - 工况：外部静水压力 `external_pressure_MPa`
 - 目标：极限压力不低于 `ultimate_pressure_min_MPa`，并按面密度或质量目标排序
 - 流程参数：候选池总数和初筛保留数由自然语言明确指定；候选来源初始配额按 `LLM:案例迁移:DOE = 2:1:1` 计算，实际来源统计以有效候选为准
+- 报告导出以已有有限元校核结果为范围，可生成阶段报告；未校核候选保留在待校核状态，不进入有限元结论
 
 ## PBIPF 代理公式
 
@@ -55,8 +56,8 @@ D:\anaconda3\envs\GPT\python.exe scripts\check_env.py
 D:\anaconda3\envs\GPT\python.exe scripts\build_initial_cases.py --reset --count 10 --task-count 1 --pressures 30 --target-pressure 35
 ```
 
-`--reset` 会清理旧案例、任务、求解输入输出、Abaqus 工件、案例记忆索引和代理公式校准文件，再从 `CASE_1` 和 `C1` 重新计数。初始案例生成使用参数范围内的拉丁超立方采样；批量建库默认不写入会话任务编号，只有显式使用 `--record-task` 时才记录 `TASK_N` 追溯文件。
+`--reset` 会清理现有案例、任务、求解输入输出、Abaqus 工件、案例记忆索引和代理公式校准文件，再从 `CASE_1` 和 `C1` 重新计数。初始案例生成使用参数范围内的拉丁超立方采样；批量建库默认不写入会话任务编号，只有显式使用 `--record-task` 时才记录 `TASK_N` 追溯文件。
 
 ## 有限元说明
 
-`reference/wangge.py` 与 `reference/zhangusdfld.for` 保留为耐压壳参数化建模和用户子程序参考。当前自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出，先执行单位外压线性屈曲分析并提取一阶模态云图，再以一阶模态缺陷进入 Static Riks 后屈曲分析，极限压力取最大 LPF 与基准外压的乘积。`reference/zhangusdfld.for` 通过 `config/app_config.yaml` 的 `abaqus.use_user_subroutine` 显式启用，默认关闭以避免本机用户子程序编译环境阻断主流程。未找到 ABAQUS 命令时返回带诊断信息的失败结果，不伪造有限元通过。
+当前自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出，先执行单位外压线性屈曲分析并提取一阶模态云图，再以一阶模态缺陷进入 Static Riks 后屈曲分析，极限压力取最大 LPF 与基准外压的乘积。本机如保留 `reference/wangge.py` 与 `reference/zhangusdfld.for`，它们只作为人工建模和用户子程序参考，不属于主流程必需资产。`reference/zhangusdfld.for` 通过 `config/app_config.yaml` 的 `abaqus.use_user_subroutine` 显式启用，默认关闭以避免本机用户子程序编译环境阻断主流程。未找到 ABAQUS 命令时返回带诊断信息的失败结果，不伪造有限元通过。

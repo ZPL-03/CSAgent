@@ -714,8 +714,8 @@ class CandidateGenAgent(BaseAgent):
             "候选生成完成："
             f"目标总数 {source_targets['total']}，"
             f"初始配额 LLM={source_targets['llm']} / 案例迁移={source_targets['case_transfer']} / DOE={source_targets['doe']}；"
-            f"实际保留 LLM={len(valid_llm_candidates)}，"
+            f"有效进入候选池 LLM={len(valid_llm_candidates)}，"
             f"案例迁移={len(valid_transfer_candidates)}，"
-            f"DOE={len(doe_candidates)}"
+            f"DOE补足={len(doe_candidates)}"
         )
         return candidates

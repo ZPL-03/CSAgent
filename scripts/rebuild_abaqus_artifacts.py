@@ -16,7 +16,7 @@ from agents.fem_agent import FEMAgent
 from core.case_memory import CaseMemoryIndex
 from core.io_utils import read_json, write_json
 from core.paths import CASES_DIR, CASE_LIBRARY_DIR, IO_DIR
-from scripts.clean_debug_artifacts import purge_business_records
+from scripts.clean_artifacts import purge_business_records
 from scripts.migrate_contracts import normalize_case_record
 
 
