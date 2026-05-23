@@ -1,0 +1,41 @@
+backends:
+  - name: domain_finetuned_primary
+    provider: openai_compatible
+    base_url_env: LLM_PRIMARY_URL
+    api_key_env: LLM_PRIMARY_API_KEY
+    model_env: LLM_PRIMARY_MODEL_NAME
+    base_url: ""
+    api_key: ""
+    model: csllm-cpv
+    temperature: 0.2
+    max_tokens: 1800
+    timeout_seconds: 180
+    json_output_tokens: 4096
+  - name: configured_fallback
+    provider: openai_compatible
+    base_url_env: URL
+    api_key_env: API_KEY
+    model_env: MODEL_NAME
+    base_url: ""
+    api_key: ""
+    model: ""
+    temperature: 0.2
+    max_tokens: 1800
+    timeout_seconds: 180
+    json_output_tokens: 4096
+
+backend:
+  provider: openai_compatible
+  base_url_env: URL
+  api_key_env: API_KEY
+  model_env: MODEL_NAME
+  base_url: ""
+  api_key: ""
+  model: ""
+  temperature: 0.2
+  max_tokens: 1800
+  timeout_seconds: 180
+  json_output_tokens: 4096
+
+fallback:
+  max_format_retries: 3

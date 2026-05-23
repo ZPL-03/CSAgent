@@ -1,0 +1,460 @@
+from __future__ import annotations
+
+from collections import Counter
+
+import pytest
+
+from agents.candidate_gen import CandidateGenAgent
+from agents.knowledge_agent import KnowledgeAgent
+from agents.orchestrator import OrchestratorAgent
+from agents.report_gen import ReportGenAgent
+from core.id_utils import format_temp_candidate_id
+from core.schema_validator import SchemaValidationError, validate_or_raise
+from core.task_contract import requested_candidate_pool_size, requested_screen_top_k, task_payload_from_request
+from core.task_parser import TaskParser
+
+
+class _FakeKnowledge:
+    def __init__(self, snippets=None):
+        self.snippets = snippets or []
+
+    def format_snippets(self, _task, top_k=5):
+        return list(self.snippets[:top_k])
+
+
+def test_parser_reads_natural_language_pool_counts(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    instruction = (
+        "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，长度 500 mm，半径 100 mm，"
+        "厚度 10 mm，极限压力不低于 35 MPa，生成 12 个候选，初筛保留 5 个候选"
+    )
+
+    task = TaskParser().parse_instruction(instruction)
+    payload = task_payload_from_request(task)
+    generation = payload["candidate_generation_preferences"]
+
+    assert requested_candidate_pool_size(task) == 12
+    assert requested_screen_top_k(task) == 5
+    assert payload["design_targets"]["ultimate_pressure_min_MPa"] == 35.0
+    assert generation["llm_candidates"] is None
+    assert generation["case_transfer_candidates"] is None
+    assert generation["doe_candidates"] is None
+    assert generation["source_allocation_mode"] == "ratio_2_1_1"
+    facts = payload["user_input_facts"]
+    assert facts["load_conditions"]["external_pressure_MPa"] == 30.0
+    assert facts["geometry"]["length_mm"] == 500.0
+    assert facts["geometry"]["radius_mm"] == 100.0
+    assert facts["geometry"]["thickness_mm"] == 10.0
+    assert facts["design_targets"]["ultimate_pressure_min_MPa"] == 35.0
+
+
+def test_candidate_prompt_separates_user_facts_from_system_constraints(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = TaskParser().parse_instruction("生成 12 个候选，初筛保留 5 个候选")
+    agent = CandidateGenAgent()
+    knowledge_guidance = ["[外部知识库 1] pressure hull buckling guidance"]
+
+    system_prompt, user_prompt = agent._build_prompt(task, desired_count=6, knowledge_guidance=knowledge_guidance)
+
+    assert "SFT 数据" in system_prompt
+    assert "候选数量：6" in user_prompt
+    user_fact_section = user_prompt.split("系统候选字段约束", 1)[0]
+    assert "30.0 MPa" not in user_fact_section
+    assert "T700/Epoxy" not in user_fact_section
+    assert "500.0" not in user_fact_section
+    assert "T700/Epoxy" in user_prompt
+    assert "0.001-0.01" in user_prompt
+    assert "结构化任务 JSON" not in user_prompt
+    assert "不要输出 JSON" in system_prompt
+    assert "结构性能依据和制造/缺陷风险依据" in user_prompt
+
+    assert "pressure hull buckling guidance" in user_prompt
+
+
+def test_count_overrides_keep_ratio_mode(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    instruction = "生成 12 个候选，初筛保留 5 个候选"
+    task = TaskParser().parse_instruction(
+        instruction,
+        overrides={
+            "total_candidates": 9,
+            "top_k_candidates": 4,
+        },
+    )
+    generation = task_payload_from_request(task)["candidate_generation_preferences"]
+
+    assert requested_candidate_pool_size(task) == 9
+    assert requested_screen_top_k(task) == 4
+    assert generation["source_allocation_mode"] == "ratio_2_1_1"
+
+
+def test_candidate_source_targets_follow_default_ratio(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = TaskParser().parse_instruction("生成 12 个候选，初筛保留 5 个候选")
+    targets = CandidateGenAgent()._resolve_source_targets(task)
+
+    assert targets == {"total": 12, "llm": 6, "case_transfer": 3, "doe": 3}
+
+
+@pytest.mark.parametrize(
+    ("instruction", "message"),
+    [
+        ("初筛保留 3 个候选", "候选池总数"),
+        ("生成 6 个候选", "初筛保留数量"),
+    ],
+)
+def test_parser_requires_pool_and_screen_counts(monkeypatch, instruction, message):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    with pytest.raises(ValueError, match=message):
+        TaskParser().parse_instruction(instruction)
+
+
+def test_candidate_generation_uses_three_initial_sources(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = TaskParser().parse_instruction("生成 6 个候选，初筛保留 3 个候选")
+    agent = CandidateGenAgent()
+    requested = {}
+
+    def controlled_source(source: str, task_payload: dict, start_index: int, desired_count: int):
+        requested[source] = desired_count
+        candidates = agent.doe_sampler.sample_candidates(
+            task_payload,
+            n_samples=desired_count,
+            start_index=start_index,
+            strict_solver_window=True,
+            hull_type="CYLINDRICAL",
+            id_factory=format_temp_candidate_id,
+        )
+        for candidate in candidates:
+            candidate["source"] = source
+        return candidates
+
+    monkeypatch.setattr(agent, "_llm_candidates", lambda task_payload, start_index, desired_count: controlled_source("LLM", task_payload, start_index, desired_count))
+    monkeypatch.setattr(agent, "_case_transfer_candidates", lambda task_payload, start_index, desired_count: controlled_source("CASE_TRANSFER", task_payload, start_index, desired_count))
+
+    candidates = agent.run(task)
+
+    assert len(candidates) == 6
+    assert {candidate["candidate_id"] for candidate in candidates} == {f"TMP_{index}" for index in range(1, 7)}
+    assert all(candidate["display_name"] == candidate["candidate_id"] for candidate in candidates)
+    assert requested == {"LLM": 3, "CASE_TRANSFER": 2}
+    assert Counter(candidate["source"] for candidate in candidates) == Counter({"LLM": 3, "CASE_TRANSFER": 2, "DOE": 1})
+
+
+def test_candidate_generation_changes_actual_source_counts_when_transfer_cases_are_fewer(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = TaskParser().parse_instruction("生成 10 个候选，初筛保留 4 个候选")
+    agent = CandidateGenAgent()
+
+    def controlled_source(source: str, task_payload: dict, start_index: int, desired_count: int, actual_count: int):
+        candidates = agent.doe_sampler.sample_candidates(
+            task_payload,
+            n_samples=actual_count,
+            start_index=start_index,
+            strict_solver_window=True,
+            hull_type="CYLINDRICAL",
+            id_factory=format_temp_candidate_id,
+        )
+        for candidate in candidates:
+            candidate["source"] = source
+        return candidates
+
+    monkeypatch.setattr(
+        agent,
+        "_llm_candidates",
+        lambda task_payload, start_index, desired_count: controlled_source("LLM", task_payload, start_index, desired_count, desired_count),
+    )
+    monkeypatch.setattr(
+        agent,
+        "_case_transfer_candidates",
+        lambda task_payload, start_index, desired_count: controlled_source("CASE_TRANSFER", task_payload, start_index, desired_count, 1),
+    )
+
+    candidates = agent.run(task)
+
+    assert len(candidates) == 10
+    assert Counter(candidate["source"] for candidate in candidates) == Counter({"LLM": 5, "CASE_TRANSFER": 1, "DOE": 4})
+
+
+def test_llm_candidates_are_extracted_from_sft_style_natural_answer(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = TaskParser().parse_instruction(
+        "请为复合材料外压圆柱耐压壳设计方案，材料 T700/Epoxy，外压 30 MPa，长度 500 mm，"
+        "半径 100 mm，厚度 10 mm，初始缺陷比 0.5%，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
+    )
+    agent = CandidateGenAgent()
+
+    class ControlledBackend:
+        json_output_tokens = 4096
+
+        def chat(self, system_prompt, user_prompt, max_tokens_override=None, json_mode=False):
+            assert "不要输出 JSON" in system_prompt
+            assert "候选数量：2" in user_prompt
+            assert "pressure hull buckling guidance" in user_prompt
+            return (
+                "## 候选方案\n"
+                "| 编号 | 材料 | 角度组合 | 工程提示 |\n"
+                "| --- | --- | --- | --- |\n"
+                "| S01 | T700/Epoxy | ±35° / ±65° | 屈曲稳定性和制造性折中 |\n"
+                "| S02 | T700/Epoxy | ±45° / ±70° | 环向刚度较高 |\n"
+            )
+
+    agent.knowledge_base = _FakeKnowledge(["[外部知识库 1] pressure hull buckling guidance"])
+    agent.llm_backend = ControlledBackend()
+    candidates = agent._llm_candidates(task, start_index=1, desired_count=2)
+
+    assert len(candidates) == 2
+    assert [candidate["source"] for candidate in candidates] == ["LLM", "LLM"]
+    assert candidates[0]["geometry"]["length_mm"] == 500.0
+    assert candidates[0]["geometry"]["radius_mm"] == 100.0
+    assert candidates[0]["geometry"]["thickness_mm"] == 10.0
+    assert candidates[0]["geometry"]["imperfection_ratio"] == 0.005
+    assert candidates[0]["geometry"]["alpha_deg"] == 35.0
+    assert candidates[0]["geometry"]["beta_deg"] == 65.0
+    assert "S01" in candidates[0]["origin_summary"]
+    assert "候选方案" in candidates[0]["llm_output_excerpt"]
+
+
+def test_llm_candidate_table_without_material_or_imperfection_is_rejected(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = TaskParser().parse_instruction(
+        "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，长度 500 mm，半径 100 mm，"
+        "厚度 10 mm，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
+    )
+    agent = CandidateGenAgent()
+
+    class ControlledBackend:
+        json_output_tokens = 4096
+
+        def chat(self, system_prompt, user_prompt, max_tokens_override=None, json_mode=False):
+            assert "用户已给信息" in user_prompt
+            assert "表格列使用" in user_prompt
+            return (
+                "## 候选方案\n"
+                "| 候选方案编号 | 壳体半径(mm) | 壳体长度(mm) | 壁厚(mm) | 铺层角 | 铺层形式 | 推荐理由 |\n"
+                "| --- | --- | --- | --- | --- | --- | --- |\n"
+                "| 1 | 100 | 500 | 10 | ±45/0/90 | [±45/0/90]s | 环向承载与铺放工艺折中 |\n"
+                "| 2 | 100 | 500 | 10 | ±60/0/90 | [±60/0/90]s | 提高环向刚度 |\n"
+            )
+
+    agent.llm_backend = ControlledBackend()
+    candidates = agent._llm_candidates(task, start_index=1, desired_count=2)
+
+    assert candidates == []
+
+
+def test_candidate_normalization_rejects_incomplete_source_geometry(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = TaskParser().parse_instruction("生成 6 个候选，初筛保留 3 个候选")
+    agent = CandidateGenAgent()
+
+    with pytest.raises(SchemaValidationError, match="缺少必要几何字段"):
+        agent._normalize_candidate(
+            task,
+            {
+                "geometry": {"length_mm": 500.0, "radius_mm": 100.0},
+                "material_system": {"name": "T700/Epoxy"},
+            },
+            index=1,
+            source="CASE_TRANSFER",
+        )
+
+
+def test_candidate_schema_requires_non_empty_display_name(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = TaskParser().parse_instruction("生成 6 个候选，初筛保留 3 个候选")
+    candidate = CandidateGenAgent().doe_sampler.sample_candidates(
+        task,
+        n_samples=1,
+        start_index=1,
+        strict_solver_window=True,
+        id_factory=format_temp_candidate_id,
+    )[0]
+
+    assert candidate["display_name"] == candidate["candidate_id"]
+    validate_or_raise("candidate.schema.json", candidate)
+
+    missing_display_name = dict(candidate)
+    missing_display_name.pop("display_name")
+    with pytest.raises(SchemaValidationError):
+        validate_or_raise("candidate.schema.json", missing_display_name)
+
+    null_persistent_id = dict(candidate)
+    null_persistent_id["persistent_candidate_id"] = None
+    with pytest.raises(SchemaValidationError):
+        validate_or_raise("candidate.schema.json", null_persistent_id)
+
+
+def test_orchestrator_promotes_candidate_to_formal_identity_without_persistent_id(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = TaskParser().parse_instruction("生成 6 个候选，初筛保留 3 个候选")
+    candidate = CandidateGenAgent().doe_sampler.sample_candidates(
+        task,
+        n_samples=1,
+        start_index=1,
+        strict_solver_window=True,
+        id_factory=format_temp_candidate_id,
+    )[0]
+    candidate["persistent_candidate_id"] = "C999"
+    orchestrator = OrchestratorAgent.__new__(OrchestratorAgent)
+
+    promoted = orchestrator._promote_candidate_for_fem(task, candidate)
+
+    assert promoted["candidate_id"].startswith("C")
+    assert promoted["display_name"] == promoted["candidate_id"]
+    assert promoted["session_candidate_id"] == "TMP_1"
+    assert "persistent_candidate_id" not in promoted
+    assert candidate["candidate_id"] == "TMP_1"
+    validate_or_raise("candidate.schema.json", promoted)
+
+
+def test_knowledge_case_record_keeps_only_real_task_trace(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task_record = TaskParser().parse_instruction("生成 6 个候选，初筛保留 3 个候选")
+    task_payload = task_payload_from_request(task_record)
+    design = {
+        "candidate_id": "C999",
+        "source": "DOE",
+        "geometry": {"length_mm": 500.0, "radius_mm": 100.0, "thickness_mm": 10.0},
+        "layup": {},
+        "material_system": {},
+    }
+    abaqus_results = {
+        "candidate_id": "C999",
+        "status": "success",
+        "retry_count": 0,
+        "ultimate_pressure_MPa": 40.0,
+        "verdict": "通过",
+    }
+    agent = KnowledgeAgent.__new__(KnowledgeAgent)
+
+    untraced_record = agent._build_record(task_payload, design, abaqus_results)
+    traced_design = {**design, "candidate_id": "C998"}
+    traced_results = {**abaqus_results, "candidate_id": "C998"}
+    traced_record = agent._build_record(task_record, traced_design, traced_results)
+
+    assert "task_id" not in untraced_record
+    assert traced_record["task_id"] == task_record["task_id"]
+
+
+def _report_sample():
+    task = TaskParser().parse_instruction(
+        "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，长度 500 mm，半径 100 mm，"
+        "厚度 10 mm，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
+    )
+    candidate = {
+        "candidate_id": "TMP_1",
+        "display_name": "TMP_1",
+        "source": "DOE",
+        "geometry": {
+            "length_mm": 500.0,
+            "radius_mm": 100.0,
+            "thickness_mm": 10.0,
+            "alpha_deg": 35.0,
+            "beta_deg": 65.0,
+            "imperfection_ratio": 0.005,
+        },
+        "layup": {"layup": "[90_4/(±35/±65)_8/90_4]"},
+        "material_system": {"name": "T700/Epoxy"},
+        "rationale": "兼顾环向刚度和制造角度。",
+        "screening_summary": "PBIPF 公式初筛通过。",
+        "selection_reason": "代理模型排序靠前。",
+        "surrogate_ultimate_pressure_MPa": 41.0,
+        "asme_linear_buckling_pressure_MPa": 52.0,
+        "rank_score": 39.0,
+        "surrogate_weight": 15.5,
+    }
+    result = {
+        "candidate_id": "C1",
+        "session_candidate_id": "TMP_1",
+        "display_name": "C1",
+        "status": "completed",
+        "ultimate_pressure_MPa": 40.0,
+        "linear_buckling_pressure_MPa": 52.0,
+        "ultimate_pressure_basis": "ABAQUS Riks",
+        "riks_lpf_max": 1.14,
+        "imperfection_amplitude_mm": 0.5,
+        "weight_kg_per_m2": 15.5,
+        "failure_mode": "整体屈曲",
+        "verdict": "通过",
+        "diagnosis_summary": "非线性极限压力达到目标。",
+        "visualization_json": "data/results/CASE_1_mode.json",
+    }
+    return task, [result], [candidate]
+
+
+def test_report_falls_back_to_structured_engineering_explanation(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, results, candidates = _report_sample()
+    agent = ReportGenAgent()
+
+    markdown = agent._render_markdown(task, results, candidates)
+
+    assert "## 工程解释与制造建议" in markdown
+    assert "### 制造工艺适配性" in markdown
+    assert "缺陷与质量控制" in markdown
+    assert agent._last_llm_explanation_used is False
+
+
+def test_report_uses_llm_only_for_grounded_engineering_explanation(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, results, candidates = _report_sample()
+    agent = ReportGenAgent()
+
+    class ControlledBackend:
+        max_tokens = 1800
+
+        def chat(self, system_prompt, user_prompt, max_tokens_override=None, json_mode=False):
+            assert "不得新增候选编号、数值" in system_prompt
+            assert "制造工艺适配性" in user_prompt
+            assert "只做定性解释" in user_prompt
+            assert json_mode is False
+            return (
+                "### 制造工艺适配性\n"
+                "- 先围绕候选铺层组织缠绕和铺放可制造性评审。\n\n"
+                "### 缺陷与质量控制\n"
+                "- 重点比较圆度、铺层角偏差和分层风险。\n\n"
+                "### 有限元结果解读\n"
+                "- 结果解释沿用结构化校核结论。"
+            )
+
+    agent.llm_backend = ControlledBackend()
+
+    markdown = agent._render_markdown(task, results, candidates)
+
+    assert "缠绕和铺放可制造性评审" in markdown
+    assert "PBIPF 公式初筛通过" in markdown
+    assert agent._last_llm_explanation_used is True
+
+
+def test_report_cleans_llm_explanation_before_using_it(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, results, candidates = _report_sample()
+    agent = ReportGenAgent()
+
+    class ControlledBackend:
+        max_tokens = 1800
+
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, system_prompt, user_prompt, max_tokens_override=None, json_mode=False):
+            self.calls += 1
+            if self.calls == 1:
+                return "### 缺陷控制\n- 建议控制到 0.3 mm，并可考虑 T800 替代材料。"
+            assert "报告解释文本约束清理器" in system_prompt
+            return (
+                "### 缺陷与质量控制\n"
+                "- 建议围绕圆度、铺层角偏差和分层风险开展质量控制，不引入额外阈值或替代材料。"
+            )
+
+    backend = ControlledBackend()
+    agent.llm_backend = backend
+
+    markdown = agent._render_markdown(task, results, candidates)
+
+    assert "额外阈值或替代材料" in markdown
+    assert "0.3 mm" not in markdown
+    assert "T800" not in markdown
+    assert backend.calls == 2
+    assert agent._last_llm_explanation_used is True

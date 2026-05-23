@@ -1,0 +1,221 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "csdm_cph/task.schema.json",
+  "title": "CSDM_cph Task Schema",
+  "type": "object",
+  "required": [
+    "application",
+    "load_conditions",
+    "boundary_conditions",
+    "geometry_envelope",
+    "candidate_generation_preferences",
+    "screening_preferences",
+    "material_system",
+    "layup_constraints",
+    "hull_type",
+    "design_targets"
+  ],
+  "properties": {
+    "application": {
+      "type": "string",
+      "minLength": 1
+    },
+    "load_conditions": {
+      "type": "object",
+      "required": ["type", "label", "external_pressure_MPa"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["external_pressure"]
+        },
+        "label": {
+          "type": "string"
+        },
+        "external_pressure_MPa": {
+          "type": "number",
+          "minimum": 0
+        }
+      },
+      "additionalProperties": true
+    },
+    "boundary_conditions": {
+      "type": "object",
+      "required": ["type", "label"],
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["END_CLAMPED", "END_SIMPLY_SUPPORTED", "FLANGE_CONSTRAINED"]
+        },
+        "label": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "axial_edges": {
+          "type": "array",
+          "items": {"type": "string"}
+        },
+        "radial_constraint": {"type": "boolean"},
+        "rotation_constraint": {"type": "boolean"}
+      },
+      "additionalProperties": true
+    },
+    "geometry_envelope": {
+      "type": "object",
+      "required": ["length_mm", "radius_mm", "thickness_mm", "alpha_deg", "beta_deg", "imperfection_ratio"],
+      "properties": {
+        "length_mm": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"type": "number"}
+        },
+        "radius_mm": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"type": "number"}
+        },
+        "thickness_mm": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"type": "number"}
+        },
+        "alpha_deg": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"type": "number"}
+        },
+        "beta_deg": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"type": "number"}
+        },
+        "imperfection_ratio": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"type": "number"}
+        }
+      },
+      "additionalProperties": true
+    },
+    "candidate_generation_preferences": {
+      "type": "object",
+      "required": [
+        "total_candidates",
+        "source_allocation_mode"
+      ],
+      "properties": {
+        "total_candidates": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 60
+        },
+        "llm_candidates": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 60
+        },
+        "case_transfer_candidates": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 60
+        },
+        "doe_candidates": {
+          "type": ["integer", "null"],
+          "minimum": 0,
+          "maximum": 60
+        },
+        "source_allocation_mode": {
+          "type": "string",
+          "enum": ["ratio_2_1_1", "explicit_counts"]
+        }
+      },
+      "additionalProperties": true
+    },
+    "screening_preferences": {
+      "type": "object",
+      "required": ["top_k_candidates"],
+      "properties": {
+        "top_k_candidates": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 30
+        }
+      },
+      "additionalProperties": true
+    },
+    "user_input_facts": {
+      "type": "object",
+      "properties": {
+        "candidate_generation": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "load_conditions": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "boundary_conditions": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "geometry": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "material_system": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "design_targets": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      },
+      "additionalProperties": true
+    },
+    "material_system": {
+      "type": "object",
+      "required": ["name", "E1_GPa"],
+      "properties": {
+        "name": {"type": "string"},
+        "E1_GPa": {"type": "number"}
+      },
+      "additionalProperties": true
+    },
+    "layup_constraints": {
+      "type": "object",
+      "required": ["allowed_angles", "symmetric", "balanced", "min_ratio_per_angle"],
+      "properties": {
+        "allowed_angles": {
+          "type": "array",
+          "items": {"type": "number"}
+        },
+        "symmetric": {"type": "boolean"},
+        "balanced": {"type": "boolean"},
+        "min_ratio_per_angle": {"type": "number", "minimum": 0, "maximum": 1}
+      },
+      "additionalProperties": true
+    },
+    "hull_type": {
+      "type": "string",
+      "enum": ["CYLINDRICAL"]
+    },
+    "design_targets": {
+      "type": "object",
+      "required": ["ultimate_pressure_min_MPa", "primary_objective"],
+      "properties": {
+        "ultimate_pressure_min_MPa": {"type": "number", "minimum": 0},
+        "primary_objective": {"type": "string"}
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": true
+}

@@ -1,0 +1,55 @@
+# Python cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Local env
+.env
+AGENTS.md
+CLAUDE.md
+reference/
+AI规范文档/
+.venv/
+venv/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Runtime outputs
+data/io/
+data/tasks/
+data/abaqus_runs/
+data/results/latest_report.md
+data/results/latest_report.pdf
+data/results/batch_summary_*.json
+knowledge/chroma_db/
+knowledge/external/rag/
+knowledge/external/kg/
+knowledge/external/provenance/
+knowledge/external/manifest.json
+models/embedding_cache/
+
+# Abaqus session / generated files
+abaqus.rpy*
+abaqus*.rec
+abaqus/build_*.py
+*.odb
+*.inp
+*.lck
+*.023
+*.com
+*.jnl
+*.sta
+*.prt
+*.sim
+*.rec
+
+# Logs
+*.log

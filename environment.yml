@@ -1,0 +1,28 @@
+name: GPT
+channels:
+  - pytorch
+  - nvidia
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.9
+  - pip
+  - numpy
+  - pytorch=2.5.*
+  - pytorch-cuda=11.8
+  - pip:
+      - PyQt6==6.4.2
+      - jinja2==3.1.6
+      - PyYAML==6.0.3
+      - python-dotenv
+      - jsonschema==4.25.1
+      - openai==2.30.0
+      - chromadb==1.5.5
+      - sentence-transformers==2.6.1
+      - scikit-learn==1.6.1
+      - matplotlib==3.9.2
+      - pyvista==0.46.5
+      - pyvistaqt
+      - reportlab==4.4.10
+      - joblib
+      - pytest

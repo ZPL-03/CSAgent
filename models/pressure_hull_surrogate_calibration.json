@@ -1,0 +1,30 @@
+{
+  "selected_model": "PBIPF_ASME_RD_1172",
+  "training_size": 10,
+  "bias_MPa": 21.762062,
+  "scale": 2.11535,
+  "feature_order": [
+    "length_mm",
+    "radius_mm",
+    "thickness_mm",
+    "alpha_deg",
+    "beta_deg",
+    "imperfection_ratio",
+    "ply_count",
+    "A22",
+    "B23",
+    "D12",
+    "D22",
+    "D33",
+    "asme_linear_buckling_pressure_MPa",
+    "external_pressure_MPa",
+    "load_case_code",
+    "boundary_condition_code",
+    "density_kg_per_m3",
+    "E1_GPa",
+    "E2_GPa",
+    "G12_GPa",
+    "nu12"
+  ],
+  "linear_buckling_model": "ASME_RD_1172"
+}

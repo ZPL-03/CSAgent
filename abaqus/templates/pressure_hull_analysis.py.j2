@@ -1,0 +1,15 @@
+# -*- coding: utf-8 -*-
+"""CSDM_cph 耐压壳 ABAQUS 运行入口。"""
+
+import os
+
+runtime_path = os.path.join(r"{{ project_root }}", "abaqus", "runtime_build_pressure_hull.py")
+namespace = {}
+with open(runtime_path, "r") as runtime_file:
+    exec(compile(runtime_file.read(), runtime_path, "exec"), namespace)
+
+namespace["main"](
+    r"{{ input_json }}",
+    r"{{ result_json }}",
+    r"{{ user_subroutine }}",
+)

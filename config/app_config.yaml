@@ -1,0 +1,75 @@
+project:
+  name: CSDM_cph
+  timezone: Asia/Shanghai
+  default_language: zh-CN
+
+paths:
+  data_dir: data
+  io_dir: data/io
+  results_dir: data/results
+  cases_dir: data/cases
+  abaqus_runs_dir: data/abaqus_runs
+  knowledge_dir: knowledge
+  chroma_dir: knowledge/chroma_db
+  case_library_dir: knowledge/case_library
+  models_dir: models
+
+abaqus:
+  command: abaqus
+  cae_args: "cae noGUI="
+  python_args: "python"
+  max_retries: 3
+  job_timeout_seconds: 3600
+  poll_interval_seconds: 5
+  user_subroutine: reference/zhangusdfld.for
+  use_user_subroutine: false
+  cleanup_patterns:
+    - "*.lck"
+    - "*.023"
+    - "*.com"
+
+pipeline:
+  candidate_source_ratio:
+    llm: 2
+    case_transfer: 1
+    doe: 1
+  min_case_records_for_retrain: 30
+  random_seed: 42
+  screening_score:
+    pressure_weight: 1.0
+    weight_penalty: 0.12
+    uncertainty_penalty: 0.2
+
+rag:
+  embedding_model: BAAI/bge-m3
+  embedding_cache_dir: models/embedding_cache
+  local_files_only: true
+  use_hash_embedding_only: false
+  allow_hash_fallback: true
+
+case_memory:
+  collection_name: csdm_cph_case_memory
+  hybrid_retrieval: true
+  vector_top_k_multiplier: 4
+  vector_rank_weight: 0.1
+
+external_knowledge:
+  enabled: true
+  base_dir: knowledge/external
+  rag_chunks_path: knowledge/external/rag/rag_chunks.jsonl
+  kg_dir: knowledge/external/kg
+  manifest_path: knowledge/external/manifest.json
+  provenance_dir: knowledge/external/provenance
+  top_k: 5
+  kg_top_k: 8
+  max_snippet_chars: 1200
+
+conversation:
+  confirmation_steps:
+    - screen_candidates
+    - fem_evaluation
+    - export_report
+
+report:
+  output_markdown: data/results/latest_report.md
+  output_pdf: data/results/latest_report.pdf

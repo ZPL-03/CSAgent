@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "csdm_cph/case_record.schema.json",
+  "title": "CSDM_cph Case Record Schema",
+  "type": "object",
+  "required": [
+    "case_id",
+    "created_at",
+    "source",
+    "task",
+    "design",
+    "abaqus_results",
+    "verdict"
+  ],
+  "properties": {
+    "case_id": {"type": "string", "pattern": "^CASE_[0-9]+$"},
+    "task_id": {"type": "string", "pattern": "^TASK_[0-9]+$"},
+    "created_at": {"type": "string"},
+    "source": {"type": "string"},
+    "task": {"type": "object"},
+    "design": {"type": "object"},
+    "abaqus_results": {"type": "object"},
+    "verdict": {"type": "string"},
+    "surrogate_pressure_error_pct": {"type": ["number", "null"]},
+    "fem_agent_retry_count": {"type": "integer", "minimum": 0}
+  },
+  "additionalProperties": true
+}

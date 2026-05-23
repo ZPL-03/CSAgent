@@ -1,0 +1,60 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "csdm_cph/abaqus_result.schema.json",
+  "title": "CSDM_cph Abaqus Result Schema",
+  "type": "object",
+  "required": [
+    "candidate_id",
+    "status",
+    "retry_count"
+  ],
+  "properties": {
+    "candidate_id": {"type": "string"},
+    "status": {
+      "type": "string",
+      "enum": ["success", "failed", "max_retries_exceeded"]
+    },
+    "retry_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "ultimate_pressure_MPa": {"type": ["number", "null"]},
+    "failure_pressure_MPa": {"type": ["number", "null"]},
+    "linear_buckling_pressure_MPa": {"type": ["number", "null"]},
+    "first_mode_eigenvalue": {"type": ["number", "null"]},
+    "postbuckling_pressure_MPa": {"type": ["number", "null"]},
+    "postbuckling_reference_pressure_MPa": {"type": ["number", "null"]},
+    "postbuckling_last_pressure_MPa": {"type": ["number", "null"]},
+    "riks_lpf_max": {"type": ["number", "null"]},
+    "riks_lpf_last": {"type": ["number", "null"]},
+    "riks_time_at_lpf_max": {"type": ["number", "null"]},
+    "riks_time_last": {"type": ["number", "null"]},
+    "imperfection_amplitude_mm": {"type": ["number", "null"]},
+    "ultimate_pressure_basis": {"type": ["string", "null"]},
+    "failure_mode": {"type": ["string", "null"]},
+    "max_displacement_mm": {"type": ["number", "null"]},
+    "weight_kg_per_m2": {"type": ["number", "null"]},
+    "verdict": {"type": ["string", "null"]},
+    "abaqus_odb": {"type": ["string", "null"]},
+    "linear_buckling_odb": {"type": ["string", "null"]},
+    "postbuckling_odb": {"type": ["string", "null"]},
+    "abaqus_inp": {"type": ["string", "null"]},
+    "postbuckling_inp": {"type": ["string", "null"]},
+    "visualization_json": {"type": ["string", "null"]},
+    "artifact_dir": {"type": ["string", "null"]},
+    "error_type": {"type": ["string", "null"]},
+    "error_log": {
+      "type": ["object", "string", "null"]
+    },
+    "mode_eigenvalues": {
+      "type": ["array", "null"],
+      "items": {"type": "number"}
+    },
+    "load_summary": {"type": ["string", "null"]},
+    "boundary_summary": {"type": ["string", "null"]},
+    "diagnosis_summary": {"type": ["string", "null"]},
+    "analysis_type": {"type": ["string", "null"]},
+    "user_subroutine_used": {"type": ["boolean", "null"]}
+  },
+  "additionalProperties": true
+}

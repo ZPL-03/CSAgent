@@ -1,0 +1,39 @@
+﻿T700_Epoxy:
+  display_name: T700/Epoxy
+  density_kg_per_m3: 1550
+  E1_GPa: 102.0
+  E2_GPa: 7.0
+  G12_GPa: 3.35
+  nu12: 0.16
+  Xt_MPa: 1400
+  Xc_MPa: 1050
+  Yt_MPa: 28
+  Yc_MPa: 105
+  S_MPa: 75
+  notes: 基准碳纤维/树脂体系
+T800G_5228:
+  display_name: T800G/5228
+  density_kg_per_m3: 1580
+  E1_GPa: 147.0
+  E2_GPa: 9.32
+  G12_GPa: 4.53
+  nu12: 0.30
+  Xt_MPa: 2820
+  Xc_MPa: 1538
+  Yt_MPa: 60.2
+  Yc_MPa: 190
+  S_MPa: 125
+  notes: 扩展材料体系
+M40J_TDE_85:
+  display_name: M40J/TDE-85
+  density_kg_per_m3: 1600
+  E1_GPa: 218.0
+  E2_GPa: 9.07
+  G12_GPa: 6.35
+  nu12: 0.30
+  Xt_MPa: 2088
+  Xc_MPa: 1212
+  Yt_MPa: 22.5
+  Yc_MPa: 196
+  S_MPa: 61.1
+  notes: 扩展材料体系

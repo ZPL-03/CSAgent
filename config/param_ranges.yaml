@@ -1,0 +1,50 @@
+geometry:
+  length_mm:
+    min: 300
+    max: 800
+  radius_mm:
+    min: 80
+    max: 180
+  thickness_mm:
+    min: 5
+    max: 20
+  alpha_deg:
+    min: 10
+    max: 80
+  beta_deg:
+    min: 10
+    max: 80
+  imperfection_ratio:
+    min: 0.001
+    max: 0.01
+
+load:
+  external_pressure_MPa:
+    min: 1
+    max: 80
+
+layup:
+  allowed_angle_min_deg: 0
+  allowed_angle_max_deg: 90
+  min_ratio_per_angle: 0.05
+  symmetric: true
+  balanced: true
+
+layup_templates:
+  - name: BASE_90_AB
+    pattern: "[90_4/(±alpha/±beta)_8/90_4]"
+  - name: NO_OUTER_90
+    pattern: "[(±alpha/±beta)_10]"
+  - name: BENCHMARK_A
+    pattern: "[90_4/(90/±45/0)_8/90_4]"
+
+surrogate_coefficients:
+  PBIPF:
+    q_method: ASME_RD_1172
+    coefficient_basis: reference_shujuabd_ASMEQ_project_units
+    d1: 204.149746
+    d2: 0.00280336348
+    d3: -31.1711936
+    d0: 0.489754093
+    rmse_MPa: 6.111385
+    r2: 0.947551

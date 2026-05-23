@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "csdm_cph/candidate.schema.json",
+  "title": "CSDM_cph Candidate Schema",
+  "type": "object",
+  "required": [
+    "candidate_id",
+    "display_name",
+    "source",
+    "hull_type",
+    "geometry",
+    "layup"
+  ],
+  "properties": {
+    "candidate_id": {
+      "type": "string",
+      "pattern": "^(C[0-9]+|TMP_[0-9]+)$"
+    },
+    "source": {
+      "type": "string",
+      "enum": ["LLM", "DOE", "CASE_TRANSFER"]
+    },
+    "hull_type": {
+      "type": "string",
+      "enum": ["CYLINDRICAL"]
+    },
+    "geometry": {
+      "type": "object",
+      "required": [
+        "length_mm",
+        "radius_mm",
+        "thickness_mm",
+        "alpha_deg",
+        "beta_deg",
+        "imperfection_ratio"
+      ],
+      "properties": {
+        "length_mm": {"type": "number"},
+        "radius_mm": {"type": "number"},
+        "thickness_mm": {"type": "number"},
+        "alpha_deg": {"type": "number"},
+        "beta_deg": {"type": "number"},
+        "imperfection_ratio": {"type": "number"}
+      },
+      "additionalProperties": true
+    },
+    "layup": {
+      "type": "object",
+      "required": ["skin_layup", "ply_count"],
+      "properties": {
+        "template_name": {"type": "string"},
+        "layup": {"type": "string"},
+        "skin_layup": {"type": "string"},
+        "alpha_deg": {"type": "number"},
+        "beta_deg": {"type": "number"},
+        "ply_count": {"type": "integer"},
+        "angles_deg": {
+          "type": "array",
+          "items": {"type": "number"}
+        },
+        "skin_f0": {"type": "number"},
+        "skin_f45": {"type": "number"},
+        "skin_f90": {"type": "number"}
+      },
+      "additionalProperties": true
+    },
+    "load_conditions": {
+      "type": "object",
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["external_pressure"]
+        },
+        "label": {"type": "string"},
+        "external_pressure_MPa": {"type": "number"}
+      },
+      "additionalProperties": true
+    },
+    "boundary_conditions": {
+      "type": ["object", "string"],
+      "properties": {
+        "type": {"type": "string", "enum": ["END_CLAMPED", "END_SIMPLY_SUPPORTED", "FLANGE_CONSTRAINED"]},
+        "label": {"type": "string"},
+        "description": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "material_system": {
+      "type": "object"
+    },
+    "design_targets": {
+      "type": "object"
+    },
+    "rule_check": {
+      "type": "object"
+    },
+    "surrogate_ultimate_pressure_MPa": {
+      "type": ["number", "null"]
+    },
+    "surrogate_PBIPF_MPa": {
+      "type": ["number", "null"]
+    },
+    "surrogate_uncertainty_MPa": {
+      "type": ["number", "null"]
+    },
+    "asme_linear_buckling_pressure_MPa": {
+      "type": ["number", "null"]
+    },
+    "linear_buckling_feature_Q": {
+      "type": ["number", "null"]
+    },
+    "linear_buckling_source": {
+      "type": ["string", "null"]
+    },
+    "surrogate_weight": {
+      "type": ["number", "null"]
+    },
+    "rank_score": {
+      "type": ["number", "null"]
+    },
+    "rationale": {
+      "type": "string"
+    },
+    "origin_summary": {"type": ["string", "null"]},
+    "screening_summary": {"type": ["string", "null"]},
+    "selection_reason": {"type": ["string", "null"]},
+    "display_name": {"type": "string", "minLength": 1},
+    "session_candidate_id": {"type": "string", "pattern": "^TMP_[0-9]+$"},
+    "persistent_candidate_id": {"type": "string", "minLength": 1}
+  },
+  "additionalProperties": true
+}
