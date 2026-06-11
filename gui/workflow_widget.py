@@ -4,7 +4,9 @@ from __future__ import annotations
 
 from PyQt6.QtWidgets import QTextBrowser, QVBoxLayout, QWidget
 
+from core.llm_status import configured_llm_backends
 from workflow.event_store import WorkflowEventStore
+from workflow.simulation_queue import SimulationJobQueue
 
 
 class WorkflowWidget(QWidget):
@@ -21,9 +23,14 @@ class WorkflowWidget(QWidget):
         ("generate_report", "报告生成"),
     ]
 
-    def __init__(self, event_store: WorkflowEventStore | None = None) -> None:
+    def __init__(
+        self,
+        event_store: WorkflowEventStore | None = None,
+        simulation_queue: SimulationJobQueue | None = None,
+    ) -> None:
         super().__init__()
         self.event_store = event_store or WorkflowEventStore()
+        self.simulation_queue = simulation_queue or SimulationJobQueue(self.event_store.db_path)
         self.browser = QTextBrowser()
         layout = QVBoxLayout()
         layout.addWidget(self.browser)
@@ -34,6 +41,28 @@ class WorkflowWidget(QWidget):
         self.browser.setHtml(
             "<h3>智能体流程</h3>"
             "<p>启动对话式设计后，这里会显示 LangGraph 工作流节点、人工确认点和工具调用事件。</p>"
+            + self._llm_status_html()
+        )
+
+    def _llm_status_html(self) -> str:
+        rows = []
+        for backend in configured_llm_backends():
+            rows.append(
+                "<tr>"
+                f"<td>{backend['role']}</td>"
+                f"<td>{backend['name']}</td>"
+                f"<td>{backend['model']}</td>"
+                f"<td>{'是' if backend['base_url_configured'] else '否'}</td>"
+                f"<td>{'是' if backend['api_key_configured'] else '否'}</td>"
+                f"<td>{'可调用' if backend['available_for_call'] else '不可调用'}</td>"
+                "</tr>"
+            )
+        return (
+            "<h4>LLM 后端</h4>"
+            "<table border='1' cellspacing='0' cellpadding='6'>"
+            "<tr><th>角色</th><th>后端</th><th>模型</th><th>URL</th><th>密钥</th><th>状态</th></tr>"
+            + "".join(rows)
+            + "</table>"
         )
 
     def refresh(self, workflow_run_id: str | None, stage: str = "", pending_confirmation: str | None = None) -> None:
@@ -42,6 +71,7 @@ class WorkflowWidget(QWidget):
             return
         try:
             events = self.event_store.list_events(workflow_run_id)
+            jobs = self.simulation_queue.list_jobs(workflow_run_id)
         except Exception as exc:
             self.browser.setHtml(f"<h3>智能体流程</h3><p>读取工作流事件失败：{exc}</p>")
             return
@@ -81,17 +111,47 @@ class WorkflowWidget(QWidget):
                 f"<li><code>{created_at}</code> [{agent}] <b>{event_type}</b>：{message}</li>"
             )
 
+        job_rows = []
+        for job in jobs:
+            result = job.get("result") or {}
+            ultimate = result.get("ultimate_pressure_MPa")
+            ultimate_text = "-" if ultimate is None else str(ultimate)
+            error = job.get("error_message") or "-"
+            job_rows.append(
+                "<tr>"
+                f"<td><code>{job.get('job_id')}</code></td>"
+                f"<td>{job.get('session_candidate_id') or '-'}</td>"
+                f"<td>{job.get('formal_candidate_id') or '-'}</td>"
+                f"<td>{job.get('status') or '-'}</td>"
+                f"<td>{ultimate_text}</td>"
+                f"<td>{error}</td>"
+                "</tr>"
+            )
+        jobs_html = (
+            "<p>当前运行还没有有限元作业。</p>"
+            if not job_rows
+            else (
+                "<table border='1' cellspacing='0' cellpadding='6'>"
+                "<tr><th>作业编号</th><th>会话候选</th><th>正式候选</th><th>状态</th><th>极限压力 MPa</th><th>错误</th></tr>"
+                + "".join(job_rows)
+                + "</table>"
+            )
+        )
+
         self.browser.setHtml(
             "<h3>智能体流程</h3>"
             f"<p><b>运行编号：</b><code>{workflow_run_id}</code></p>"
             f"<p><b>当前阶段：</b>{active_stage}　<b>等待确认：</b>{pending_text}</p>"
-            "<h4>节点状态</h4>"
-            "<table border='1' cellspacing='0' cellpadding='6'>"
+            + self._llm_status_html()
+            + "<h4>节点状态</h4>"
+            + "<table border='1' cellspacing='0' cellpadding='6'>"
             "<tr><th>智能体节点</th><th>节点键</th><th>状态</th></tr>"
             + "".join(node_rows)
             + "</table>"
-            "<h4>事件审计</h4>"
-            "<ol>"
+            + "<h4>有限元队列</h4>"
+            + jobs_html
+            + "<h4>事件审计</h4>"
+            + "<ol>"
             + "".join(event_items)
             + "</ol>"
         )

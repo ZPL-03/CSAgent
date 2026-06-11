@@ -7,6 +7,7 @@ from PyQt6.QtWidgets import QApplication
 from gui.workflow_widget import WorkflowWidget
 from workflow.event_store import WorkflowEventStore
 from workflow.events import WorkflowEvent
+from workflow.simulation_queue import SimulationJobQueue
 
 
 def _app() -> QApplication:
@@ -38,8 +39,12 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
             stage="parse_task",
         )
     )
+    queue = SimulationJobQueue(tmp_path / "workflow.sqlite3")
+    job_id = queue.enqueue("RUN_TEST", {"candidate_id": "TMP_1"})
+    queue.mark_running(job_id)
+    queue.mark_success(job_id, {"candidate_id": "C1", "ultimate_pressure_MPa": 45.0, "verdict": "通过"})
 
-    widget = WorkflowWidget(event_store=store)
+    widget = WorkflowWidget(event_store=store, simulation_queue=queue)
     try:
         widget.refresh("RUN_TEST", "awaiting_screen_confirmation", "screen_candidates")
         html = widget.browser.toHtml()
@@ -50,6 +55,11 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
         assert "完成" in html
         assert "screen_candidates" in html
         assert "工具 parse_task 调用完成" in html
+        assert "有限元队列" in html
+        assert "TMP_1" in html
+        assert "C1" in html
+        assert "45.0" in html
+        assert "LLM 后端" in html
     finally:
         widget.close()
         app.processEvents()

@@ -112,3 +112,12 @@ def test_workflow_runtime_completes_full_approved_path(tmp_path):
     stored = store.load_snapshot(state["run_id"])
     assert stored["stage"] == "completed"
     assert stored["report"]["pdf_path"].endswith("latest_report.pdf")
+
+    jobs = runtime.simulation_queue.list_jobs(state["run_id"])
+    assert len(jobs) == 1
+    assert jobs[0]["session_candidate_id"] == "TMP_1"
+    assert jobs[0]["formal_candidate_id"] == "C1"
+    assert jobs[0]["status"] == "success"
+    event_types = [event["event_type"] for event in store.list_events(state["run_id"])]
+    assert "simulation_job_queued" in event_types
+    assert "simulation_job_completed" in event_types

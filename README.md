@@ -50,9 +50,10 @@ P_PBIPF = d1 * lg(Q) * t / R
 | `workflow/runtime.py` | LangGraph 状态图运行时，支持启动、人工确认后继续、从快照恢复 |
 | `workflow/event_store.py` | SQLite 运行库，记录 `workflow_runs`、`workflow_events` 和 `workflow_snapshots` |
 | `workflow/tool_registry.py` | 工具注册层，统一审计任务解析、候选生成、初筛、有限元和报告工具调用 |
+| `workflow/simulation_queue.py` | 有限元作业队列，记录候选入队、运行、成功、失败和结果摘要 |
 | `workflow/state.py` | 工作流状态契约，保存任务、候选、初筛、有限元结果、报告和人工确认状态 |
 
-运行时数据写入 `data/runtime/`，该目录属于本地运行产物，不进入 Git。PyQt6 主界面已经包含“智能体流程”页，可读取运行时事件库并展示节点状态、人工确认点和工具调用审计。重大阶段仍以源码、配置、测试和文档入库。
+运行时数据写入 `data/runtime/`，该目录属于本地运行产物，不进入 Git。PyQt6 主界面已经包含“智能体流程”页，可读取运行时事件库并展示节点状态、人工确认点、LLM 后端配置状态、有限元作业队列和工具调用审计。重大阶段仍以源码、配置、测试和文档入库。
 
 ## 外部知识
 

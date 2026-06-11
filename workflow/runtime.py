@@ -10,6 +10,7 @@ from langgraph.graph import END, START, StateGraph
 from agents.orchestrator import OrchestratorAgent
 from workflow.event_store import WorkflowEventStore
 from workflow.events import WorkflowEvent
+from workflow.simulation_queue import SimulationJobQueue
 from workflow.state import DesignWorkflowState, initial_state, source_counter
 from workflow.tool_registry import ToolRegistry, ToolSpec
 
@@ -31,6 +32,7 @@ class DesignWorkflowRuntime:
         event_callback: WorkflowCallback | None = None,
     ) -> None:
         self.event_store = event_store or WorkflowEventStore()
+        self.simulation_queue = SimulationJobQueue(self.event_store.db_path)
         self.event_callback = event_callback
         self._active_run_id: str | None = None
         self._active_stage = ""
@@ -117,12 +119,7 @@ class DesignWorkflowRuntime:
                 description="执行入选候选的 Abaqus 有限元校核。",
                 input_schema={"task": "dict", "candidates": "list"},
                 output_schema={"results": "list"},
-                handler=lambda payload: {
-                    "results": [
-                        self.orchestrator.evaluate_candidate(payload["task"], candidate)
-                        for candidate in payload["candidates"]
-                    ]
-                },
+                handler=self._evaluate_candidates_with_queue,
             )
         )
         registry.register(
@@ -142,6 +139,54 @@ class DesignWorkflowRuntime:
             )
         )
         return registry
+
+    def _evaluate_candidates_with_queue(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+        if not self._active_run_id:
+            raise RuntimeError("仿真队列缺少当前工作流运行编号")
+        task = payload["task"]
+        candidates = list(payload.get("candidates") or [])
+        results = []
+        for candidate in candidates:
+            job_id = self.simulation_queue.enqueue(self._active_run_id, candidate)
+            self._emit_event(
+                "simulation_job_queued",
+                "SimulationQueue",
+                f"有限元作业入队：{job_id}",
+                {"job_id": job_id, "candidate_id": candidate.get("candidate_id")},
+            )
+            self.simulation_queue.mark_running(job_id)
+            self._emit_event(
+                "simulation_job_started",
+                "FEMExecutionAgent",
+                f"有限元作业开始：{job_id}",
+                {"job_id": job_id, "candidate_id": candidate.get("candidate_id")},
+            )
+            try:
+                result = self.orchestrator.evaluate_candidate(task, candidate)
+            except Exception as exc:
+                self.simulation_queue.mark_failed(job_id, str(exc))
+                self._emit_event(
+                    "simulation_job_failed",
+                    "FEMExecutionAgent",
+                    f"有限元作业失败：{job_id}：{exc}",
+                    {"job_id": job_id, "error": str(exc)},
+                )
+                raise
+            self.simulation_queue.mark_success(job_id, result)
+            self._emit_event(
+                "simulation_job_completed",
+                "FEMExecutionAgent",
+                f"有限元作业完成：{job_id}",
+                {
+                    "job_id": job_id,
+                    "candidate_id": result.get("candidate_id"),
+                    "status": result.get("status"),
+                    "verdict": result.get("verdict"),
+                    "ultimate_pressure_MPa": result.get("ultimate_pressure_MPa"),
+                },
+            )
+            results.append(result)
+        return {"results": results}
 
     def _node(self, node_name: str, state: DesignWorkflowState, fn) -> Dict[str, Any]:
         run_id = state["run_id"]
