@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 import os
 
@@ -14,6 +16,63 @@ def _app() -> QApplication:
     if app is None:
         app = QApplication([])
     return app
+
+
+class FakeKnowledge:
+    def status(self) -> dict:
+        return {
+            "ready": True,
+            "rag_chunk_count": 51788,
+            "kg_entity_count": 2214,
+            "kg_relation_count": 480899,
+            "manifest_path": "knowledge/external/manifest.json",
+            "provenance_dir": "knowledge/external/provenance",
+            "source_registry_count": 1931,
+            "source_metadata_count": 1931,
+            "structured_document_count": 1931,
+            "structured_block_count": 400762,
+            "table_record_count": 22800,
+            "figure_record_count": 44135,
+            "formula_record_count": 108500,
+            "markdown_document_count": 1931,
+            "updated_at": "2026-06-11T01:22:02",
+        }
+
+    def retrieve_by_query(self, query: str, top_k: int | None = None, kg_top_k: int | None = None) -> dict:
+        return self._payload(query)
+
+    def retrieve(self, task: dict, top_k: int | None = None, kg_top_k: int | None = None) -> dict:
+        return self._payload("复合材料外压圆柱耐压壳 线性屈曲 极限压力")
+
+    def _payload(self, query: str) -> dict:
+        return {
+            "query": query,
+            "chunks": [
+                {
+                    "score": 12.5,
+                    "record_id": "DOC_1",
+                    "source_id": "SRC_1",
+                    "document_title": "Composite pressure hull buckling evidence",
+                    "page_start": 3,
+                    "page_end": 4,
+                    "doi": "10.1000/test",
+                    "source_url": "https://example.test/paper",
+                    "text": "外压圆柱壳的屈曲与初始缺陷敏感性需要结合有限元校核。",
+                }
+            ],
+            "relations": [
+                {
+                    "score": 5.0,
+                    "source": "Initial Imperfection",
+                    "source_type": "Phenomenon",
+                    "relation": "affects",
+                    "target": "Buckling",
+                    "target_type": "FailureMode",
+                    "record_id": "DOC_1",
+                    "evidence_document_title": "Composite pressure hull buckling evidence",
+                }
+            ],
+        }
 
 
 def test_knowledge_widget_renders_external_knowledge_status(monkeypatch) -> None:
@@ -35,34 +94,7 @@ def test_knowledge_widget_renders_external_knowledge_status(monkeypatch) -> None
             ),
             encoding="utf-8",
         )
-        monkeypatch.setattr(
-            "gui.knowledge_widget.DomainKnowledgeBase",
-            lambda: type(
-                "FakeKnowledge",
-                (),
-                {
-                    "status": staticmethod(
-                        lambda: {
-                            "ready": True,
-                            "rag_chunk_count": 51788,
-                            "kg_entity_count": 2214,
-                            "kg_relation_count": 480899,
-                            "manifest_path": "knowledge/external/manifest.json",
-                            "provenance_dir": "knowledge/external/provenance",
-                            "source_registry_count": 1931,
-                            "source_metadata_count": 1931,
-                            "structured_document_count": 1931,
-                            "structured_block_count": 400762,
-                            "table_record_count": 22800,
-                            "figure_record_count": 44135,
-                            "formula_record_count": 108500,
-                            "markdown_document_count": 1931,
-                            "updated_at": "2026-06-11T01:22:02",
-                        }
-                    )
-                },
-            )(),
-        )
+        monkeypatch.setattr("gui.knowledge_widget.DomainKnowledgeBase", FakeKnowledge)
 
         widget = KnowledgeWidget()
         try:
@@ -82,6 +114,12 @@ def test_knowledge_widget_renders_external_knowledge_status(monkeypatch) -> None
             assert "knowledge/external/provenance" in html
             assert "代理模型指标" in html
             assert "128" in html
+            assert "外部知识证据预览" in html
+            assert "不作为确定性数值来源" in html
+            assert "Composite pressure hull buckling evidence" in html
+            assert "外压圆柱壳的屈曲与初始缺陷敏感性" in html
+            assert "Initial Imperfection" in html
+            assert "Buckling" in html
         finally:
             widget.close()
             app.processEvents()

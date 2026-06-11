@@ -487,7 +487,7 @@ class MainWindow(QMainWindow):
             self.session.stage,
             self.session.pending_confirmation,
         )
-        self.knowledge_widget.refresh()
+        self.knowledge_widget.refresh(self.session.task)
         self._update_overview_cards()
 
     def _refresh_design_views(self) -> None:
@@ -500,6 +500,7 @@ class MainWindow(QMainWindow):
             self.session.stage,
             self.session.pending_confirmation,
         )
+        self.knowledge_widget.refresh(self.session.task)
         self._update_overview_cards()
 
     def _start_conversation(self) -> None:
@@ -522,7 +523,7 @@ class MainWindow(QMainWindow):
         self.input_line.setFocus()
 
     def _refresh_knowledge_view(self) -> None:
-        self.knowledge_widget.refresh()
+        self.knowledge_widget.refresh(self.session.task)
         self.status_label.setText("状态：知识库视图已刷新")
 
     def _open_latest_report(self) -> None:

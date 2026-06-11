@@ -524,6 +524,16 @@ class DomainKnowledgeBase:
         relations = self.kg.search(query, record_ids, top_k=kg_top_k or self.kg_top_k) if self.kg.is_ready else []
         return {"query": query, "chunks": chunks, "relations": relations}
 
+    def retrieve_by_query(self, query: str, top_k: int | None = None, kg_top_k: int | None = None) -> dict[str, Any]:
+        """按人工输入的工程查询检索 RAG 文本块和知识图谱关系。"""
+        query_text = str(query or "").strip()
+        if not self.is_ready or not query_text:
+            return {"query": query_text, "chunks": [], "relations": []}
+        chunks = self.rag.search(query_text, top_k=top_k or self.top_k)
+        record_ids = [str(item.get("record_id") or "") for item in chunks]
+        relations = self.kg.search(query_text, record_ids, top_k=kg_top_k or self.kg_top_k) if self.kg.is_ready else []
+        return {"query": query_text, "chunks": chunks, "relations": relations}
+
     def format_snippets(self, task: Dict[str, Any], top_k: int | None = None) -> list[str]:
         payload = self.retrieve(task, top_k=top_k or self.top_k)
         formatted: list[str] = []
