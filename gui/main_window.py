@@ -43,6 +43,7 @@ from gui.candidate_widget import CandidateWidget
 from gui.chat_widget import ChatWidget
 from gui.knowledge_widget import KnowledgeWidget
 from gui.log_widget import LogWidget
+from gui.report_widget import ReportWidget
 from gui.workflow_widget import WorkflowWidget
 
 
@@ -228,6 +229,7 @@ class MainWindow(QMainWindow):
         self.candidate_widget = CandidateWidget()
         self.abaqus_widget = AbaqusWidget()
         self.knowledge_widget = KnowledgeWidget()
+        self.report_widget = ReportWidget()
         self.log_widget = LogWidget()
         self.workflow_widget = WorkflowWidget()
 
@@ -235,6 +237,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.workflow_widget, "智能体流程")
         self.tabs.addTab(self.candidate_widget, "候选方案")
         self.tabs.addTab(self.abaqus_widget, "ABAQUS结果")
+        self.tabs.addTab(self.report_widget, "报告预览")
         self.tabs.addTab(self.knowledge_widget, "知识库")
         self.tabs.addTab(self.log_widget, "日志")
 
@@ -478,6 +481,7 @@ class MainWindow(QMainWindow):
         self.task_browser.setHtml(self._task_summary_html())
         self.candidate_widget.update_candidates(self.session.current_candidates, self.session.results_by_session_id)
         self.abaqus_widget.update_results(list(self.session.results_by_session_id.values()))
+        self.report_widget.update_report(self.session.report)
         self.workflow_widget.refresh(
             self.session.workflow_run_id,
             self.session.stage,
@@ -490,6 +494,7 @@ class MainWindow(QMainWindow):
         self.task_browser.setHtml(self._task_summary_html())
         self.candidate_widget.update_candidates(self.session.current_candidates, self.session.results_by_session_id)
         self.abaqus_widget.update_results(list(self.session.results_by_session_id.values()))
+        self.report_widget.update_report(self.session.report)
         self.workflow_widget.refresh(
             self.session.workflow_run_id,
             self.session.stage,
@@ -521,6 +526,7 @@ class MainWindow(QMainWindow):
         self.status_label.setText("状态：知识库视图已刷新")
 
     def _open_latest_report(self) -> None:
+        self.report_widget.refresh_latest()
         for path in [RESULTS_DIR / "latest_report.pdf", RESULTS_DIR / "latest_report.md"]:
             if path.exists():
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
@@ -609,6 +615,7 @@ class MainWindow(QMainWindow):
         ordered_results = self._ordered_report_results()
         if not ordered_results:
             return
+        self.tabs.setCurrentWidget(self.report_widget)
         self._run_action(
             "report",
             {
@@ -629,6 +636,7 @@ class MainWindow(QMainWindow):
         self.abaqus_widget.update_results([])
         self.candidate_widget.reset_view()
         self.abaqus_widget.reset_view()
+        self.report_widget.reset_view()
         self.workflow_widget.reset_view()
         self.knowledge_widget.refresh()
         self.status_label.setText("状态：会话已重置")
@@ -700,7 +708,8 @@ class MainWindow(QMainWindow):
                 self.session.report = report
             self.session.stage = "completed"
             self.session.pending_confirmation = None
-            self.tabs.setCurrentWidget(self.log_widget)
+            self.report_widget.update_report(self.session.report)
+            self.tabs.setCurrentWidget(self.report_widget)
 
     def _handle_finished(self, action: str, payload: dict) -> None:
         if action in {"conversation_start", "conversation_continue"}:
@@ -745,6 +754,8 @@ class MainWindow(QMainWindow):
 
         elif action == "report":
             self.session.report = payload["report"]
+            self.report_widget.update_report(self.session.report)
+            self.tabs.setCurrentWidget(self.report_widget)
             self.chat_widget.add_message(
                 "SYSTEM",
                 f"手动入口：报告已生成：{payload['report'].get('markdown_path')} / {payload['report'].get('pdf_path')}",
