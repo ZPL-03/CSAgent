@@ -122,3 +122,52 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
     finally:
         widget.close()
         app.processEvents()
+
+
+def test_workflow_widget_renders_manual_llm_health_check(monkeypatch) -> None:
+    app = _app()
+
+    def fake_probe(timeout_seconds=12):
+        return [
+            {
+                "role": "primary",
+                "name": "domain_finetuned_primary",
+                "model": "csllm",
+                "base_url_configured": True,
+                "api_key_configured": True,
+                "available_for_call": True,
+                "health_status": "failed",
+                "health_message": "调用失败",
+                "latency_ms": 12.3,
+                "error": "connection refused",
+            },
+            {
+                "role": "fallback",
+                "name": "configured_fallback",
+                "model": "deepseek-v4-pro",
+                "base_url_configured": True,
+                "api_key_configured": True,
+                "available_for_call": True,
+                "health_status": "success",
+                "health_message": "可用",
+                "latency_ms": 8.1,
+                "error": "",
+            },
+        ]
+
+    monkeypatch.setattr("gui.workflow_widget.probe_llm_backends", fake_probe)
+    widget = WorkflowWidget()
+    try:
+        widget._run_llm_health_check()
+        html = widget.browser.toHtml()
+
+        assert "实时检测" in html
+        assert "domain_finetuned_primary" in html
+        assert "deepseek-v4-pro" in html
+        assert "调用失败" in html
+        assert "connection refused" in html
+        assert "可用" in html
+        assert "8.1 ms" in html
+    finally:
+        widget.close()
+        app.processEvents()

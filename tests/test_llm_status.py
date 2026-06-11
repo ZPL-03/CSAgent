@@ -1,9 +1,10 @@
 from __future__ import annotations
 
-from core.llm_status import configured_llm_backends
+from core.llm_backend import LLMBackend
+from core.llm_status import configured_llm_backends, probe_llm_backends
 
 
-def test_configured_llm_backends_hide_secrets_and_report_availability(monkeypatch):
+def test_configured_llm_backends_hide_secrets_and_report_availability(monkeypatch) -> None:
     monkeypatch.setenv("PRIMARY_URL", "https://primary.example/v1")
     monkeypatch.setenv("PRIMARY_KEY", "secret-primary")
     monkeypatch.setenv("PRIMARY_MODEL", "domain-model")
@@ -36,3 +37,82 @@ def test_configured_llm_backends_hide_secrets_and_report_availability(monkeypatc
     assert statuses[1]["role"] == "fallback"
     assert statuses[1]["available_for_call"] is False
     assert "secret-primary" not in str(statuses)
+
+
+def test_probe_llm_backends_reports_live_status_without_secrets(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "0")
+    config = {
+        "backends": [
+            {
+                "name": "primary",
+                "base_url": "http://primary.local/v1",
+                "api_key": "primary-key",
+                "model": "primary-model",
+                "temperature": 0.1,
+                "max_tokens": 16,
+                "timeout_seconds": 30,
+                "json_output_tokens": 16,
+            },
+            {
+                "name": "fallback",
+                "base_url": "http://fallback.local/v1",
+                "api_key": "fallback-key",
+                "model": "fallback-model",
+                "temperature": 0.1,
+                "max_tokens": 16,
+                "timeout_seconds": 30,
+                "json_output_tokens": 16,
+            },
+        ]
+    }
+    backend = LLMBackend(config)
+
+    class FakeCompletions:
+        def __init__(self, owner):
+            self.owner = owner
+
+        def create(self, **payload):
+            if "primary" in self.owner.base_url:
+                fake_secret = "sk-" + "1234567890abcdef"
+                raise RuntimeError(f"failed at http://primary.local/v1 with primary-key and {fake_secret}")
+
+            class Message:
+                content = "OK"
+
+            class Choice:
+                message = Message()
+                finish_reason = "stop"
+
+            class Response:
+                choices = [Choice()]
+
+            return Response()
+
+    class FakeChat:
+        def __init__(self, owner):
+            self.completions = FakeCompletions(owner)
+
+    class FakeOpenAI:
+        def __init__(self, base_url, api_key, timeout, default_headers):
+            self.base_url = base_url
+            self.chat = FakeChat(self)
+
+    backend._openai_cls = FakeOpenAI
+
+    results = probe_llm_backends(config=config, timeout_seconds=1, backend=backend)
+    by_name = {item["name"]: item for item in results}
+
+    assert by_name["primary"]["health_status"] == "failed"
+    assert by_name["primary"]["health_message"] == "调用失败"
+    assert by_name["fallback"]["health_status"] == "success"
+    assert by_name["fallback"]["health_message"] == "可用"
+    assert by_name["fallback"]["latency_ms"] is not None
+
+    text = str(results)
+    assert "primary-model" in text
+    assert "fallback-model" in text
+    assert "primary-key" not in text
+    assert "fallback-key" not in text
+    assert "primary.local" not in text
+    assert "fallback.local" not in text
+    assert "sk-" + "1234567890abcdef" not in text

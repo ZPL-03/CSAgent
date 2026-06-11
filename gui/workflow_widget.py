@@ -5,9 +5,9 @@ from __future__ import annotations
 from html import escape
 from typing import Any
 
-from PyQt6.QtWidgets import QTextBrowser, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QPushButton, QTextBrowser, QVBoxLayout, QWidget
 
-from core.llm_status import configured_llm_backends
+from core.llm_status import configured_llm_backends, probe_llm_backends
 from workflow.event_store import WorkflowEventStore
 from workflow.simulation_queue import SimulationJobQueue
 
@@ -45,36 +45,69 @@ class WorkflowWidget(QWidget):
         super().__init__()
         self.event_store = event_store or WorkflowEventStore()
         self.simulation_queue = simulation_queue or SimulationJobQueue(self.event_store.db_path)
+        self.llm_health_results: list[dict[str, Any]] = []
+        self._last_refresh_args: tuple[str | None, str, str | None] = (None, "", None)
+        self.health_button = QPushButton("检测 LLM 后端")
         self.browser = QTextBrowser()
         layout = QVBoxLayout()
+        layout.addWidget(self.health_button)
         layout.addWidget(self.browser)
         self.setLayout(layout)
+        self.health_button.clicked.connect(self._run_llm_health_check)
         self.reset_view()
 
     def reset_view(self) -> None:
+        self._last_refresh_args = (None, "", None)
         self.browser.setHtml(
             "<h3>智能体流程</h3>"
             "<p>启动对话式设计后，这里会显示 LangGraph 工作流节点、人工确认点和工具调用事件。</p>"
             + self._llm_status_html()
         )
 
+    def _run_llm_health_check(self) -> None:
+        self.health_button.setEnabled(False)
+        self.health_button.setText("正在检测 LLM 后端...")
+        try:
+            self.llm_health_results = probe_llm_backends(timeout_seconds=12)
+            workflow_run_id, stage, pending = self._last_refresh_args
+            if workflow_run_id:
+                self.refresh(workflow_run_id, stage, pending)
+            else:
+                self.browser.setHtml(
+                    "<h3>智能体流程</h3>"
+                    "<p>当前还没有运行快照；以下为 LLM 后端实时检测结果。</p>"
+                    + self._llm_status_html()
+                )
+        finally:
+            self.health_button.setText("检测 LLM 后端")
+            self.health_button.setEnabled(True)
+
     def _llm_status_html(self) -> str:
+        health_by_name = {str(item.get("name") or ""): item for item in self.llm_health_results}
         rows = []
         for backend in configured_llm_backends():
+            health = health_by_name.get(str(backend.get("name") or ""), {})
+            latency = health.get("latency_ms")
+            latency_text = "-" if latency in (None, "") else f"{latency} ms"
+            health_status = health.get("health_message") or "未检测"
+            error = health.get("error") or "-"
             rows.append(
                 "<tr>"
-                f"<td>{backend['role']}</td>"
-                f"<td>{backend['name']}</td>"
-                f"<td>{backend['model']}</td>"
+                f"<td>{self._safe(backend['role'])}</td>"
+                f"<td>{self._safe(backend['name'])}</td>"
+                f"<td>{self._safe(backend['model'])}</td>"
                 f"<td>{'是' if backend['base_url_configured'] else '否'}</td>"
                 f"<td>{'是' if backend['api_key_configured'] else '否'}</td>"
                 f"<td>{'可调用' if backend['available_for_call'] else '不可调用'}</td>"
+                f"<td>{self._safe(health_status)}</td>"
+                f"<td>{self._safe(latency_text)}</td>"
+                f"<td>{self._safe(error)}</td>"
                 "</tr>"
             )
         return (
             "<h4>LLM 后端</h4>"
             "<table border='1' cellspacing='0' cellpadding='6'>"
-            "<tr><th>角色</th><th>后端</th><th>模型</th><th>URL</th><th>密钥</th><th>状态</th></tr>"
+            "<tr><th>角色</th><th>后端</th><th>模型</th><th>URL</th><th>密钥</th><th>配置状态</th><th>实时检测</th><th>耗时</th><th>错误摘要</th></tr>"
             + "".join(rows)
             + "</table>"
         )
@@ -253,6 +286,7 @@ class WorkflowWidget(QWidget):
         )
 
     def refresh(self, workflow_run_id: str | None, stage: str = "", pending_confirmation: str | None = None) -> None:
+        self._last_refresh_args = (workflow_run_id, stage, pending_confirmation)
         if not workflow_run_id:
             self.reset_view()
             return
