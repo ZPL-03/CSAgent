@@ -165,7 +165,11 @@
           "type": "object",
           "additionalProperties": true
         },
-        "geometry": {
+        "geometry_reference": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "fixed_geometry": {
           "type": "object",
           "additionalProperties": true
         },

@@ -126,10 +126,46 @@ class TaskParser:
                 break
         return geometry
 
+    def _extract_fixed_geometry_values(self, text: str, geometry_values: Dict[str, float]) -> Dict[str, float]:
+        if not geometry_values:
+            return {}
+
+        fixed_terms = r"(?:固定|保持|限定|锁定|指定|严格采用|必须|等于|不变)"
+        gap = r"[^，。；,;\n]{0,24}"
+        whole_geometry_patterns = [
+            rf"(?:几何|尺寸|结构尺寸){gap}{fixed_terms}",
+            rf"{fixed_terms}{gap}(?:几何|尺寸|结构尺寸)",
+        ]
+        if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in whole_geometry_patterns):
+            return dict(geometry_values)
+
+        labels = {
+            "length_mm": r"(?:长度|壳长|筒长|length|\bL\b)",
+            "radius_mm": r"(?:半径|壳半径|内半径|radius|\bR\b)",
+            "thickness_mm": r"(?:厚度|壁厚|壳厚|thickness|\bt\b)",
+            "alpha_deg": r"(?:alpha|α|铺层角\s*α|角度\s*α)",
+            "beta_deg": r"(?:beta|β|铺层角\s*β|角度\s*β)",
+            "imperfection_ratio": r"(?:初始缺陷比|缺陷比|初始缺陷|缺陷幅值|imperfection|Ir)",
+        }
+        fixed: Dict[str, float] = {}
+        for key, value in geometry_values.items():
+            label = labels[key]
+            patterns = [
+                rf"{fixed_terms}{gap}{label}",
+                rf"{label}{gap}{fixed_terms}",
+            ]
+            if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns):
+                fixed[key] = value
+        return fixed
+
     def _extract_geometry_envelope(self, text: str) -> Dict[str, Any]:
         geometry = dict(DEFAULT_GEOMETRY_ENVELOPE)
         values = self._extract_geometry_values(text)
+        fixed_values = self._extract_fixed_geometry_values(text, values)
         for key, value in values.items():
+            if key in fixed_values:
+                geometry[key] = [value, value]
+                continue
             width = {
                 "length_mm": 60.0,
                 "radius_mm": 20.0,
@@ -209,8 +245,13 @@ class TaskParser:
 
     def _user_boundary_conditions(self, text: str) -> Dict[str, Any] | None:
         lowered = text.lower()
-        keywords = ["固支", "固定", "简支", "法兰", "夹持", "clamped", "simply", "flange", "ssss", "cccc"]
-        if not any(keyword in text or keyword in lowered for keyword in keywords):
+        keywords = ["固支", "简支", "法兰", "夹持", "clamped", "simply", "flange", "ssss", "cccc"]
+        fixed_boundary_patterns = [
+            r"(?:两端|端部|端面|边界|约束)[^，。；,;\n]{0,8}固定",
+            r"固定[^，。；,;\n]{0,8}(?:两端|端部|端面|边界|约束)",
+        ]
+        has_fixed_boundary = any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in fixed_boundary_patterns)
+        if not any(keyword in text or keyword in lowered for keyword in keywords) and not has_fixed_boundary:
             return None
         return normalize_boundary_conditions(text)
 
@@ -243,7 +284,16 @@ class TaskParser:
 
         geometry_values = self._extract_geometry_values(text)
         if geometry_values:
-            facts["geometry"] = geometry_values
+            fixed_geometry = self._extract_fixed_geometry_values(text, geometry_values)
+            reference_geometry = {
+                key: value
+                for key, value in geometry_values.items()
+                if key not in fixed_geometry
+            }
+            if reference_geometry:
+                facts["geometry_reference"] = reference_geometry
+            if fixed_geometry:
+                facts["fixed_geometry"] = fixed_geometry
 
         if is_user_specified:
             facts["material_system"] = {

@@ -177,7 +177,7 @@ class CandidateWidget(QWidget):
         llm_excerpt_html = ""
         if candidate.get("source") == "LLM" and llm_excerpt:
             llm_excerpt_html = (
-                "<h4>LLM 回答片段</h4>"
+                "<h4>LLM 回答原文</h4>"
                 f"<p>{escape(llm_excerpt).replace(chr(10), '<br>')}</p>"
             )
 
@@ -205,11 +205,11 @@ class CandidateWidget(QWidget):
             f"<p><b>生成说明：</b>{candidate.get('rationale', '-')}</p>"
             f"<p><b>来源补充：</b>{candidate.get('origin_summary') or '当前候选未附带额外来源说明。'}</p>"
             f"<p><b>代理预测：</b> 极限压力={_format_number(candidate.get('surrogate_ultimate_pressure_MPa'))} MPa，"
-            f"线性屈曲Q(ASME RD-1172)={_format_number(candidate.get('asme_linear_buckling_pressure_MPa'))} MPa，"
+            f"ASME RD-1172线性屈曲压力={_format_number(candidate.get('asme_linear_buckling_pressure_MPa'))} MPa，"
             f"PBIPF公式={_format_number(candidate.get('surrogate_PBIPF_MPa'))} MPa，"
             f"面密度={_format_number(candidate.get('surrogate_weight'))} kg/m^2，"
             f"评分={_format_number(candidate.get('rank_score'), 4)}<br>"
-            f"线性屈曲Q来源：{candidate.get('linear_buckling_source') or '-'}</p>"
+            f"线性屈曲压力来源：{candidate.get('linear_buckling_source') or '-'}</p>"
             f"<p><b>代理模型初筛摘要：</b>{screening_summary}</p>"
             f"<p><b>优先校核原因：</b>{selection_reason}</p>"
             "<h4>几何设计参数</h4><ul>"

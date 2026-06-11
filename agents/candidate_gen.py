@@ -128,19 +128,30 @@ class CandidateGenAgent(BaseAgent):
         boundary_conditions = facts.get("boundary_conditions", {})
         if isinstance(boundary_conditions, dict) and boundary_conditions.get("label"):
             lines.append(f"边界条件：{boundary_conditions['label']}")
-        geometry = facts.get("geometry", {})
-        if isinstance(geometry, dict) and geometry:
-            geometry_labels = {
-                "length_mm": "长度",
-                "radius_mm": "半径",
-                "thickness_mm": "厚度",
-                "alpha_deg": "alpha",
-                "beta_deg": "beta",
-                "imperfection_ratio": "缺陷比",
-            }
+        geometry_reference = facts.get("geometry_reference", {})
+        fixed_geometry = facts.get("fixed_geometry", {})
+        geometry_labels = {
+            "length_mm": "长度",
+            "radius_mm": "半径",
+            "thickness_mm": "厚度",
+            "alpha_deg": "alpha",
+            "beta_deg": "beta",
+            "imperfection_ratio": "缺陷比",
+        }
+        if isinstance(geometry_reference, dict) and geometry_reference:
+            values = []
             for key in ["length_mm", "radius_mm", "thickness_mm", "alpha_deg", "beta_deg", "imperfection_ratio"]:
-                if geometry.get(key) is not None:
-                    lines.append(f"{geometry_labels[key]}：{geometry[key]}")
+                if geometry_reference.get(key) is not None:
+                    values.append(f"{geometry_labels[key]}={geometry_reference[key]}")
+            if values:
+                lines.append("参考几何尺寸（设计中心，非固定约束）：" + "，".join(values))
+        if isinstance(fixed_geometry, dict) and fixed_geometry:
+            values = []
+            for key in ["length_mm", "radius_mm", "thickness_mm", "alpha_deg", "beta_deg", "imperfection_ratio"]:
+                if fixed_geometry.get(key) is not None:
+                    values.append(f"{geometry_labels[key]}={fixed_geometry[key]}")
+            if values:
+                lines.append("固定几何约束：" + "，".join(values))
         material = facts.get("material_system", {})
         if isinstance(material, dict) and material.get("name"):
             lines.append(f"材料：{material['name']}")
@@ -174,35 +185,29 @@ class CandidateGenAgent(BaseAgent):
             if knowledge_guidance
             else "当前没有可用外部知识库/知识图谱片段，请仅依据任务约束生成。"
         )
-        sft_instruction = (
-            f"请为{type_display}生成 {desired_count} 套可进入代理模型初筛的初始候选方案，"
-            "要求用自然语言工程回答给出候选方案表和推荐理由。"
-        )
-
         system_prompt = (
-            "你是 csllm-cpv 领域微调模型中的复合材料耐压壳候选方案生成助手。"
-            "本轮输入采用 SFT 数据的 instruction/input 风格，而不是原始用户自然语言。"
-            "请按训练数据中的自然语言工程回答风格输出，包含需求解析、候选方案、制造风险和后续 FEM 校核建议。"
+            "你是 csllm 领域微调模型中的复合材料耐压壳候选方案生成助手。"
+            "本轮输入是系统整理后的工程任务书，不是原始用户自然语言，也不是 JSON 任务契约。"
+            "请按自然语言工程回答风格输出，候选方案表是主体，表外说明保持简洁。"
             "候选方案必须用 Markdown 表格表达，列名中直接写出编号、材料、长度、半径或内径、厚度、alpha、beta、铺层形式、缺陷比和推荐理由。"
-            "表格中的推荐理由必须同时包含结构性能依据和制造/缺陷风险依据，不要只写泛化结论。"
-            "只能基于 input 中列出的用户已给信息生成方案；input 没有给出的工况、材料、几何、目标或边界，不要当成用户事实写入回答。"
+            "表格中的推荐理由必须用一句话同时包含结构性能依据和制造/缺陷风险依据，不要只写泛化结论。"
+            "只能把“用户已给信息”中列出的内容写成用户事实；用户没有给出的工况、材料、几何、目标或边界，不要当成用户事实写入回答。"
             "为了形成候选而提出的材料、铺层角或缺陷比必须写成候选建议值，不能写成用户已给条件。"
-            "不要输出 JSON，不要输出 XML 标签。"
+            "不要输出 JSON，不要输出 XML 标签，不要展开长篇推理过程。"
         )
         user_prompt = (
-            f"instruction: {sft_instruction}\n\n"
-            "input:\n"
-            "任务类型：批量候选方案生成\n"
-            f"候选数量：{desired_count}\n"
+            "工程任务：批量生成复合材料耐压壳初始候选方案。\n"
+            f"设计对象：{type_display}\n"
+            f"需要生成的 LLM 来源候选数量：{desired_count}\n\n"
             f"用户已给信息：\n{fact_text if fact_text else '- 仅给出候选数量和初筛数量'}\n\n"
             f"系统候选字段约束（用于保证候选可解析和可校核，不代表用户已给事实）：\n{constraint_text}\n\n"
             f"外部知识库/知识图谱依据：\n{knowledge_text}\n\n"
-            "output 要求：\n"
-            f"1. 自然语言回答风格与训练样本一致。\n"
-            f"2. 候选表给出 {desired_count} 行；每行必须包含可解析的材料、长度、半径、厚度、alpha、beta、缺陷比、铺层形式。\n"
-            "3. 表格列使用：编号 | 材料 | 长度(mm) | 半径(mm) | 厚度(mm) | alpha(deg) | beta(deg) | 缺陷比 | 铺层形式 | 推荐理由。\n"
-            "4. 推荐理由必须说明结构性能依据和制造/缺陷风险依据，例如屈曲稳定性、环向/轴向刚度折中、缠绕或铺放可实现性、铺层角偏差敏感性、缺陷控制风险。\n"
-            "5. 未给出的用户事实不要补写为输入条件；如果为了形成候选而提出建议值，请在回答中表明这是候选建议值。"
+            "回答要求：\n"
+            f"1. 候选表给出 {desired_count} 行；每行必须包含可解析的材料、长度、半径、厚度、alpha、beta、缺陷比、铺层形式。\n"
+            "2. 表格列使用：编号 | 材料 | 长度(mm) | 半径(mm) | 厚度(mm) | alpha(deg) | beta(deg) | 缺陷比 | 铺层形式 | 推荐理由。\n"
+            "3. 推荐理由必须说明结构性能依据和制造/缺陷风险依据，例如屈曲稳定性、环向/轴向刚度折中、缠绕或铺放可实现性、铺层角偏差敏感性、缺陷控制风险。\n"
+            "4. 未给出的用户事实不要补写为输入条件；如果为了形成候选而提出建议值，请在回答中表明这是候选建议值。\n"
+            "5. 表格后最多保留 3 条简短工程说明，不要输出完整报告。"
         )
         return system_prompt, user_prompt
 
@@ -216,9 +221,9 @@ class CandidateGenAgent(BaseAgent):
         material_names = "、".join(str(item.get("name")) for item in self.material_catalog if item.get("name"))
         return [
             f"材料必须从项目材料库选择：{material_names}",
-            f"长度 L(mm) 必须为数值；用户已给长度时沿用用户事实，未给时在 {range_text('length_mm')} 内提出候选建议值",
-            f"半径 R(mm) 必须为数值；用户已给半径时沿用用户事实，未给时在 {range_text('radius_mm')} 内提出候选建议值",
-            f"厚度 t(mm) 必须为数值；用户已给厚度时沿用用户事实，未给时在 {range_text('thickness_mm')} 内提出候选建议值",
+            f"长度 L(mm) 必须为数值；参考尺寸只表示设计中心，候选值仍需在 {range_text('length_mm')} 内提出；只有固定几何约束才必须沿用",
+            f"半径 R(mm) 必须为数值；参考尺寸只表示设计中心，候选值仍需在 {range_text('radius_mm')} 内提出；只有固定几何约束才必须沿用",
+            f"厚度 t(mm) 必须为数值；参考尺寸只表示设计中心，候选值仍需在 {range_text('thickness_mm')} 内提出；只有固定几何约束才必须沿用",
             f"alpha(deg) 与 beta(deg) 必须为 {range_text('alpha_deg')} 内的两个铺层角建议值",
             f"缺陷比必须为无量纲小数 {range_text('imperfection_ratio')}，也可以写成 1-10‰；不要用 0.05 或 0.07 表示缺陷比",
             "铺层形式使用 [90_4/(±alpha/±beta)_8/90_4] 或 [(±alpha/±beta)_10] 这一类可解析格式",
@@ -436,7 +441,9 @@ class CandidateGenAgent(BaseAgent):
         facts = dict(task_payload.get("user_input_facts") or {})
         merged = dict(raw)
         raw_geometry = dict(raw.get("geometry") or {})
-        user_geometry = dict((facts.get("geometry") or {}) if isinstance(facts.get("geometry"), dict) else {})
+        user_geometry = dict(
+            (facts.get("fixed_geometry") or {}) if isinstance(facts.get("fixed_geometry"), dict) else {}
+        )
         geometry = dict(raw_geometry)
         geometry.update({key: value for key, value in user_geometry.items() if value is not None})
         if geometry:
@@ -456,6 +463,17 @@ class CandidateGenAgent(BaseAgent):
         if not self._material_is_catalog_registered(raw.get("material_system")):
             return False
         return True
+
+    def _llm_generation_token_budget(self, desired_count: int) -> int:
+        if self.llm_backend is None:
+            return 1200
+        configured_budget = max(
+            int(getattr(self.llm_backend, "json_output_tokens", 0) or 0),
+            int(getattr(self.llm_backend, "max_tokens", 0) or 0),
+            900,
+        )
+        estimated_budget = max(900, 700 + max(int(desired_count), 1) * 300)
+        return min(configured_budget, estimated_budget)
 
     def _repair_geometry_by_task(
         self,
@@ -548,34 +566,62 @@ class CandidateGenAgent(BaseAgent):
 
         knowledge_guidance = self._knowledge_guidance(task, top_k=max(3, desired_count))
         system_prompt, user_prompt = self._build_prompt(task, desired_count, knowledge_guidance)
+        excluded_backend_names: set[str] = set()
+        backend_count = len(getattr(self.llm_backend, "backends", []) or [None])
 
-        for _ in range(int(self.llm_config["fallback"]["max_format_retries"])):
-            try:
-                answer = self.llm_backend.chat(
-                    system_prompt,
-                    user_prompt,
-                    max_tokens_override=max(int(self.llm_backend.json_output_tokens), 4096),
-                    json_mode=False,
-                )
-                items = self._extract_candidates_from_natural_answer(answer)
-                if not items:
-                    raise SchemaValidationError("LLM 自然语言回答中没有可解析的候选表或编号方案")
-                usable_items = []
-                for raw in items:
-                    if isinstance(raw, dict):
-                        raw["llm_output_excerpt"] = answer[:2000]
-                    merged_raw = self._merge_user_facts_into_raw_candidate(task, raw)
-                    if self._llm_raw_candidate_is_usable(merged_raw):
-                        usable_items.append(merged_raw)
-                if not usable_items:
-                    raise SchemaValidationError("LLM 自然语言回答中没有可解析的完整候选参数")
-                normalized = [
-                    self._normalize_candidate(task, raw, start_index + offset, "LLM")
-                    for offset, raw in enumerate(usable_items)
-                ]
-                return normalized[:desired_count]
-            except Exception as exc:
-                self.emit(f"LLM 生成失败，准备重试：{exc}")
+        while len(excluded_backend_names) < backend_count:
+            retry_hint = ""
+            last_schema_error: Exception | None = None
+            for _ in range(int(self.llm_config["fallback"]["max_format_retries"])):
+                try:
+                    answer = self.llm_backend.chat(
+                        system_prompt,
+                        user_prompt + retry_hint,
+                        max_tokens_override=self._llm_generation_token_budget(desired_count),
+                        json_mode=False,
+                        excluded_backend_names=excluded_backend_names,
+                    )
+                    items = self._extract_candidates_from_natural_answer(answer)
+                    if not items:
+                        raise SchemaValidationError("LLM 自然语言回答中没有可解析的候选表或编号方案")
+                    usable_items = []
+                    for raw in items:
+                        if isinstance(raw, dict):
+                            raw["llm_output_excerpt"] = answer
+                        merged_raw = self._merge_user_facts_into_raw_candidate(task, raw)
+                        if self._llm_raw_candidate_is_usable(merged_raw):
+                            usable_items.append(merged_raw)
+                    if not usable_items:
+                        raise SchemaValidationError("LLM 自然语言回答中没有可解析的完整候选参数")
+                    normalized = [
+                        self._normalize_candidate(task, raw, start_index + offset, "LLM")
+                        for offset, raw in enumerate(usable_items)
+                    ]
+                    valid_normalized = [candidate for candidate in normalized if candidate["rule_check"]["is_valid"]]
+                    if not valid_normalized:
+                        reasons = "；".join(
+                            "、".join(candidate["rule_check"].get("errors", [])[:3])
+                            for candidate in normalized[:3]
+                        )
+                        retry_hint = (
+                            "\n\n上一轮候选未通过项目参数域规则，原因："
+                            f"{reasons or '未给出有效规则诊断'}。"
+                            "请重新输出候选表，确保长度、半径、厚度、alpha、beta 和缺陷比均在系统候选字段约束范围内。"
+                        )
+                        raise SchemaValidationError("LLM 候选均未通过参数域规则")
+                    return normalized[:desired_count]
+                except SchemaValidationError as exc:
+                    last_schema_error = exc
+                    self.emit(f"LLM 生成失败，准备重试：{exc}")
+                except Exception as exc:
+                    self.emit(f"LLM 生成失败，准备重试：{exc}")
+                    return []
+
+            active_name = str(getattr(getattr(self.llm_backend, "active_backend", None), "name", "") or "")
+            if not active_name or active_name in excluded_backend_names:
+                break
+            excluded_backend_names.add(active_name)
+            self.emit(f"LLM 后端 {active_name} 输出不合规，尝试下一个后端：{last_schema_error}")
         return []
 
     def _case_transfer_candidates(self, task: Dict[str, Any], start_index: int, desired_count: int) -> List[Dict[str, Any]]:
@@ -667,8 +713,65 @@ class CandidateGenAgent(BaseAgent):
                     break
         return counts
 
+    def _signature_value(self, value: Any, digits: int = 6) -> Any:
+        try:
+            return round(float(value), digits)
+        except (TypeError, ValueError):
+            return str(value or "").strip()
+
+    def _candidate_signature(self, candidate: Dict[str, Any]) -> tuple:
+        geometry = dict(candidate.get("geometry") or {})
+        material = dict(candidate.get("material_system") or {})
+        layup = dict(candidate.get("layup") or {})
+        geometry_signature = tuple(
+            (key, self._signature_value(value, 6 if key == "imperfection_ratio" else 3))
+            for key, value in sorted(geometry.items())
+            if value is not None
+        )
+        layup_signature = (
+            str(layup.get("template_name") or "").strip(),
+            str(layup.get("layup") or "").strip(),
+        )
+        return (
+            str(candidate.get("hull_type") or "CYLINDRICAL").strip(),
+            str(material.get("material_key") or material.get("name") or "").strip().lower(),
+            geometry_signature,
+            layup_signature,
+        )
+
+    def _add_unique_candidates(
+        self,
+        pool: List[Dict[str, Any]],
+        incoming: List[Dict[str, Any]],
+        seen: set[tuple],
+    ) -> tuple[int, int]:
+        added = 0
+        duplicate = 0
+        for candidate in incoming:
+            signature = self._candidate_signature(candidate)
+            if signature in seen:
+                duplicate += 1
+                continue
+            seen.add(signature)
+            pool.append(candidate)
+            added += 1
+        return added, duplicate
+
+    def _renumber_session_candidates(self, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        renumbered: List[Dict[str, Any]] = []
+        for index, candidate in enumerate(candidates, start=1):
+            updated = dict(candidate)
+            candidate_id = format_temp_candidate_id(index)
+            updated["candidate_id"] = candidate_id
+            updated["display_name"] = candidate_id
+            updated.pop("persistent_candidate_id", None)
+            validate_or_raise("candidate.schema.json", updated)
+            renumbered.append(updated)
+        return renumbered
+
     def run(self, task: Dict[str, Any]) -> List[Dict[str, Any]]:
         candidates: List[Dict[str, Any]] = []
+        seen_signatures: set[tuple] = set()
         next_index = 1
         source_targets = self._resolve_source_targets(task)
 
@@ -681,7 +784,7 @@ class CandidateGenAgent(BaseAgent):
                 for candidate in invalid_llm_candidates[:3]
             )
             self.emit(f"LLM 候选规则过滤 {len(invalid_llm_candidates)} 个：{reasons}")
-        candidates.extend(valid_llm_candidates)
+        llm_added, llm_duplicates = self._add_unique_candidates(candidates, valid_llm_candidates, seen_signatures)
         next_index += len(llm_candidates)
 
         transfer_candidates = self._case_transfer_candidates(task, next_index, source_targets["case_transfer"])
@@ -693,29 +796,48 @@ class CandidateGenAgent(BaseAgent):
                 for candidate in invalid_transfer_candidates[:3]
             )
             self.emit(f"案例迁移候选规则过滤 {len(invalid_transfer_candidates)} 个：{reasons}")
-        candidates.extend(valid_transfer_candidates)
+        transfer_added, transfer_duplicates = self._add_unique_candidates(
+            candidates,
+            valid_transfer_candidates,
+            seen_signatures,
+        )
         next_index += len(transfer_candidates)
 
-        doe_target = max(source_targets["total"] - len(candidates), source_targets["doe"])
         hull_type = task_payload_from_request(task).get("hull_type", "CYLINDRICAL")
-        doe_candidates = self.doe_sampler.sample_candidates(
-            task,
-            n_samples=doe_target,
-            start_index=next_index,
-            strict_solver_window=True,
-            hull_type=hull_type,
-            id_factory=format_temp_candidate_id,
-        )
-        candidates.extend(doe_candidates)
-        candidates = candidates[: source_targets["total"]]
+        doe_candidates: List[Dict[str, Any]] = []
+        doe_added = 0
+        doe_duplicates = 0
+        doe_round = 0
+        while len(candidates) < source_targets["total"] and doe_round < 8:
+            requested = max(source_targets["total"] - len(candidates), source_targets["doe"] if doe_round == 0 else 1)
+            batch = self.doe_sampler.sample_candidates(
+                task,
+                n_samples=requested,
+                start_index=next_index,
+                strict_solver_window=True,
+                hull_type=hull_type,
+                id_factory=format_temp_candidate_id,
+            )
+            next_index += len(batch)
+            doe_candidates.extend(batch)
+            added, duplicate = self._add_unique_candidates(candidates, batch, seen_signatures)
+            doe_added += added
+            doe_duplicates += duplicate
+            if not batch:
+                break
+            doe_round += 1
+        candidates = self._renumber_session_candidates(candidates[: source_targets["total"]])
         if len(candidates) != source_targets["total"]:
             raise RuntimeError(f"候选池数量不一致：目标 {source_targets['total']}，实际 {len(candidates)}。")
+        duplicate_total = llm_duplicates + transfer_duplicates + doe_duplicates
+        if duplicate_total:
+            self.emit(f"候选去重过滤 {duplicate_total} 个结构等价方案")
         self.emit(
             "候选生成完成："
             f"目标总数 {source_targets['total']}，"
             f"初始配额 LLM={source_targets['llm']} / 案例迁移={source_targets['case_transfer']} / DOE={source_targets['doe']}；"
-            f"有效进入候选池 LLM={len(valid_llm_candidates)}，"
-            f"案例迁移={len(valid_transfer_candidates)}，"
-            f"DOE补足={len(doe_candidates)}"
+            f"有效进入候选池 LLM={llm_added}，"
+            f"案例迁移={transfer_added}，"
+            f"DOE补足={doe_added}"
         )
         return candidates

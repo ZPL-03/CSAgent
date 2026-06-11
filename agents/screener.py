@@ -77,7 +77,7 @@ class ScreenerAgent(BaseAgent):
             }
             updated["screening_summary"] = (
                 f"代理预测极限压力={updated['surrogate_ultimate_pressure_MPa']} MPa，"
-                f"线性屈曲Q(ASME RD-1172)={updated['asme_linear_buckling_pressure_MPa']} MPa，"
+                f"ASME RD-1172线性屈曲压力={updated['asme_linear_buckling_pressure_MPa']} MPa，"
                 f"PBIPF公式={updated['surrogate_PBIPF_MPa']} MPa，"
                 f"面密度={updated['surrogate_weight']} kg/m^2，"
                 f"按 {self.score_formula_text} 得分 {updated['rank_score']}。"

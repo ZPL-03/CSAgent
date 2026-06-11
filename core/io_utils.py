@@ -8,7 +8,7 @@ from typing import Any
 
 
 def read_json(path: Path) -> Any:
-    with path.open("r", encoding="utf-8") as file:
+    with path.open("r", encoding="utf-8-sig") as file:
         return json.load(file)
 
 

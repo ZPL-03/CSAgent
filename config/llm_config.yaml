@@ -6,7 +6,7 @@ backends:
     model_env: LLM_PRIMARY_MODEL_NAME
     base_url: ""
     api_key: ""
-    model: csllm-cpv
+    model: csllm
     temperature: 0.2
     max_tokens: 1800
     timeout_seconds: 180

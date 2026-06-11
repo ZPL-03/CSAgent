@@ -52,3 +52,23 @@ def test_report_button_allows_partial_evaluated_results(monkeypatch) -> None:
     finally:
         window.close()
         app.processEvents()
+
+
+def test_loaded_example_keeps_geometry_as_candidate_variables(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window._load_example_prompt()
+        text = window.input_line.text()
+
+        assert "外压 30 MPa" in text
+        assert "生成 12 个候选" in text
+        assert "初筛保留 5 个候选" in text
+        assert "长度" not in text
+        assert "半径" not in text
+        assert "厚度" not in text
+        assert "初始缺陷" not in text
+    finally:
+        window.close()
+        app.processEvents()

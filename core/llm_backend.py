@@ -141,10 +141,14 @@ class LLMBackend:
         user_prompt: str,
         max_tokens_override: int | None = None,
         json_mode: bool = False,
+        excluded_backend_names: set[str] | None = None,
     ) -> str:
         """按配置优先级调用 LLM，失败时自动尝试回退后端。"""
         last_error: Exception | None = None
+        excluded = set(excluded_backend_names or set())
         for runtime in self.backends:
+            if runtime.name in excluded:
+                continue
             request_payload = {
                 "model": runtime.model,
                 "temperature": runtime.temperature,
@@ -167,7 +171,10 @@ class LLMBackend:
                     response = client.chat.completions.create(**request_payload)
                 self.active_backend = runtime
                 self._sync_public_attrs(runtime)
-                return response.choices[0].message.content or ""
+                content = response.choices[0].message.content or ""
+                if not content.strip():
+                    raise ValueError(f"LLM 后端 {runtime.name} 返回空文本")
+                return content
             except Exception as exc:
                 last_error = exc
                 continue

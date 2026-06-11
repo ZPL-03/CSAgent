@@ -199,7 +199,7 @@ class MainWindow(QMainWindow):
 
         self.input_line = QLineEdit()
         self.input_line.setPlaceholderText(
-            "例如：请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，长度 500 mm，半径 100 mm，厚度 10 mm，极限压力不低于 35 MPa，生成 12 个候选，初筛保留 5 个候选"
+            "例如：请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 12 个候选，初筛保留 5 个候选"
         )
 
         self.generate_button = QPushButton("开始对话设计")
@@ -496,7 +496,7 @@ class MainWindow(QMainWindow):
 
     def _load_example_prompt(self) -> None:
         self.input_line.setText(
-            "请为复合材料外压圆柱耐压壳设计方案，材料 T700/Epoxy，外压 30 MPa，长度 500 mm，半径 100 mm，厚度 10 mm，初始缺陷比 0.5%，极限压力不低于 35 MPa，生成 12 个候选，初筛保留 5 个候选"
+            "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 12 个候选，初筛保留 5 个候选"
         )
         self.input_line.setFocus()
 

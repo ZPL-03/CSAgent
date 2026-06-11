@@ -12,7 +12,7 @@ from agents.report_gen import ReportGenAgent
 from agents.screener import ScreenerAgent
 from core.id_utils import format_candidate_id, next_candidate_index, task_file_name
 from core.io_utils import write_json
-from core.paths import TASKS_DIR
+from core.paths import IO_DIR, TASKS_DIR
 from core.task_contract import (
     describe_boundary_conditions,
     describe_load_conditions,
@@ -170,6 +170,7 @@ class OrchestratorAgent(BaseAgent):
         result = self.fem_agent.run(fem_candidate)
         result["session_candidate_id"] = fem_candidate.get("session_candidate_id")
         result["display_name"] = fem_candidate.get("display_name")
+        write_json(IO_DIR / f"result_{result['candidate_id']}.json", result)
         self.knowledge_agent.run({"task": task, "design": fem_candidate, "abaqus_results": result})
         return result
 

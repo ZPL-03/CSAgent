@@ -383,7 +383,30 @@ class ReportGenAgent(BaseAgent):
             except ValueError:
                 answer = self._deterministic_clean_llm_engineering_text(answer, payload)
                 self._validate_llm_engineering_text(answer, payload)
-        return answer
+        return self._postprocess_engineering_explanation(answer)
+
+    def _postprocess_engineering_explanation(self, text: str) -> str:
+        """清理报告解释段的标题层级和数值占位语，避免与模板标题重复。"""
+        cleaned_lines: List[str] = []
+        for raw_line in str(text or "").splitlines():
+            line = raw_line.rstrip()
+            stripped = line.strip()
+            if not stripped:
+                cleaned_lines.append("")
+                continue
+            if re.fullmatch(r"#{1,2}\s*工程解释与制造建议", stripped):
+                continue
+            if stripped.startswith("# ") or stripped.startswith("## "):
+                stripped = re.sub(r"^#+\s*", "", stripped)
+                line = f"### {stripped}"
+            line = line.replace("为对应工程量", "由结构化有限元结果给出")
+            line = line.replace("为结构化结果中的对应工程量", "由结构化有限元结果给出")
+            line = line.replace("对应工程量", "结构化结果")
+            cleaned_lines.append(line)
+        cleaned = "\n".join(cleaned_lines).strip()
+        while "\n\n\n" in cleaned:
+            cleaned = cleaned.replace("\n\n\n", "\n\n")
+        return cleaned
 
     def _render_engineering_explanation(self, summary: Dict[str, Any]) -> str:
         self._last_llm_explanation_used = False
@@ -407,6 +430,11 @@ class ReportGenAgent(BaseAgent):
             for result in results
             if str(result.get("session_candidate_id") or "").strip()
         }
+        results_by_candidate_id = {
+            str(result.get("candidate_id")): result
+            for result in results
+            if str(result.get("candidate_id") or "").strip()
+        }
         lines = [
             "# CSDM_cph 耐压壳设计报告",
             "",
@@ -425,10 +453,12 @@ class ReportGenAgent(BaseAgent):
         ]
         if candidates:
             for candidate in candidates:
-                official_candidate_id = (
-                    results_by_session_id.get(str(candidate.get("candidate_id") or ""), {}).get("candidate_id")
-                    or "-"
+                linked_result = (
+                    results_by_session_id.get(str(candidate.get("candidate_id") or ""))
+                    or results_by_candidate_id.get(str(candidate.get("candidate_id") or ""))
+                    or {}
                 )
+                official_candidate_id = linked_result.get("candidate_id") or "-"
                 lines.extend(
                     [
                         "",

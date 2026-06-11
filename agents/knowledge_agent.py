@@ -80,6 +80,8 @@ class KnowledgeAgent(BaseAgent):
     def _sanitize_abaqus_results(self, abaqus_results: Dict) -> Dict:
         keys = [
             "candidate_id",
+            "session_candidate_id",
+            "display_name",
             "status",
             "retry_count",
             "ultimate_pressure_MPa",
