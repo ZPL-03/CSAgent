@@ -21,6 +21,30 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
     app = _app()
     store = WorkflowEventStore(tmp_path / "workflow.sqlite3")
     store.create_run("RUN_TEST", "生成 2 个候选，初筛保留 1 个候选")
+    store.save_snapshot(
+        "RUN_TEST",
+        {
+            "run_id": "RUN_TEST",
+            "instruction": "生成 2 个候选，初筛保留 1 个候选",
+            "stage": "awaiting_screen_confirmation",
+            "pending_confirmation": "screen_candidates",
+            "task": {
+                "task_id": "TASK_1",
+                "application": "复合材料外压圆柱耐压壳",
+                "load_conditions": {"external_pressure_MPa": 30.0},
+                "design_targets": {"ultimate_pressure_min_MPa": 35.0},
+            },
+            "candidates": [
+                {"candidate_id": "TMP_1", "source": "DOE"},
+                {"candidate_id": "TMP_2", "source": "LLM"},
+            ],
+            "screened_candidates": [{"candidate_id": "TMP_1", "source": "DOE"}],
+            "results": [{"candidate_id": "C1", "verdict": "通过"}],
+            "report": {"markdown_path": str(tmp_path / "latest_report.md")},
+            "source_counter": {"DOE": 1, "LLM": 1},
+            "error": None,
+        },
+    )
     store.append_event(
         WorkflowEvent(
             run_id="RUN_TEST",
@@ -62,6 +86,8 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
     job_id = queue.enqueue("RUN_TEST", {"candidate_id": "TMP_1"})
     queue.mark_running(job_id)
     queue.mark_success(job_id, {"candidate_id": "C1", "ultimate_pressure_MPa": 45.0, "verdict": "通过"})
+    failed_job_id = queue.enqueue("RUN_TEST", {"candidate_id": "TMP_2"})
+    queue.mark_failed(failed_job_id, "Abaqus 输入文件缺少厚度字段")
 
     widget = WorkflowWidget(event_store=store, simulation_queue=queue)
     try:
@@ -75,9 +101,20 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
         assert "screen_candidates" in html
         assert "工具 parse_task 调用完成" in html
         assert "有限元队列" in html
+        assert "运行摘要" in html
+        assert "状态图" in html
+        assert "诊断" in html
+        assert "任务契约" in html
+        assert "候选池" in html
+        assert "DOE=1" in html
+        assert "LLM=1" in html
+        assert "latest_report.md" in html
         assert "TMP_1" in html
+        assert "TMP_2" in html
         assert "C1" in html
         assert "45.0" in html
+        assert "Abaqus 输入文件缺少厚度字段" in html
+        assert "LLM 已使用回退后端" in html
         assert "LLM 后端" in html
         assert "candidate_generation" in html
         assert "primary-model" in html
