@@ -20,7 +20,7 @@ LANGUAGE_OPTIONS: dict[str, str] = {
 
 TEXT: dict[str, dict[str, str]] = {
     "zh": {
-        "app.title": "CSDM_cph 耐压壳智能设计平台",
+        "app.title": "复合材料结构多智能体智能设计系统",
         "app.subtitle": "多智能体任务编排 / 候选生成 / 代理初筛 / ABAQUS 校核 / 案例回流 / 报告输出",
         "section.primary": "主流程",
         "section.utility": "辅助入口",
@@ -102,7 +102,7 @@ TEXT: dict[str, dict[str, str]] = {
         "abaqus.headers": "候选样本|正式编号|状态|极限压力|屈曲压力|面密度|结论|失效模式",
     },
     "en": {
-        "app.title": "CSDM_cph Pressure Hull Design Workbench",
+        "app.title": "Composite Structure Multi-Agent Intelligent Design System",
         "app.subtitle": "Multi-agent orchestration / candidate generation / surrogate screening / ABAQUS verification / case memory / reports",
         "section.primary": "Primary Flow",
         "section.utility": "Utilities",
