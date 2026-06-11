@@ -111,6 +111,38 @@ class WorkflowWidget(QWidget):
                 f"<li><code>{created_at}</code> [{agent}] <b>{event_type}</b>：{message}</li>"
             )
 
+        llm_rows = []
+        for event in events:
+            if event.get("event_type") != "llm_call_trace":
+                continue
+            payload = event.get("payload") or {}
+            context = payload.get("context") or {}
+            trace = payload.get("trace") or []
+            attempts = []
+            for item in trace:
+                attempts.append(
+                    f"{item.get('backend')} / {item.get('model')} / {item.get('status')}"
+                )
+            llm_rows.append(
+                "<tr>"
+                f"<td>{context.get('purpose') or '-'}</td>"
+                f"<td>{payload.get('selected_backend') or '-'}</td>"
+                f"<td>{payload.get('selected_model') or '-'}</td>"
+                f"<td>{'是' if payload.get('fallback_used') else '否'}</td>"
+                f"<td>{'<br/>'.join(attempts) if attempts else '-'}</td>"
+                "</tr>"
+            )
+        llm_trace_html = (
+            "<p>当前运行还没有 LLM 调用轨迹。</p>"
+            if not llm_rows
+            else (
+                "<table border='1' cellspacing='0' cellpadding='6'>"
+                "<tr><th>用途</th><th>选用后端</th><th>选用模型</th><th>使用回退</th><th>尝试链路</th></tr>"
+                + "".join(llm_rows)
+                + "</table>"
+            )
+        )
+
         job_rows = []
         for job in jobs:
             result = job.get("result") or {}
@@ -150,6 +182,8 @@ class WorkflowWidget(QWidget):
             + "</table>"
             + "<h4>有限元队列</h4>"
             + jobs_html
+            + "<h4>LLM 调用轨迹</h4>"
+            + llm_trace_html
             + "<h4>事件审计</h4>"
             + "<ol>"
             + "".join(event_items)

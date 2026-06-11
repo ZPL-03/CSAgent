@@ -338,12 +338,14 @@ class ReportGenAgent(BaseAgent):
             "请清理以下报告解释文本：\n"
             f"{text}"
         )
-        return self.llm_backend.chat(
+        answer = self.llm_backend.chat(
             system_prompt,
             user_prompt,
             max_tokens_override=min(max(int(self.llm_backend.max_tokens), 1800), 2400),
             json_mode=False,
         ).strip()
+        self.emit_llm_trace(self.llm_backend, {"purpose": "report_explanation_sanitize"})
+        return answer
 
     def _render_llm_engineering_explanation(self, summary: Dict[str, Any]) -> str:
         if self.llm_backend is None:
@@ -372,6 +374,7 @@ class ReportGenAgent(BaseAgent):
             max_tokens_override=min(max(int(self.llm_backend.max_tokens), 1800), 2600),
             json_mode=False,
         ).strip()
+        self.emit_llm_trace(self.llm_backend, {"purpose": "report_engineering_explanation"})
         if not answer:
             return ""
         try:
@@ -417,6 +420,7 @@ class ReportGenAgent(BaseAgent):
                     self._last_llm_explanation_used = True
                     return llm_text
             except Exception as exc:
+                self.emit_llm_trace(self.llm_backend, {"purpose": "report_engineering_explanation", "failed": True})
                 self.emit(f"报告 LLM 工程解释生成失败，已使用确定性解释：{exc}")
         return self._render_deterministic_engineering_explanation(summary)
 

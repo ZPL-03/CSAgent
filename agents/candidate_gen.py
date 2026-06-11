@@ -581,6 +581,10 @@ class CandidateGenAgent(BaseAgent):
                         json_mode=False,
                         excluded_backend_names=excluded_backend_names,
                     )
+                    self.emit_llm_trace(
+                        self.llm_backend,
+                        {"purpose": "candidate_generation", "desired_count": desired_count},
+                    )
                     items = self._extract_candidates_from_natural_answer(answer)
                     if not items:
                         raise SchemaValidationError("LLM 自然语言回答中没有可解析的候选表或编号方案")
@@ -614,6 +618,10 @@ class CandidateGenAgent(BaseAgent):
                     last_schema_error = exc
                     self.emit(f"LLM 生成失败，准备重试：{exc}")
                 except Exception as exc:
+                    self.emit_llm_trace(
+                        self.llm_backend,
+                        {"purpose": "candidate_generation", "desired_count": desired_count, "failed": True},
+                    )
                     self.emit(f"LLM 生成失败，准备重试：{exc}")
                     return []
 

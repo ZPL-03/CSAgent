@@ -44,3 +44,31 @@ class BaseAgent:
 
     def run(self, input_data: Any) -> Any:
         raise NotImplementedError
+
+    def emit_llm_trace(self, llm_backend: Any, context: Dict[str, Any] | None = None) -> None:
+        """把 LLM 后端调用轨迹写入智能体事件。"""
+
+        trace = list(getattr(llm_backend, "last_call_trace", []) or [])
+        if not trace:
+            return
+        successful = [item for item in trace if item.get("status") == "success"]
+        selected = successful[-1] if successful else None
+        fallback_used = bool(selected and trace and trace[0].get("backend") != selected.get("backend"))
+        if selected:
+            message = (
+                f"LLM 调用完成：使用 {selected.get('backend')} / {selected.get('model')}，"
+                f"后端尝试 {len(trace)} 次"
+            )
+        else:
+            message = f"LLM 调用失败：后端尝试 {len(trace)} 次"
+        self.emit_event(
+            "llm_call_trace",
+            message,
+            {
+                "context": context or {},
+                "trace": trace,
+                "selected_backend": selected.get("backend") if selected else None,
+                "selected_model": selected.get("model") if selected else None,
+                "fallback_used": fallback_used,
+            },
+        )

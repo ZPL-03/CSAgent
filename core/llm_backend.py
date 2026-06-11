@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import time
 from dataclasses import dataclass
 from typing import Any, Dict, List
+from urllib.parse import urlparse
 
 from core.config_loader import load_llm_config
 
@@ -110,7 +113,28 @@ class LLMBackend:
             raise ValueError(f"LLM 配置不完整，请检查后端：{', '.join(missing_groups) or 'openai_compatible'}")
 
         self.active_backend = self.backends[0]
+        self.last_call_trace: List[Dict[str, Any]] = []
+        self.call_history: List[List[Dict[str, Any]]] = []
         self._sync_public_attrs(self.active_backend)
+
+    def _record_call_trace(self, trace: List[Dict[str, Any]]) -> None:
+        safe_trace = [dict(item) for item in trace]
+        self.last_call_trace = safe_trace
+        self.call_history.append(safe_trace)
+
+    def _sanitize_trace_error(self, error: Exception | str) -> str:
+        text = str(error)
+        for runtime in self.backends:
+            if runtime.base_url:
+                text = text.replace(runtime.base_url, "[url]")
+                host = urlparse(runtime.base_url).netloc
+                if host:
+                    text = text.replace(host, "[host]")
+            if runtime.api_key:
+                text = text.replace(runtime.api_key, "[secret]")
+        text = re.sub(r"https?://[^\s'\"),}]+", "[url]", text)
+        text = re.sub(r"\b(?:sk|tp)-[A-Za-z0-9_-]{8,}\b", "[secret]", text)
+        return text[:500]
 
     def _sync_public_attrs(self, runtime: BackendRuntime) -> None:
         self.base_url = runtime.base_url
@@ -146,6 +170,7 @@ class LLMBackend:
         """按配置优先级调用 LLM，失败时自动尝试回退后端。"""
         last_error: Exception | None = None
         excluded = set(excluded_backend_names or set())
+        trace: List[Dict[str, Any]] = []
         for runtime in self.backends:
             if runtime.name in excluded:
                 continue
@@ -160,6 +185,14 @@ class LLMBackend:
             }
             if json_mode:
                 request_payload["response_format"] = {"type": "json_object"}
+            attempt = {
+                "backend": runtime.name,
+                "model": runtime.model,
+                "json_mode": bool(json_mode),
+                "max_tokens": int(max_tokens_override or runtime.max_tokens),
+                "status": "started",
+            }
+            started_at = time.perf_counter()
             try:
                 client = self._client_for(runtime)
                 try:
@@ -171,13 +204,30 @@ class LLMBackend:
                     response = client.chat.completions.create(**request_payload)
                 self.active_backend = runtime
                 self._sync_public_attrs(runtime)
-                content = response.choices[0].message.content or ""
+                choice = response.choices[0]
+                content = choice.message.content or ""
+                attempt["finish_reason"] = getattr(choice, "finish_reason", None)
+                attempt["content_chars"] = len(content)
                 if not content.strip():
+                    attempt["status"] = "failed"
+                    attempt["error_type"] = "ValueError"
+                    attempt["error"] = f"LLM 后端 {runtime.name} 返回空文本"
                     raise ValueError(f"LLM 后端 {runtime.name} 返回空文本")
+                attempt["status"] = "success"
+                attempt["latency_ms"] = round((time.perf_counter() - started_at) * 1000.0, 3)
+                trace.append(attempt)
+                self._record_call_trace(trace)
                 return content
             except Exception as exc:
+                attempt.setdefault("content_chars", 0)
+                attempt["status"] = "failed"
+                attempt["error_type"] = type(exc).__name__
+                attempt["error"] = self._sanitize_trace_error(exc)
+                attempt["latency_ms"] = round((time.perf_counter() - started_at) * 1000.0, 3)
+                trace.append(attempt)
                 last_error = exc
                 continue
+        self._record_call_trace(trace)
         if last_error is not None:
             raise last_error
         raise ValueError("LLM 后端列表为空")

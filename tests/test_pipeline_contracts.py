@@ -167,6 +167,47 @@ def test_llm_backend_uses_fallback_backend_after_primary_unusable_response(monke
         ("http://primary.local/v1", "primary-model"),
         ("http://fallback.local/v1", "fallback-model"),
     ]
+    assert backend.last_call_trace == [
+        {
+            "backend": "primary",
+            "model": "primary-model",
+            "json_mode": False,
+            "max_tokens": 16,
+            "status": "failed",
+            "finish_reason": None,
+            "content_chars": 0,
+            "error_type": "ValueError",
+            "error": "LLM 后端 primary 返回空文本",
+            "latency_ms": backend.last_call_trace[0]["latency_ms"],
+        },
+        {
+            "backend": "fallback",
+            "model": "fallback-model",
+            "json_mode": False,
+            "max_tokens": 16,
+            "status": "success",
+            "finish_reason": None,
+            "content_chars": 11,
+            "latency_ms": backend.last_call_trace[1]["latency_ms"],
+        },
+    ]
+    trace_text = str(backend.last_call_trace)
+    assert "primary-key" not in trace_text
+    assert "fallback-key" not in trace_text
+    assert "primary.local" not in trace_text
+    assert "fallback.local" not in trace_text
+    assert backend.call_history[-1] == backend.last_call_trace
+    fake_secret = "sk-" + "1234567890abcdef"
+    sanitized_error = backend._sanitize_trace_error(
+        RuntimeError(
+            "request failed at http://primary.local/v1 with primary-key and "
+            f"https://api.deepseek.com/v1 using {fake_secret}"
+        )
+    )
+    assert "http://primary.local/v1" not in sanitized_error
+    assert "https://api.deepseek.com/v1" not in sanitized_error
+    assert "primary-key" not in sanitized_error
+    assert fake_secret not in sanitized_error
 
 
 def test_count_overrides_keep_ratio_mode(monkeypatch):
@@ -622,6 +663,60 @@ def test_report_uses_llm_only_for_grounded_engineering_explanation(monkeypatch):
     assert "缠绕和铺放可制造性评审" in markdown
     assert "PBIPF 公式初筛通过" in markdown
     assert agent._last_llm_explanation_used is True
+
+
+def test_report_emits_llm_trace_when_engineering_explanation_fails(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, results, candidates = _report_sample()
+    events = []
+    agent = ReportGenAgent(progress_callback=lambda *args: events.append(args))
+
+    class ControlledBackend:
+        max_tokens = 1800
+
+        def __init__(self):
+            self.last_call_trace = []
+
+        def chat(self, system_prompt, user_prompt, max_tokens_override=None, json_mode=False, **_kwargs):
+            self.last_call_trace = [
+                {
+                    "backend": "primary",
+                    "model": "csllm",
+                    "status": "failed",
+                    "error_type": "ConnectionError",
+                    "error": "connection refused",
+                    "latency_ms": 10.0,
+                },
+                {
+                    "backend": "fallback",
+                    "model": "deepseek-v4-pro",
+                    "status": "failed",
+                    "error_type": "TimeoutError",
+                    "error": "request timeout",
+                    "latency_ms": 20.0,
+                },
+            ]
+            raise RuntimeError("all llm backends failed")
+
+    agent.llm_backend = ControlledBackend()
+
+    markdown = agent._render_markdown(task, results, candidates)
+
+    assert agent._last_llm_explanation_used is False
+    assert "### 制造工艺适配性" in markdown
+    trace_events = [
+        payload
+        for _, _, payload in events
+        if payload.get("event_type") == "llm_call_trace"
+    ]
+    assert trace_events
+    trace_payload = trace_events[-1]["payload"]
+    assert trace_payload["context"]["failed"] is True
+    assert trace_payload["selected_backend"] is None
+    assert trace_payload["fallback_used"] is False
+    assert [item["backend"] for item in trace_payload["trace"]] == ["primary", "fallback"]
+    assert "csllm" in str(trace_payload["trace"])
+    assert "deepseek-v4-pro" in str(trace_payload["trace"])
 
 
 def test_report_cleans_llm_explanation_before_using_it(monkeypatch):

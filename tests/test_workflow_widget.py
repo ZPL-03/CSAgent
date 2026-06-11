@@ -39,6 +39,25 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
             stage="parse_task",
         )
     )
+    store.append_event(
+        WorkflowEvent(
+            run_id="RUN_TEST",
+            event_type="llm_call_trace",
+            agent="CandidateGenAgent",
+            message="LLM 调用完成：使用 fallback / fallback-model，后端尝试 2 次",
+            stage="generate_candidates",
+            payload={
+                "context": {"purpose": "candidate_generation", "desired_count": 6},
+                "selected_backend": "fallback",
+                "selected_model": "fallback-model",
+                "fallback_used": True,
+                "trace": [
+                    {"backend": "primary", "model": "primary-model", "status": "failed"},
+                    {"backend": "fallback", "model": "fallback-model", "status": "success"},
+                ],
+            },
+        )
+    )
     queue = SimulationJobQueue(tmp_path / "workflow.sqlite3")
     job_id = queue.enqueue("RUN_TEST", {"candidate_id": "TMP_1"})
     queue.mark_running(job_id)
@@ -60,6 +79,9 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
         assert "C1" in html
         assert "45.0" in html
         assert "LLM 后端" in html
+        assert "candidate_generation" in html
+        assert "primary-model" in html
+        assert "fallback-model" in html
     finally:
         widget.close()
         app.processEvents()
