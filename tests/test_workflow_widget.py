@@ -39,8 +39,10 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
                 {"candidate_id": "TMP_2", "source": "LLM"},
             ],
             "screened_candidates": [{"candidate_id": "TMP_1", "source": "DOE"}],
-            "results": [{"candidate_id": "C1", "verdict": "通过"}],
-            "knowledge_updates": [{"status": "stored", "case_id": "CASE_100", "candidate_id": "C1"}],
+            "results": [{"candidate_id": "C1", "session_candidate_id": "TMP_1", "verdict": "通过", "ultimate_pressure_MPa": 45.0}],
+            "knowledge_updates": [
+                {"status": "stored", "case_id": "CASE_100", "candidate_id": "C1", "session_candidate_id": "TMP_1"}
+            ],
             "report": {"markdown_path": str(tmp_path / "latest_report.md")},
             "source_counter": {"DOE": 1, "LLM": 1},
             "error": None,
@@ -104,11 +106,11 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
     queue = SimulationJobQueue(tmp_path / "workflow.sqlite3")
     job_id = queue.enqueue("RUN_TEST", {"candidate_id": "TMP_1"})
     queue.mark_running(job_id)
-    queue.mark_success(job_id, {"candidate_id": "C1", "ultimate_pressure_MPa": 45.0, "verdict": "通过"})
+    queue.mark_success(job_id, {"candidate_id": "C1", "session_candidate_id": "TMP_1", "ultimate_pressure_MPa": 45.0, "verdict": "通过"})
     failed_job_id = queue.enqueue("RUN_TEST", {"candidate_id": "TMP_2"})
     queue.mark_failed(failed_job_id, "Abaqus 输入文件缺少厚度字段")
 
-    widget = WorkflowWidget(event_store=store, simulation_queue=queue)
+    widget = WorkflowWidget(event_store=store, simulation_queue=queue, audit_output_dir=tmp_path)
     try:
         widget.refresh("RUN_TEST", "awaiting_screen_confirmation", "screen_candidates")
         html = widget.browser.toHtml()
@@ -145,6 +147,19 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
         assert "primary-model" in html
         assert "fallback-model" in html
         assert "工具 persist_knowledge 调用完成" in html
+
+        widget._export_run_audit()
+        audit_path = tmp_path / "run_audit_RUN_TEST.md"
+        assert audit_path.exists()
+        audit_text = audit_path.read_text(encoding="utf-8")
+        assert "CSDM_cph 运行审计报告" in audit_text
+        assert "RUN_TEST" in audit_text
+        assert "TMP_1" in audit_text
+        assert "C1" in audit_text
+        assert "CASE_100" in audit_text
+        assert "fallback-model" in audit_text
+        assert "Abaqus 输入文件缺少厚度字段" in audit_text
+        assert "运行审计已导出" in widget.audit_status_label.text()
     finally:
         widget.close()
         app.processEvents()

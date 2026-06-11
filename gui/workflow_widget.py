@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from html import escape
+from pathlib import Path
 from typing import Any
 
-from PyQt6.QtWidgets import QPushButton, QTextBrowser, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTextBrowser, QVBoxLayout, QWidget
 
 from core.llm_status import configured_llm_backends, probe_llm_backends
+from core.paths import RESULTS_DIR
 from workflow.agent_contracts import list_agent_contracts
 from workflow.event_store import WorkflowEventStore
+from workflow.run_audit import write_run_audit
 from workflow.simulation_queue import SimulationJobQueue
 
 
@@ -44,23 +47,36 @@ class WorkflowWidget(QWidget):
         self,
         event_store: WorkflowEventStore | None = None,
         simulation_queue: SimulationJobQueue | None = None,
+        audit_output_dir: Path | None = None,
     ) -> None:
         super().__init__()
         self.event_store = event_store or WorkflowEventStore()
         self.simulation_queue = simulation_queue or SimulationJobQueue(self.event_store.db_path)
+        self.audit_output_dir = audit_output_dir or RESULTS_DIR
         self.llm_health_results: list[dict[str, Any]] = []
         self._last_refresh_args: tuple[str | None, str, str | None] = (None, "", None)
         self.health_button = QPushButton("检测 LLM 后端")
+        self.audit_button = QPushButton("导出运行审计")
+        self.audit_button.setEnabled(False)
+        self.audit_status_label = QLabel("")
+        self.audit_status_label.setWordWrap(True)
         self.browser = QTextBrowser()
         layout = QVBoxLayout()
-        layout.addWidget(self.health_button)
+        button_layout = QHBoxLayout()
+        button_layout.addWidget(self.health_button)
+        button_layout.addWidget(self.audit_button)
+        layout.addLayout(button_layout)
+        layout.addWidget(self.audit_status_label)
         layout.addWidget(self.browser)
         self.setLayout(layout)
         self.health_button.clicked.connect(self._run_llm_health_check)
+        self.audit_button.clicked.connect(self._export_run_audit)
         self.reset_view()
 
     def reset_view(self) -> None:
         self._last_refresh_args = (None, "", None)
+        self.audit_button.setEnabled(False)
+        self.audit_status_label.setText("")
         self.browser.setHtml(
             "<h3>智能体流程</h3>"
             "<p>启动对话式设计后，这里会显示 LangGraph 工作流节点、人工确认点和工具调用事件。</p>"
@@ -86,6 +102,25 @@ class WorkflowWidget(QWidget):
         finally:
             self.health_button.setText("检测 LLM 后端")
             self.health_button.setEnabled(True)
+
+    def _export_run_audit(self) -> None:
+        workflow_run_id, stage, pending = self._last_refresh_args
+        if not workflow_run_id:
+            self.audit_status_label.setText("当前没有可导出的运行快照。")
+            return
+        try:
+            path = write_run_audit(
+                self.event_store,
+                self.simulation_queue,
+                workflow_run_id,
+                output_dir=self.audit_output_dir,
+            )
+        except Exception as exc:
+            self.audit_status_label.setText(f"运行审计导出失败：{self._safe(exc)}")
+            return
+        self.refresh(workflow_run_id, stage, pending)
+        self.audit_status_label.setText(f"运行审计已导出：{path}")
+        self.browser.append(f"<p><b>运行审计已导出：</b>{self._safe(path)}</p>")
 
     def _llm_status_html(self) -> str:
         health_by_name = {str(item.get("name") or ""): item for item in self.llm_health_results}
@@ -322,6 +357,8 @@ class WorkflowWidget(QWidget):
         if not workflow_run_id:
             self.reset_view()
             return
+        self.audit_button.setEnabled(True)
+        self.audit_status_label.setText("")
         try:
             events = self.event_store.list_events(workflow_run_id)
             jobs = self.simulation_queue.list_jobs(workflow_run_id)
