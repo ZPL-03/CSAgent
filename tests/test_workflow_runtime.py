@@ -92,6 +92,11 @@ def test_workflow_runtime_persists_and_resumes_without_repeating_completed_nodes
     assert "tool_completed" in event_types
     assert "human_confirmation" in event_types
 
+    runs = store.list_runs(limit=5)
+    assert runs[0]["run_id"] == state["run_id"]
+    assert runs[0]["stage"] == "paused_before_fem"
+    assert runs[0]["pending_confirmation"] is None
+
 
 def test_workflow_runtime_completes_full_approved_path(tmp_path):
     store = WorkflowEventStore(tmp_path / "workflow.sqlite3")

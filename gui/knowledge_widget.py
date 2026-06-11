@@ -41,7 +41,12 @@ class KnowledgeWidget(QWidget):
         self.search_button.clicked.connect(self._search_from_input)
         self.search_input.returnPressed.connect(self._search_from_input)
 
-    def refresh(self, task: dict[str, Any] | None = None, query_text: str | None = None) -> None:
+    def refresh(
+        self,
+        task: dict[str, Any] | None = None,
+        query_text: str | None = None,
+        load_evidence: bool = True,
+    ) -> None:
         if task is not None:
             self._last_task = task
 
@@ -51,7 +56,7 @@ class KnowledgeWidget(QWidget):
         knowledge_status = self.knowledge_base.status()
         case_memory_count = self._case_memory_count()
         odb_count, vis_count = self._abaqus_archive_counts()
-        evidence_payload = self._retrieve_evidence(task, query_text)
+        evidence_payload = self._retrieve_evidence(task, query_text) if load_evidence else {"query": "", "chunks": [], "relations": []}
 
         lines = [
             self._status_html(

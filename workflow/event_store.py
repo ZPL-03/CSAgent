@@ -131,6 +131,39 @@ class WorkflowEventStore:
             raise KeyError(f"未找到工作流快照：{run_id}")
         return json.loads(row["state_json"])
 
+    def list_runs(self, limit: int = 20) -> List[Dict[str, Any]]:
+        """按更新时间倒序列出最近工作流运行摘要。"""
+        with self._connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    r.run_id,
+                    r.instruction,
+                    r.status,
+                    r.created_at,
+                    r.updated_at,
+                    s.stage,
+                    s.pending_confirmation
+                FROM workflow_runs r
+                LEFT JOIN workflow_snapshots s ON s.run_id = r.run_id
+                ORDER BY r.updated_at DESC
+                LIMIT ?
+                """,
+                (int(limit),),
+            ).fetchall()
+        return [
+            {
+                "run_id": row["run_id"],
+                "instruction": row["instruction"],
+                "status": row["status"],
+                "created_at": row["created_at"],
+                "updated_at": row["updated_at"],
+                "stage": row["stage"],
+                "pending_confirmation": row["pending_confirmation"],
+            }
+            for row in rows
+        ]
+
     def list_events(self, run_id: str) -> List[Dict[str, Any]]:
         with self._connect() as conn:
             rows = conn.execute(

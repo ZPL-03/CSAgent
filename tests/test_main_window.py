@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -6,6 +8,8 @@ from PyQt6.QtWidgets import QApplication
 
 from core.task_parser import TaskParser
 from gui.main_window import MainWindow
+from workflow.event_store import WorkflowEventStore
+from workflow.simulation_queue import SimulationJobQueue
 
 
 def _app() -> QApplication:
@@ -24,6 +28,17 @@ def _candidate(candidate_id: str) -> dict:
         "layup": {},
         "material_system": {},
     }
+
+
+class FakeKnowledge:
+    def status(self) -> dict:
+        return {"ready": True}
+
+    def retrieve(self, task: dict, top_k: int | None = None, kg_top_k: int | None = None) -> dict:
+        return {"query": "restore", "chunks": [], "relations": []}
+
+    def retrieve_by_query(self, query: str, top_k: int | None = None, kg_top_k: int | None = None) -> dict:
+        return {"query": query, "chunks": [], "relations": []}
 
 
 def test_report_button_allows_partial_evaluated_results(monkeypatch) -> None:
@@ -93,6 +108,54 @@ def test_loaded_example_keeps_geometry_as_candidate_variables(monkeypatch) -> No
         assert "半径" not in text
         assert "厚度" not in text
         assert "初始缺陷" not in text
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_main_window_restores_workflow_snapshot(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    monkeypatch.setattr("gui.knowledge_widget.DomainKnowledgeBase", FakeKnowledge)
+    app = _app()
+    store = WorkflowEventStore(tmp_path / "workflow.sqlite3")
+    task = TaskParser().parse_instruction(
+        "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
+    )
+    candidate = _candidate("TMP_1")
+    snapshot = {
+        "run_id": "RUN_RESTORE",
+        "instruction": "恢复测试需求",
+        "task": task,
+        "candidates": [candidate],
+        "screened_candidates": [candidate],
+        "evaluated_candidates": [candidate],
+        "results": [{"candidate_id": "C1", "session_candidate_id": "TMP_1", "verdict": "通过"}],
+        "report": {"markdown_path": "data/results/latest_report.md", "content": "# 报告"},
+        "stage": "awaiting_report_confirmation",
+        "pending_confirmation": "export_report",
+        "screen_skipped": False,
+    }
+    store.create_run("RUN_RESTORE", snapshot["instruction"])
+    store.save_snapshot("RUN_RESTORE", snapshot)
+
+    window = MainWindow()
+    try:
+        window.workflow_event_store = store
+        window.workflow_widget.event_store = store
+        window.workflow_widget.simulation_queue = SimulationJobQueue(store.db_path)
+        window._refresh_run_selector()
+
+        assert window.run_selector.currentData() == "RUN_RESTORE"
+
+        window._restore_selected_run()
+
+        assert window.session.workflow_run_id == "RUN_RESTORE"
+        assert window.session.instruction == "恢复测试需求"
+        assert window.session.pending_confirmation == "export_report"
+        assert window.session.results_by_session_id["TMP_1"]["candidate_id"] == "C1"
+        assert window.tabs.currentWidget() is window.workflow_widget
+        assert "RUN_RESTORE" in window.status_label.text()
+        assert window.confirm_yes_button.isEnabled() is True
     finally:
         window.close()
         app.processEvents()

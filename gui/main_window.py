@@ -15,6 +15,7 @@ from PyQt6.QtCore import QObject, QThread, QUrl, pyqtSignal
 from PyQt6.QtGui import QCloseEvent, QDesktopServices
 from PyQt6.QtWidgets import (
     QApplication,
+    QComboBox,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -45,6 +46,7 @@ from gui.knowledge_widget import KnowledgeWidget
 from gui.log_widget import LogWidget
 from gui.report_widget import ReportWidget
 from gui.workflow_widget import WorkflowWidget
+from workflow.event_store import WorkflowEventStore
 
 
 @dataclass
@@ -192,6 +194,7 @@ class MainWindow(QMainWindow):
         self.session = PipelineSession()
         self.worker_thread: QThread | None = None
         self.worker: PipelineWorker | None = None
+        self.workflow_event_store = WorkflowEventStore()
 
         self.chat_widget = ChatWidget()
         self.task_browser = QTextBrowser()
@@ -214,6 +217,10 @@ class MainWindow(QMainWindow):
         self.example_button = QPushButton("载入示例需求")
         self.refresh_button = QPushButton("刷新知识库")
         self.open_report_button = QPushButton("打开最新报告")
+        self.run_selector = QComboBox()
+        self.run_selector.setMinimumHeight(42)
+        self.refresh_runs_button = QPushButton("刷新运行记录")
+        self.restore_run_button = QPushButton("载入运行快照")
 
         self.screen_button = QPushButton("手动：代理初筛")
         self.evaluate_selected_button = QPushButton("手动：校核所选样本")
@@ -231,7 +238,7 @@ class MainWindow(QMainWindow):
         self.knowledge_widget = KnowledgeWidget()
         self.report_widget = ReportWidget()
         self.log_widget = LogWidget()
-        self.workflow_widget = WorkflowWidget()
+        self.workflow_widget = WorkflowWidget(event_store=self.workflow_event_store)
 
         self.tabs = QTabWidget()
         self.tabs.addTab(self.workflow_widget, "智能体流程")
@@ -246,7 +253,8 @@ class MainWindow(QMainWindow):
         self._connect_signals()
         self._update_button_states()
         self._update_overview_cards()
-        self.knowledge_widget.refresh()
+        self._refresh_run_selector()
+        self.knowledge_widget.refresh(load_evidence=False)
 
     def _build_layout(self) -> None:
         primary_header = QLabel("主流程")
@@ -266,6 +274,9 @@ class MainWindow(QMainWindow):
         utility_button_layout.addWidget(self.example_button, 0, 0)
         utility_button_layout.addWidget(self.refresh_button, 0, 1)
         utility_button_layout.addWidget(self.open_report_button, 0, 2)
+        utility_button_layout.addWidget(self.run_selector, 1, 0, 1, 3)
+        utility_button_layout.addWidget(self.refresh_runs_button, 2, 0)
+        utility_button_layout.addWidget(self.restore_run_button, 2, 1, 1, 2)
 
         stats_header = QLabel("当前会话")
         stats_header.setObjectName("sectionTitle")
@@ -350,12 +361,12 @@ class MainWindow(QMainWindow):
                 background: #f3f6fb;
                 color: #1f2937;
             }
-            QTextBrowser, QTableWidget, QLineEdit {
+            QTextBrowser, QTableWidget, QLineEdit, QComboBox {
                 background: white;
                 border: 1px solid #d8e1ee;
                 border-radius: 10px;
             }
-            QLineEdit {
+            QLineEdit, QComboBox {
                 padding: 10px 12px;
                 font-size: 15px;
             }
@@ -383,6 +394,8 @@ class MainWindow(QMainWindow):
         self._decorate_button(self.example_button, "#ffffff", "#cfd8e6")
         self._decorate_button(self.refresh_button, "#ffffff", "#cfd8e6")
         self._decorate_button(self.open_report_button, "#ffffff", "#cfd8e6")
+        self._decorate_button(self.refresh_runs_button, "#ffffff", "#cfd8e6")
+        self._decorate_button(self.restore_run_button, "#eef2ff", "#c7d2fe", "#3730a3")
         self._decorate_button(self.screen_button, "#ffffff", "#cfd8e6")
         self._decorate_button(self.evaluate_selected_button, "#ffffff", "#cfd8e6")
         self._decorate_button(self.evaluate_all_button, "#ffffff", "#cfd8e6")
@@ -397,6 +410,9 @@ class MainWindow(QMainWindow):
         self.example_button.clicked.connect(self._load_example_prompt)
         self.refresh_button.clicked.connect(self._refresh_knowledge_view)
         self.open_report_button.clicked.connect(self._open_latest_report)
+        self.refresh_runs_button.clicked.connect(self._refresh_run_selector)
+        self.restore_run_button.clicked.connect(self._restore_selected_run)
+        self.run_selector.currentIndexChanged.connect(lambda: self._update_button_states())
 
         self.screen_button.clicked.connect(self._start_screen)
         self.evaluate_selected_button.clicked.connect(self._start_evaluate_selected)
@@ -408,12 +424,15 @@ class MainWindow(QMainWindow):
         self.status_label.setText(f"状态：{status_text}")
         self.generate_button.setEnabled(not busy)
         self.input_line.setEnabled(not busy)
+        self.run_selector.setEnabled(not busy)
         self.confirm_yes_button.setEnabled(not busy and self.session.pending_confirmation is not None)
         self.confirm_no_button.setEnabled(not busy and self.session.pending_confirmation is not None)
         for button in [
             self.example_button,
             self.refresh_button,
             self.open_report_button,
+            self.refresh_runs_button,
+            self.restore_run_button,
             self.screen_button,
             self.evaluate_selected_button,
             self.evaluate_all_button,
@@ -439,6 +458,8 @@ class MainWindow(QMainWindow):
         self.example_button.setEnabled(self.session.pending_confirmation is None)
         self.refresh_button.setEnabled(True)
         self.open_report_button.setEnabled((RESULTS_DIR / "latest_report.md").exists() or (RESULTS_DIR / "latest_report.pdf").exists())
+        self.refresh_runs_button.setEnabled(True)
+        self.restore_run_button.setEnabled(bool(self.run_selector.currentData()))
         self._update_overview_cards()
 
     def _update_overview_cards(self) -> None:
@@ -475,6 +496,80 @@ class MainWindow(QMainWindow):
     def _clear_worker_refs(self) -> None:
         self.worker = None
         self.worker_thread = None
+
+    def _run_selector_label(self, run: dict) -> str:
+        updated_at = str(run.get("updated_at") or "-")
+        stage = str(run.get("stage") or run.get("status") or "-")
+        run_id = str(run.get("run_id") or "-")
+        instruction = " ".join(str(run.get("instruction") or "").split())
+        if len(instruction) > 42:
+            instruction = instruction[:42].rstrip() + "..."
+        return f"{updated_at} | {stage} | {run_id} | {instruction}"
+
+    def _refresh_run_selector(self) -> None:
+        current_run_id = self.run_selector.currentData()
+        self.run_selector.blockSignals(True)
+        self.run_selector.clear()
+        runs = self.workflow_event_store.list_runs(limit=20)
+        if not runs:
+            self.run_selector.addItem("暂无可恢复运行", "")
+        else:
+            for run in runs:
+                self.run_selector.addItem(self._run_selector_label(run), run.get("run_id") or "")
+            if current_run_id:
+                index = self.run_selector.findData(current_run_id)
+                if index >= 0:
+                    self.run_selector.setCurrentIndex(index)
+        self.run_selector.blockSignals(False)
+        self._update_button_states()
+
+    def _session_from_workflow_state(self, state: dict) -> PipelineSession:
+        results_by_session_id: dict[str, dict] = {}
+        for result in state.get("results") or []:
+            if not isinstance(result, dict):
+                continue
+            key = result.get("session_candidate_id") or result.get("candidate_id")
+            if key:
+                results_by_session_id[str(key)] = result
+        return PipelineSession(
+            task=state.get("task"),
+            workflow_run_id=state.get("run_id"),
+            instruction=str(state.get("instruction") or ""),
+            candidates=list(state.get("candidates") or []),
+            screened_candidates=list(state.get("screened_candidates") or []),
+            evaluated_candidates=list(state.get("evaluated_candidates") or []),
+            results_by_session_id=results_by_session_id,
+            report=state.get("report") if isinstance(state.get("report"), dict) else None,
+            pending_confirmation=state.get("pending_confirmation"),
+            stage=str(state.get("stage") or "idle"),
+            screen_skipped=bool(state.get("screen_skipped")),
+        )
+
+    def _restore_selected_run(self) -> None:
+        run_id = str(self.run_selector.currentData() or "").strip()
+        if not run_id:
+            self.status_label.setText("状态：没有可载入的运行快照")
+            return
+        try:
+            snapshot = self.workflow_event_store.load_snapshot(run_id)
+        except Exception as exc:
+            self.status_label.setText(f"状态：运行快照载入失败：{exc}")
+            self.log_widget.append_log("SYSTEM", f"运行快照载入失败：{run_id} | {exc}")
+            return
+
+        self.chat_widget.clear()
+        self.log_widget.clear()
+        self.session = self._session_from_workflow_state(snapshot)
+        self.input_line.setText(self.session.instruction)
+        self._apply_session(self.session)
+        self.tabs.setCurrentWidget(self.workflow_widget)
+        self.chat_widget.add_message(
+            "SYSTEM",
+            f"已载入运行快照：{run_id}，当前阶段：{self.session.stage}",
+        )
+        self.log_widget.append_log("SYSTEM", f"已载入运行快照：{run_id}")
+        self.status_label.setText(f"状态：已载入运行快照 {run_id}")
+        self._update_button_states()
 
     def _apply_session(self, session: PipelineSession) -> None:
         self.session = session
@@ -639,7 +734,7 @@ class MainWindow(QMainWindow):
         self.abaqus_widget.reset_view()
         self.report_widget.reset_view()
         self.workflow_widget.reset_view()
-        self.knowledge_widget.refresh()
+        self.knowledge_widget.refresh(load_evidence=False)
         self.status_label.setText("状态：会话已重置")
         self.input_line.clear()
         self._update_overview_cards()
@@ -716,6 +811,7 @@ class MainWindow(QMainWindow):
         if action in {"conversation_start", "conversation_continue"}:
             session = PipelineSession.from_flow_state(payload["state"])
             self._apply_session(session)
+            self._refresh_run_selector()
 
         elif action == "generate":
             self.session.task = payload["task"]
