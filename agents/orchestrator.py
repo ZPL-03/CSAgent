@@ -106,6 +106,7 @@ class OrchestratorAgent(BaseAgent):
             {**self._task_event_context(task), "target_total_candidates": target_total},
         )
         candidates = [self._attach_task_context(task, candidate) for candidate in self.candidate_gen.run(task)]
+        generation_audit = dict(getattr(self.candidate_gen, "last_generation_audit", {}) or {})
         source_counter: Dict[str, int] = {}
         for candidate in candidates:
             source = str(candidate.get("source", "UNKNOWN"))
@@ -119,6 +120,7 @@ class OrchestratorAgent(BaseAgent):
                 "candidate_count": len(candidates),
                 "target_total_candidates": target_total,
                 "source_counter": source_counter,
+                "generation_audit": generation_audit,
             },
         )
         return candidates

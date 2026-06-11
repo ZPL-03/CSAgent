@@ -278,6 +278,11 @@ def test_candidate_generation_uses_three_initial_sources(monkeypatch):
     assert all(candidate["display_name"] == candidate["candidate_id"] for candidate in candidates)
     assert requested == {"LLM": 3, "CASE_TRANSFER": 2}
     assert Counter(candidate["source"] for candidate in candidates) == Counter({"LLM": 3, "CASE_TRANSFER": 2, "DOE": 1})
+    audit = candidates[0]["generation_audit"]
+    assert audit["source_targets"] == {"total": 6, "LLM": 3, "CASE_TRANSFER": 2, "DOE": 1}
+    assert audit["added_counts"] == {"LLM": 3, "CASE_TRANSFER": 2, "DOE": 1}
+    assert audit["duplicate_counts"]["total"] == 0
+    assert "有效进入候选池 LLM=3" in audit["summary"]
 
 
 def test_candidate_generation_changes_actual_source_counts_when_transfer_cases_are_fewer(monkeypatch):
@@ -314,6 +319,8 @@ def test_candidate_generation_changes_actual_source_counts_when_transfer_cases_a
 
     assert len(candidates) == 10
     assert Counter(candidate["source"] for candidate in candidates) == Counter({"LLM": 5, "CASE_TRANSFER": 1, "DOE": 4})
+    assert candidates[0]["generation_audit"]["raw_counts"]["CASE_TRANSFER"] == 1
+    assert candidates[0]["generation_audit"]["added_counts"]["DOE"] == 4
     assert "初始配额 LLM=5 / 案例迁移=3 / DOE=2" in messages[-1]
     assert "有效进入候选池 LLM=5，案例迁移=1，DOE补足=4" in messages[-1]
 
@@ -354,6 +361,8 @@ def test_candidate_generation_deduplicates_equivalent_designs(monkeypatch):
     assert len(signatures) == len(set(signatures))
     assert [candidate["candidate_id"] for candidate in candidates] == [f"TMP_{index}" for index in range(1, 5)]
     assert any("候选去重过滤" in message for message in messages)
+    assert candidates[0]["generation_audit"]["duplicate_counts"]["LLM"] == 1
+    assert candidates[0]["generation_audit"]["duplicate_counts"]["total"] == 1
 
 
 def test_llm_candidates_are_extracted_from_engineering_natural_answer(monkeypatch):

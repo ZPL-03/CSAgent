@@ -49,6 +49,12 @@ def _layup_sequence(layup: dict) -> list[object]:
     return []
 
 
+def _count_map_text(payload: dict | None) -> str:
+    if not isinstance(payload, dict) or not payload:
+        return "-"
+    return " / ".join(f"{escape(str(key))}={escape(str(value))}" for key, value in payload.items())
+
+
 class CandidateWidget(QWidget):
     """展示候选方案表格、设计细节与交互式几何视图。"""
 
@@ -91,6 +97,61 @@ class CandidateWidget(QWidget):
     def _result_for_candidate(self, candidate: dict) -> dict | None:
         return self.results_by_session_id.get(candidate.get("candidate_id", ""))
 
+    def _generation_audit_for_pool(self) -> dict:
+        for candidate in self.candidates:
+            audit = candidate.get("generation_audit")
+            if isinstance(audit, dict) and audit:
+                return audit
+        return {}
+
+    def _generation_audit_summary(self, audit: dict) -> str:
+        if not audit:
+            return "-"
+        summary = str(audit.get("summary") or "").strip()
+        if summary:
+            return summary
+        added = audit.get("added_counts") if isinstance(audit.get("added_counts"), dict) else {}
+        duplicates = audit.get("duplicate_counts") if isinstance(audit.get("duplicate_counts"), dict) else {}
+        return f"有效进入候选池：{_count_map_text(added)}；结构去重：{duplicates.get('total', 0) if isinstance(duplicates, dict) else 0}"
+
+    def _generation_audit_html(self, audit: dict) -> str:
+        if not audit:
+            return "<h4>候选来源与去重审计</h4><p>当前候选未附带结构化生成审计。</p>"
+        filter_reasons = audit.get("filter_reasons") if isinstance(audit.get("filter_reasons"), dict) else {}
+        reason_items = []
+        for source, reasons in filter_reasons.items():
+            if not reasons:
+                continue
+            reason_items.append(f"<li>{escape(str(source))}: {escape('；'.join(str(item) for item in reasons))}</li>")
+        reasons_html = "<ul>" + "".join(reason_items) + "</ul>" if reason_items else "<p>未记录规则过滤原因。</p>"
+        return (
+            "<h4>候选来源与去重审计</h4>"
+            f"<p><b>摘要：</b>{escape(str(audit.get('summary') or '-'))}</p>"
+            "<table border='1' cellspacing='0' cellpadding='5'>"
+            "<tr><th>项目</th><th>LLM</th><th>案例迁移</th><th>DOE</th><th>合计</th></tr>"
+            f"<tr><td>初始配额</td><td>{escape(str((audit.get('source_targets') or {}).get('LLM', '-')))}</td>"
+            f"<td>{escape(str((audit.get('source_targets') or {}).get('CASE_TRANSFER', '-')))}</td>"
+            f"<td>{escape(str((audit.get('source_targets') or {}).get('DOE', '-')))}</td>"
+            f"<td>{escape(str((audit.get('source_targets') or {}).get('total', '-')))}</td></tr>"
+            f"<tr><td>原始输出</td><td>{escape(str((audit.get('raw_counts') or {}).get('LLM', '-')))}</td>"
+            f"<td>{escape(str((audit.get('raw_counts') or {}).get('CASE_TRANSFER', '-')))}</td>"
+            f"<td>{escape(str((audit.get('raw_counts') or {}).get('DOE', '-')))}</td><td>-</td></tr>"
+            f"<tr><td>规则有效</td><td>{escape(str((audit.get('valid_counts') or {}).get('LLM', '-')))}</td>"
+            f"<td>{escape(str((audit.get('valid_counts') or {}).get('CASE_TRANSFER', '-')))}</td>"
+            f"<td>{escape(str((audit.get('valid_counts') or {}).get('DOE', '-')))}</td><td>-</td></tr>"
+            f"<tr><td>进入候选池</td><td>{escape(str((audit.get('added_counts') or {}).get('LLM', '-')))}</td>"
+            f"<td>{escape(str((audit.get('added_counts') or {}).get('CASE_TRANSFER', '-')))}</td>"
+            f"<td>{escape(str((audit.get('added_counts') or {}).get('DOE', '-')))}</td><td>-</td></tr>"
+            f"<tr><td>结构去重</td><td>{escape(str((audit.get('duplicate_counts') or {}).get('LLM', '-')))}</td>"
+            f"<td>{escape(str((audit.get('duplicate_counts') or {}).get('CASE_TRANSFER', '-')))}</td>"
+            f"<td>{escape(str((audit.get('duplicate_counts') or {}).get('DOE', '-')))}</td>"
+            f"<td>{escape(str((audit.get('duplicate_counts') or {}).get('total', '-')))}</td></tr>"
+            "</table>"
+            f"<p><b>DOE 补足：</b>{escape(str(audit.get('doe_fill_count', '-')))} 个，采样轮次 {escape(str(audit.get('doe_rounds', '-')))}。</p>"
+            "<h4>规则过滤原因</h4>"
+            f"{reasons_html}"
+        )
+
     def update_candidates(self, candidates: Iterable[dict], results_by_session_id: dict[str, dict] | None = None) -> None:
         self.candidates = list(candidates)
         if results_by_session_id is not None:
@@ -122,8 +183,10 @@ class CandidateWidget(QWidget):
                 self.table.setItem(row, col, item)
 
         summary = " / ".join(f"{key}: {value}" for key, value in sorted(source_counter.items()))
+        audit_summary = self._generation_audit_summary(self._generation_audit_for_pool())
         self.summary_label.setText(
             f"当前候选方案数：{len(self.candidates)} | 来源构成：{summary or '-'} | "
+            f"来源审计：{audit_summary} | "
             "说明：候选阶段只使用临时编号，只有做过 ABAQUS 校核后才会分配正式 C 编号。"
         )
 
@@ -159,6 +222,7 @@ class CandidateWidget(QWidget):
         rule_check = candidate.get("rule_check", {})
         screening_summary = candidate.get("screening_summary") or "尚未完成代理模型初筛。"
         selection_reason = candidate.get("selection_reason") or "当前样本尚未进入优先校核队列。"
+        generation_audit_html = self._generation_audit_html(candidate.get("generation_audit") or {})
 
         ply_items = "".join(
             f"<li>第 {index + 1} 层：{angle}&deg;</li>"
@@ -204,6 +268,7 @@ class CandidateWidget(QWidget):
             f"<b>正式编号：</b>{archive_id}</p>"
             f"<p><b>生成说明：</b>{candidate.get('rationale', '-')}</p>"
             f"<p><b>来源补充：</b>{candidate.get('origin_summary') or '当前候选未附带额外来源说明。'}</p>"
+            f"{generation_audit_html}"
             f"<p><b>代理预测：</b> 极限压力={_format_number(candidate.get('surrogate_ultimate_pressure_MPa'))} MPa，"
             f"ASME RD-1172线性屈曲压力={_format_number(candidate.get('asme_linear_buckling_pressure_MPa'))} MPa，"
             f"PBIPF公式={_format_number(candidate.get('surrogate_PBIPF_MPa'))} MPa，"

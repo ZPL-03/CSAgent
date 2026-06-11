@@ -42,6 +42,7 @@ class CandidateGenAgent(BaseAgent):
         self.knowledge_base = DomainKnowledgeBase()
         self.material_catalog = self._build_material_catalog()
         self.llm_backend: LLMBackend | None = None
+        self.last_generation_audit: Dict[str, Any] = {}
         if auto_llm_enabled():
             try:
                 self.llm_backend = LLMBackend(self.llm_config)
@@ -765,6 +766,82 @@ class CandidateGenAgent(BaseAgent):
             added += 1
         return added, duplicate
 
+    def _invalid_candidate_reasons(self, candidates: List[Dict[str, Any]], limit: int = 5) -> List[str]:
+        reasons: List[str] = []
+        for candidate in candidates[:limit]:
+            errors = candidate.get("rule_check", {}).get("errors", [])
+            joined = "、".join(str(item) for item in errors[:3]) if errors else "规则检查未通过"
+            reasons.append(f"{candidate.get('candidate_id', '-')}: {joined}")
+        return reasons
+
+    def _build_generation_audit(
+        self,
+        source_targets: Dict[str, int],
+        llm_candidates: List[Dict[str, Any]],
+        valid_llm_candidates: List[Dict[str, Any]],
+        invalid_llm_candidates: List[Dict[str, Any]],
+        llm_added: int,
+        llm_duplicates: int,
+        transfer_candidates: List[Dict[str, Any]],
+        valid_transfer_candidates: List[Dict[str, Any]],
+        invalid_transfer_candidates: List[Dict[str, Any]],
+        transfer_added: int,
+        transfer_duplicates: int,
+        doe_candidates: List[Dict[str, Any]],
+        doe_added: int,
+        doe_duplicates: int,
+        doe_round: int,
+    ) -> Dict[str, Any]:
+        duplicate_total = llm_duplicates + transfer_duplicates + doe_duplicates
+        audit = {
+            "source_targets": {
+                "total": source_targets["total"],
+                "LLM": source_targets["llm"],
+                "CASE_TRANSFER": source_targets["case_transfer"],
+                "DOE": source_targets["doe"],
+            },
+            "raw_counts": {
+                "LLM": len(llm_candidates),
+                "CASE_TRANSFER": len(transfer_candidates),
+                "DOE": len(doe_candidates),
+            },
+            "valid_counts": {
+                "LLM": len(valid_llm_candidates),
+                "CASE_TRANSFER": len(valid_transfer_candidates),
+                "DOE": len(doe_candidates),
+            },
+            "invalid_counts": {
+                "LLM": len(invalid_llm_candidates),
+                "CASE_TRANSFER": len(invalid_transfer_candidates),
+                "DOE": 0,
+            },
+            "added_counts": {
+                "LLM": llm_added,
+                "CASE_TRANSFER": transfer_added,
+                "DOE": doe_added,
+            },
+            "duplicate_counts": {
+                "LLM": llm_duplicates,
+                "CASE_TRANSFER": transfer_duplicates,
+                "DOE": doe_duplicates,
+                "total": duplicate_total,
+            },
+            "filter_reasons": {
+                "LLM": self._invalid_candidate_reasons(invalid_llm_candidates),
+                "CASE_TRANSFER": self._invalid_candidate_reasons(invalid_transfer_candidates),
+                "DOE": [],
+            },
+            "doe_rounds": doe_round,
+            "doe_fill_count": doe_added,
+        }
+        audit["summary"] = (
+            f"初始配额 LLM={source_targets['llm']} / 案例迁移={source_targets['case_transfer']} / DOE={source_targets['doe']}；"
+            f"有效进入候选池 LLM={llm_added}，案例迁移={transfer_added}，DOE补足={doe_added}；"
+            f"规则过滤 LLM={len(invalid_llm_candidates)}，案例迁移={len(invalid_transfer_candidates)}；"
+            f"结构去重={duplicate_total}"
+        )
+        return audit
+
     def _renumber_session_candidates(self, candidates: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         renumbered: List[Dict[str, Any]] = []
         for index, candidate in enumerate(candidates, start=1):
@@ -837,9 +914,30 @@ class CandidateGenAgent(BaseAgent):
         candidates = self._renumber_session_candidates(candidates[: source_targets["total"]])
         if len(candidates) != source_targets["total"]:
             raise RuntimeError(f"候选池数量不一致：目标 {source_targets['total']}，实际 {len(candidates)}。")
+        generation_audit = self._build_generation_audit(
+            source_targets,
+            llm_candidates,
+            valid_llm_candidates,
+            invalid_llm_candidates,
+            llm_added,
+            llm_duplicates,
+            transfer_candidates,
+            valid_transfer_candidates,
+            invalid_transfer_candidates,
+            transfer_added,
+            transfer_duplicates,
+            doe_candidates,
+            doe_added,
+            doe_duplicates,
+            doe_round,
+        )
+        self.last_generation_audit = generation_audit
+        for candidate in candidates:
+            candidate["generation_audit"] = generation_audit
         duplicate_total = llm_duplicates + transfer_duplicates + doe_duplicates
         if duplicate_total:
             self.emit(f"候选去重过滤 {duplicate_total} 个结构等价方案")
+        self.emit_event("candidate_generation_audit", "候选来源、过滤、去重与 DOE 补足审计已生成", generation_audit)
         self.emit(
             "候选生成完成："
             f"目标总数 {source_targets['total']}，"
