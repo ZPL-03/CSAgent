@@ -37,6 +37,7 @@ class ConversationState:
     screened_candidates: List[Dict] = field(default_factory=list)
     evaluated_candidates: List[Dict] = field(default_factory=list)
     results: List[Dict] = field(default_factory=list)
+    knowledge_updates: List[Dict] = field(default_factory=list)
     report: Dict | None = None
     pending_confirmation: str | None = None
     stage: str = "idle"
@@ -241,6 +242,7 @@ class ConversationFlowController:
         state.screened_candidates = workflow_state.get("screened_candidates", state.screened_candidates)
         state.evaluated_candidates = workflow_state.get("evaluated_candidates", state.evaluated_candidates)
         state.results = workflow_state.get("results", state.results)
+        state.knowledge_updates = workflow_state.get("knowledge_updates", state.knowledge_updates)
         state.report = workflow_state.get("report", state.report)
         state.pending_confirmation = workflow_state.get("pending_confirmation")
         state.stage = workflow_state.get("stage", state.stage)

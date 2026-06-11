@@ -45,6 +45,7 @@ from gui.chat_widget import ChatWidget
 from gui.knowledge_widget import KnowledgeWidget
 from gui.log_widget import LogWidget
 from gui.report_widget import ReportWidget
+from gui.result_trace_widget import ResultTraceWidget
 from gui.task_config_widget import TaskConfigWidget
 from gui.workflow_widget import WorkflowWidget
 from workflow.event_store import WorkflowEventStore
@@ -59,6 +60,7 @@ class PipelineSession:
     screened_candidates: list[dict] = field(default_factory=list)
     evaluated_candidates: list[dict] = field(default_factory=list)
     results_by_session_id: dict[str, dict] = field(default_factory=dict)
+    knowledge_updates: list[dict] = field(default_factory=list)
     report: dict | None = None
     pending_confirmation: str | None = None
     stage: str = "idle"
@@ -81,6 +83,7 @@ class PipelineSession:
             screened_candidates=list(self.screened_candidates),
             evaluated_candidates=list(self.evaluated_candidates),
             results=list(self.results_by_session_id.values()),
+            knowledge_updates=list(self.knowledge_updates),
             report=self.report,
             pending_confirmation=self.pending_confirmation,
             stage=self.stage,
@@ -102,6 +105,7 @@ class PipelineSession:
             screened_candidates=list(state.screened_candidates),
             evaluated_candidates=list(state.evaluated_candidates),
             results_by_session_id=results_by_session_id,
+            knowledge_updates=list(state.knowledge_updates),
             report=state.report,
             pending_confirmation=state.pending_confirmation,
             stage=state.stage,
@@ -152,8 +156,22 @@ class PipelineWorker(QObject):
             if self.action == "evaluate":
                 task = self.payload["task"]
                 candidates = self.payload["candidates"]
-                results = [orchestrator.evaluate_candidate(task, candidate) for candidate in candidates]
-                self.finished.emit(self.action, {"results": results, "candidates": candidates})
+                fem_designs = []
+                results = []
+                for candidate in candidates:
+                    fem_candidate = orchestrator.prepare_candidate_for_fem(task, candidate)
+                    fem_designs.append(fem_candidate)
+                    results.append(orchestrator.evaluate_prepared_candidate(task, fem_candidate))
+                knowledge_updates = orchestrator.persist_knowledge_records(task, fem_designs, results)
+                self.finished.emit(
+                    self.action,
+                    {
+                        "results": results,
+                        "candidates": candidates,
+                        "fem_designs": fem_designs,
+                        "knowledge_updates": knowledge_updates,
+                    },
+                )
                 return
 
             if self.action == "report":
@@ -238,6 +256,7 @@ class MainWindow(QMainWindow):
         self.abaqus_widget = AbaqusWidget()
         self.knowledge_widget = KnowledgeWidget()
         self.report_widget = ReportWidget()
+        self.result_trace_widget = ResultTraceWidget()
         self.log_widget = LogWidget()
         self.task_config_widget = TaskConfigWidget()
         self.workflow_widget = WorkflowWidget(event_store=self.workflow_event_store)
@@ -247,6 +266,7 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.workflow_widget, "智能体流程")
         self.tabs.addTab(self.candidate_widget, "候选方案")
         self.tabs.addTab(self.abaqus_widget, "ABAQUS结果")
+        self.tabs.addTab(self.result_trace_widget, "结果追踪")
         self.tabs.addTab(self.report_widget, "报告预览")
         self.tabs.addTab(self.knowledge_widget, "知识库")
         self.tabs.addTab(self.log_widget, "日志")
@@ -542,6 +562,7 @@ class MainWindow(QMainWindow):
             screened_candidates=list(state.get("screened_candidates") or []),
             evaluated_candidates=list(state.get("evaluated_candidates") or []),
             results_by_session_id=results_by_session_id,
+            knowledge_updates=list(state.get("knowledge_updates") or []),
             report=state.get("report") if isinstance(state.get("report"), dict) else None,
             pending_confirmation=state.get("pending_confirmation"),
             stage=str(state.get("stage") or "idle"),
@@ -580,6 +601,12 @@ class MainWindow(QMainWindow):
         self.task_config_widget.update_task(self.session.task)
         self.candidate_widget.update_candidates(self.session.current_candidates, self.session.results_by_session_id)
         self.abaqus_widget.update_results(list(self.session.results_by_session_id.values()))
+        self.result_trace_widget.update_trace(
+            self.session.current_candidates,
+            self.session.results_by_session_id,
+            self.session.knowledge_updates,
+            self.session.report,
+        )
         self.report_widget.update_report(self.session.report)
         self.workflow_widget.refresh(
             self.session.workflow_run_id,
@@ -594,6 +621,12 @@ class MainWindow(QMainWindow):
         self.task_config_widget.update_task(self.session.task)
         self.candidate_widget.update_candidates(self.session.current_candidates, self.session.results_by_session_id)
         self.abaqus_widget.update_results(list(self.session.results_by_session_id.values()))
+        self.result_trace_widget.update_trace(
+            self.session.current_candidates,
+            self.session.results_by_session_id,
+            self.session.knowledge_updates,
+            self.session.report,
+        )
         self.report_widget.update_report(self.session.report)
         self.workflow_widget.refresh(
             self.session.workflow_run_id,
@@ -735,8 +768,10 @@ class MainWindow(QMainWindow):
         self.workflow_browser.setHtml(self._workflow_html())
         self.candidate_widget.update_candidates([])
         self.abaqus_widget.update_results([])
+        self.result_trace_widget.update_trace([])
         self.candidate_widget.reset_view()
         self.abaqus_widget.reset_view()
+        self.result_trace_widget.reset_view()
         self.report_widget.reset_view()
         self.task_config_widget.reset_view()
         self.workflow_widget.reset_view()
@@ -774,6 +809,7 @@ class MainWindow(QMainWindow):
                 self.session.screened_candidates = []
                 self.session.evaluated_candidates = []
                 self.session.results_by_session_id = {}
+                self.session.knowledge_updates = []
                 self.session.report = None
                 self.session.stage = "awaiting_screen_confirmation"
                 self.session.pending_confirmation = "screen_candidates"
@@ -799,6 +835,9 @@ class MainWindow(QMainWindow):
                     session_candidate_id = result.get("session_candidate_id", result.get("candidate_id"))
                     if session_candidate_id:
                         self.session.results_by_session_id[str(session_candidate_id)] = result
+                updates = payload.get("knowledge_updates")
+                if isinstance(updates, list):
+                    self.session.knowledge_updates = updates
                 self.session.stage = "awaiting_report_confirmation"
                 self.session.pending_confirmation = "export_report"
                 self._refresh_design_views()
@@ -810,7 +849,7 @@ class MainWindow(QMainWindow):
                 self.session.report = report
             self.session.stage = "completed"
             self.session.pending_confirmation = None
-            self.report_widget.update_report(self.session.report)
+            self._refresh_design_views()
             self.tabs.setCurrentWidget(self.report_widget)
 
     def _handle_finished(self, action: str, payload: dict) -> None:
@@ -825,6 +864,7 @@ class MainWindow(QMainWindow):
             self.session.screened_candidates = []
             self.session.evaluated_candidates = []
             self.session.results_by_session_id = {}
+            self.session.knowledge_updates = []
             self.session.report = None
             self._apply_session(self.session)
             target_total = requested_candidate_pool_size(self.session.task)
@@ -848,6 +888,7 @@ class MainWindow(QMainWindow):
                 session_candidate_id = result.get("session_candidate_id", result["candidate_id"])
                 self.session.results_by_session_id[session_candidate_id] = result
                 self.abaqus_widget.append_or_update_result(result)
+            self.session.knowledge_updates = list(payload.get("knowledge_updates") or self.session.knowledge_updates)
             self._apply_session(self.session)
             passed_count = sum(1 for item in payload["results"] if item.get("verdict") == "通过")
             self.chat_widget.add_message(
@@ -857,7 +898,7 @@ class MainWindow(QMainWindow):
 
         elif action == "report":
             self.session.report = payload["report"]
-            self.report_widget.update_report(self.session.report)
+            self._apply_session(self.session)
             self.tabs.setCurrentWidget(self.report_widget)
             self.chat_widget.add_message(
                 "SYSTEM",
