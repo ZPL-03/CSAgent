@@ -1,13 +1,21 @@
-"""Interactive PyVista view widget."""
+"""交互式 PyVista 可视化组件。"""
 
 from __future__ import annotations
 
+import os
 from typing import Dict
 
 from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QLabel, QStackedLayout, QVBoxLayout, QWidget
 
-from gui.render_utils import build_candidate_scene, build_mode_shape_scene
+from gui.i18n import DEFAULT_LANGUAGE, text as tr
+from gui.render_utils import (
+    build_candidate_scene,
+    build_mode_shape_scene,
+    render_candidate_png_bytes,
+    render_mode_shape_png_bytes,
+)
 
 try:
     from pyvistaqt import QtInteractor
@@ -16,19 +24,29 @@ except Exception:  # pragma: no cover
 
 
 class InteractivePlotWidget(QWidget):
-    def __init__(self, empty_message: str) -> None:
+    def __init__(self, empty_message: str, language: str = DEFAULT_LANGUAGE) -> None:
         super().__init__()
         self.empty_message = empty_message
-        self._interactive = QtInteractor is not None
+        self.language = language
+        platform = os.getenv("QT_QPA_PLATFORM", "").lower()
+        disable_interactive = os.getenv("CSDM_cph_DISABLE_INTERACTIVE_3D", "").strip() == "1"
+        self._interactive = QtInteractor is not None and platform != "offscreen" and not disable_interactive
         self.plotter = None
         self._initial_camera_position = None
+        self._static_pixmap: QPixmap | None = None
 
         self.message_label = QLabel(empty_message)
         self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.message_label.setWordWrap(True)
         self.message_label.setMinimumHeight(320)
 
-        self.hint_label = QLabel("\u9f20\u6807\u5de6\u952e\u65cb\u8f6c\uff0c\u6eda\u8f6e\u7f29\u653e\uff0cShift+\u62d6\u62fd\u5e73\u79fb\uff0c\u53cc\u51fb\u53ef\u91cd\u7f6e\u89c6\u89d2\u3002")
+        self.static_label = QLabel()
+        self.static_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.static_label.setMinimumHeight(360)
+        self.static_label.setWordWrap(True)
+
+        self.hint_label = QLabel(tr("plot.hint", language=self.language))
+        self.hint_label.setObjectName("plotHint")
         self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.hint_label.setWordWrap(True)
 
@@ -39,6 +57,7 @@ class InteractivePlotWidget(QWidget):
 
         self.stack = QStackedLayout()
         self.stack.addWidget(self.message_label)
+        self.stack.addWidget(self.static_label)
         self.stack.addWidget(self.plot_container)
 
         root_layout = QVBoxLayout(self)
@@ -47,17 +66,25 @@ class InteractivePlotWidget(QWidget):
 
         self.clear_scene(empty_message)
 
+    def set_language(self, language: str, empty_message: str | None = None) -> None:
+        self.language = language
+        if empty_message is not None:
+            self.empty_message = empty_message
+        self.hint_label.setText(tr("plot.hint", language=self.language))
+        if self.stack.currentWidget() is self.message_label:
+            self.message_label.setText(self.empty_message)
+
     def _ensure_plotter(self) -> bool:
         if self.plotter is not None:
             return True
         if not self._interactive:
-            self.clear_scene("\u5f53\u524d\u73af\u5883\u672a\u5b89\u88c5 pyvistaqt\uff0c\u65e0\u6cd5\u63d0\u4f9b\u4ea4\u4e92\u5f0f\u4e09\u7ef4\u89c6\u56fe\u3002")
+            self.clear_scene(tr("plot.no_pyvista", language=self.language))
             return False
         try:
             self.plotter = QtInteractor(self.plot_container)
         except Exception:
             self.plotter = None
-            self.clear_scene("\u5f53\u524d\u73af\u5883\u65e0\u6cd5\u521d\u59cb\u5316\u4ea4\u4e92\u5f0f OpenGL \u89c6\u56fe\uff0c\u53ef\u5728\u672c\u5730\u56fe\u5f62\u754c\u9762\u4e2d\u91cd\u8bd5\u3002")
+            self.clear_scene(tr("plot.opengl_failed", language=self.language))
             return False
 
         self.plot_layout.addWidget(self.plotter.interactor)
@@ -108,6 +135,35 @@ class InteractivePlotWidget(QWidget):
                 self._dispose_plotter()
         self._initial_camera_position = None
         self.stack.setCurrentWidget(self.message_label)
+        self._static_pixmap = None
+        self.static_label.clear()
+
+    def _show_static_png(self, png_bytes: bytes | None, fallback_message: str) -> bool:
+        if not png_bytes:
+            self.clear_scene(fallback_message)
+            return False
+        pixmap = QPixmap()
+        if not pixmap.loadFromData(png_bytes, "PNG"):
+            self.clear_scene(fallback_message)
+            return False
+        self._static_pixmap = pixmap
+        self._update_static_pixmap()
+        self.stack.setCurrentWidget(self.static_label)
+        return True
+
+    def _update_static_pixmap(self) -> None:
+        if self._static_pixmap is None:
+            return
+        target_size = self.static_label.size()
+        if target_size.width() <= 0 or target_size.height() <= 0:
+            return
+        self.static_label.setPixmap(
+            self._static_pixmap.scaled(
+                target_size,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
 
     def _store_initial_camera(self) -> None:
         if self.plotter is not None:
@@ -150,13 +206,24 @@ class InteractivePlotWidget(QWidget):
         self.reset_plotter()
         super().closeEvent(event)
 
+    def resizeEvent(self, event) -> None:
+        self._update_static_pixmap()
+        super().resizeEvent(event)
+
     def show_candidate(self, candidate: Dict) -> None:
         scene = build_candidate_scene(candidate)
         if scene is None:
-            self.clear_scene("\u5f53\u524d\u5019\u9009\u65b9\u6848\u7f3a\u5c11\u51e0\u4f55\u53c2\u6570\uff0c\u65e0\u6cd5\u663e\u793a\u4e09\u7ef4\u6a21\u578b\u3002")
+            self._show_static_png(
+                render_candidate_png_bytes(candidate, language=self.language),
+                tr("plot.no_candidate_geometry", language=self.language),
+            )
             return
         meshes, title = scene
         if not self._activate_plotter(title):
+            self._show_static_png(
+                render_candidate_png_bytes(candidate, language=self.language),
+                tr("plot.static_candidate_failed", language=self.language),
+            )
             return
         assert self.plotter is not None
         for mesh, kwargs in meshes:
@@ -166,10 +233,17 @@ class InteractivePlotWidget(QWidget):
     def show_mode_shape(self, result: Dict) -> None:
         scene = build_mode_shape_scene(result)
         if scene is None:
-            self.clear_scene("\u5f53\u524d\u7ed3\u679c\u8fd8\u6ca1\u6709\u53ef\u663e\u793a\u7684\u6a21\u6001\u4e91\u56fe\u6570\u636e\u3002")
+            self._show_static_png(
+                render_mode_shape_png_bytes(result, language=self.language),
+                tr("plot.no_mode", language=self.language),
+            )
             return
         mesh, scalar_name, title = scene
         if not self._activate_plotter(title):
+            self._show_static_png(
+                render_mode_shape_png_bytes(result, language=self.language),
+                tr("plot.static_mode_failed", language=self.language),
+            )
             return
         assert self.plotter is not None
         self.plotter.add_mesh(

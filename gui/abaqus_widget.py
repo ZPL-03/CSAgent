@@ -14,7 +14,9 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from gui.i18n import DEFAULT_LANGUAGE, text as tr
 from gui.interactive_view import InteractivePlotWidget
+from gui.render_utils import mode_shape_payload_status
 
 
 def _fmt(value: object, digits: int = 3) -> str:
@@ -29,21 +31,25 @@ def _fmt(value: object, digits: int = 3) -> str:
 class AbaqusWidget(QWidget):
     """展示有限元校核结果与交互式模态视图。"""
 
-    HEADERS = ["候选样本", "正式编号", "状态", "极限压力", "屈曲压力", "面密度", "结论", "失效模式"]
+    COLUMN_COUNT = 8
 
-    def __init__(self) -> None:
+    def __init__(self, language: str = DEFAULT_LANGUAGE) -> None:
         super().__init__()
+        self.language = language
         self.results: list[dict] = []
 
-        self.table = QTableWidget(0, len(self.HEADERS))
-        self.table.setHorizontalHeaderLabels(self.HEADERS)
+        self.table = QTableWidget(0, self.COLUMN_COUNT)
+        self.table.setHorizontalHeaderLabels(self._headers())
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.SingleSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self._refresh_detail)
 
         self.detail_browser = QTextBrowser()
-        self.preview_widget = InteractivePlotWidget("完成 ABAQUS 校核后，这里会显示可旋转的模态云图。")
+        self.preview_widget = InteractivePlotWidget(
+            tr("abaqus.preview_empty", language=self.language),
+            language=self.language,
+        )
 
         right_layout = QVBoxLayout()
         right_layout.addWidget(self.detail_browser, 2)
@@ -58,6 +64,20 @@ class AbaqusWidget(QWidget):
 
         layout = QHBoxLayout(self)
         layout.addWidget(splitter)
+
+    def _headers(self) -> list[str]:
+        return tr("abaqus.headers", language=self.language).split("|")
+
+    def set_language(self, language: str) -> None:
+        self.language = language
+        self.table.setHorizontalHeaderLabels(self._headers())
+        self.preview_widget.set_language(
+            language,
+            tr("abaqus.preview_empty", language=self.language),
+        )
+        if not self.results:
+            self.detail_browser.setHtml(f"<p>{tr('abaqus.no_results', language=self.language)}</p>")
+            self.preview_widget.clear_scene(tr("abaqus.no_preview", language=self.language))
 
     def update_results(self, results: Iterable[dict]) -> None:
         self.results = list(results)
@@ -78,8 +98,8 @@ class AbaqusWidget(QWidget):
         if self.results:
             self.table.selectRow(0)
         else:
-            self.detail_browser.setHtml("<p>暂无 ABAQUS 结果。</p>")
-            self.preview_widget.clear_scene("暂无结果预览。")
+            self.detail_browser.setHtml(f"<p>{tr('abaqus.no_results', language=self.language)}</p>")
+            self.preview_widget.clear_scene(tr("abaqus.no_preview", language=self.language))
 
     def reset_view(self) -> None:
         if hasattr(self, "detail_browser"):
@@ -100,11 +120,12 @@ class AbaqusWidget(QWidget):
     def _refresh_detail(self) -> None:
         rows = self.table.selectionModel().selectedRows()
         if not rows:
-            self.detail_browser.setHtml("<p>请选择结果查看详情。</p>")
-            self.preview_widget.clear_scene("请选择结果查看模态云图。")
+            self.detail_browser.setHtml(f"<p>{tr('abaqus.select_result', language=self.language)}</p>")
+            self.preview_widget.clear_scene(tr("abaqus.select_preview", language=self.language))
             return
 
         result = self.results[rows[0].row()]
+        mode_status = mode_shape_payload_status(result)
         html = (
             f"<h3>{result.get('display_name', result.get('session_candidate_id', '-'))}</h3>"
             f"<p><b>正式编号：</b>{result.get('candidate_id')}<br>"
@@ -125,6 +146,7 @@ class AbaqusWidget(QWidget):
             f"<p><b>后屈曲 ODB：</b>{result.get('postbuckling_odb', '-')}</p>"
             f"<p><b>INP：</b>{result.get('abaqus_inp', '-')}</p>"
             f"<p><b>模态数据：</b>{result.get('visualization_json', '-')}</p>"
+            f"<p><b>模态数据状态：</b>{mode_status.get('message', '-')}</p>"
             f"<p><b>工件目录：</b>{result.get('artifact_dir', '-')}</p>"
             f"<p><b>特征值：</b>{result.get('mode_eigenvalues', [])}</p>"
         )

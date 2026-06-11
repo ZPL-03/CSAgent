@@ -16,6 +16,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from gui.i18n import DEFAULT_LANGUAGE, text as tr
 from gui.interactive_view import InteractivePlotWidget
 from core.pressure_hull_profile import GEOMETRY_LABELS, TYPE_DISPLAY_NAMES
 from core.task_contract import describe_boundary_conditions, describe_load_conditions
@@ -58,25 +59,29 @@ def _count_map_text(payload: dict | None) -> str:
 class CandidateWidget(QWidget):
     """展示候选方案表格、设计细节与交互式几何视图。"""
 
-    HEADERS = ["样本", "来源", "预测极限压力", "预测面密度", "排序分数", "FEM极限压力", "状态", "结论"]
+    COLUMN_COUNT = 8
 
-    def __init__(self) -> None:
+    def __init__(self, language: str = DEFAULT_LANGUAGE) -> None:
         super().__init__()
+        self.language = language
         self.candidates: list[dict] = []
         self.results_by_session_id: dict[str, dict] = {}
 
-        self.table = QTableWidget(0, len(self.HEADERS))
-        self.table.setHorizontalHeaderLabels(self.HEADERS)
+        self.table = QTableWidget(0, self.COLUMN_COUNT)
+        self.table.setHorizontalHeaderLabels(self._headers())
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.table.itemSelectionChanged.connect(self._refresh_detail)
 
-        self.summary_label = QLabel("当前还没有候选方案。")
+        self.summary_label = QLabel(tr("candidate.empty", language=self.language))
         self.summary_label.setWordWrap(True)
 
         self.detail_browser = QTextBrowser()
-        self.preview_widget = InteractivePlotWidget("选中候选方案后，这里会显示可旋转的三维几何视图。")
+        self.preview_widget = InteractivePlotWidget(
+            tr("candidate.preview_empty", language=self.language),
+            language=self.language,
+        )
 
         right_layout = QVBoxLayout()
         right_layout.addWidget(self.summary_label)
@@ -93,6 +98,21 @@ class CandidateWidget(QWidget):
 
         layout = QHBoxLayout(self)
         layout.addWidget(splitter)
+
+    def _headers(self) -> list[str]:
+        return tr("candidate.headers", language=self.language).split("|")
+
+    def set_language(self, language: str) -> None:
+        self.language = language
+        self.table.setHorizontalHeaderLabels(self._headers())
+        self.preview_widget.set_language(
+            language,
+            tr("candidate.preview_empty", language=self.language),
+        )
+        if not self.candidates:
+            self.summary_label.setText(tr("candidate.empty", language=self.language))
+            self.detail_browser.setHtml(f"<p>{tr('candidate.empty', language=self.language)}</p>")
+            self.preview_widget.clear_scene(tr("candidate.no_geometry", language=self.language))
 
     def _result_for_candidate(self, candidate: dict) -> dict | None:
         return self.results_by_session_id.get(candidate.get("candidate_id", ""))
@@ -193,8 +213,8 @@ class CandidateWidget(QWidget):
         if self.candidates:
             self.table.selectRow(0)
         else:
-            self.detail_browser.setHtml("<p>暂无候选方案。</p>")
-            self.preview_widget.clear_scene("暂无几何预览。")
+            self.detail_browser.setHtml(f"<p>{tr('candidate.empty', language=self.language)}</p>")
+            self.preview_widget.clear_scene(tr("candidate.no_geometry", language=self.language))
 
     def reset_view(self) -> None:
         if hasattr(self, "detail_browser"):
@@ -208,8 +228,8 @@ class CandidateWidget(QWidget):
     def _refresh_detail(self) -> None:
         selected = self.selected_candidates()
         if not selected:
-            self.detail_browser.setHtml("<p>请选择候选方案查看详细信息。</p>")
-            self.preview_widget.clear_scene("请选择候选方案查看三维几何视图。")
+            self.detail_browser.setHtml(f"<p>{tr('candidate.no_detail', language=self.language)}</p>")
+            self.preview_widget.clear_scene(tr("candidate.no_preview", language=self.language))
             return
 
         candidate = selected[0]

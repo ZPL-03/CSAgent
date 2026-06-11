@@ -99,6 +99,7 @@ def main() -> int:
         "sklearn",
         "matplotlib",
         "pyvista",
+        "pyvistaqt",
         "reportlab",
     ]:
         ok, detail = check_module(module_name)

@@ -19,6 +19,12 @@ CSDM_cph 是复合材料外压圆柱耐压壳智能设计系统。主流程为�
 
 普通长度、半径、厚度、铺层角或缺陷比写入 `geometry_reference`，用于设计中心和几何包络；明确固定的几何条件写入 `fixed_geometry`。普通几何参考值不会强制所有候选等于该数值。
 
+## GUI 工作台
+
+PyQt6 桌面端默认为简体中文界面，顶部语言选择器支持切换为 English。界面语言设置写入 `data/runtime/ui_settings.json`，属于本地运行偏好，不进入 Git。桌面端启动时主动加载 Windows 中文字体，避免中文标签、状态栏和可视化图注显示为方块。
+
+主界面采用工程工作台布局：顶部为系统身份栏和语言切换，左侧为自然语言输入、对话状态、运行快照、人工确认和手动工具入口，右侧为任务配置、智能体流程、候选方案、ABAQUS 结果、结果追踪、报告预览、知识库和日志页。界面层只显示和触发流程，不改变任务解析、候选生成、代理初筛、有限元校核、知识回流和报告生成的业务契约。
+
 ## PBIPF 公式
 
 快速筛选阶段使用 PBIPF 公式预测极限压力：
@@ -98,6 +104,6 @@ D:\anaconda3\envs\GPT\python.exe scripts\build_initial_cases.py --reset --count 
 
 ## 有限元说明
 
-自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出。流程先执行单位外压线性屈曲分析并提取一阶模态云图，再以一阶模态缺陷进入 Static Riks 后屈曲分析，极限压力取最大 LPF 与基准外压的乘积。
+自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出。流程先执行单位外压线性屈曲分析并提取一阶模态云图，再以一阶模态缺陷进入 Static Riks 后屈曲分析，极限压力取最大 LPF 与基准外压的乘积。GUI 的“候选方案”和“ABAQUS结果”页优先使用 `pyvistaqt` 显示可旋转三维几何模型和模态云图；交互式 OpenGL 视图不可用、`QT_QPA_PLATFORM=offscreen` 或 `CSDM_cph_DISABLE_INTERACTIVE_3D=1` 时，自动使用 Matplotlib 静态 PNG 显示候选剖面或一阶模态云图。静态图注跟随界面语言，并在详情中展示模态数据路径、点面数量和可用性状态。
 
 `reference/wangge.py` 与 `reference/zhangusdfld.for` 只作为人工建模和用户子程序参考，不属于主流程必需资产。`reference/zhangusdfld.for` 通过 `config/app_config.yaml` 的 `abaqus.use_user_subroutine` 显式启用，默认关闭以避免本机用户子程序编译环境阻断主流程。未找到 ABAQUS 命令时返回带诊断信息的失败结果，不伪造有限元通过。

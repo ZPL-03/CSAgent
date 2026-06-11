@@ -155,7 +155,7 @@ def test_main_window_restores_workflow_snapshot(monkeypatch, tmp_path) -> None:
         assert window.session.pending_confirmation == "export_report"
         assert window.session.results_by_session_id["TMP_1"]["candidate_id"] == "C1"
         assert window.session.knowledge_updates[0]["case_id"] == "CASE_1"
-        assert any(window.tabs.tabText(index) == "结果追踪" for index in range(window.tabs.count()))
+        assert window.tabs.indexOf(window.result_trace_widget) >= 0
         assert "CASE_1" in window.result_trace_widget.table.item(0, 7).text()
         assert window.tabs.currentWidget() is window.workflow_widget
         assert "RUN_RESTORE" in window.status_label.text()

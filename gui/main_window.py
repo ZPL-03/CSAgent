@@ -11,11 +11,12 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from PyQt6 import sip
-from PyQt6.QtCore import QObject, QThread, QUrl, pyqtSignal
+from PyQt6.QtCore import QObject, Qt, QThread, QUrl, pyqtSignal
 from PyQt6.QtGui import QCloseEvent, QDesktopServices
 from PyQt6.QtWidgets import (
     QApplication,
     QComboBox,
+    QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -42,11 +43,13 @@ from core.task_contract import (
 from gui.abaqus_widget import AbaqusWidget
 from gui.candidate_widget import CandidateWidget
 from gui.chat_widget import ChatWidget
+from gui.i18n import LANGUAGE_OPTIONS, LocaleManager
 from gui.knowledge_widget import KnowledgeWidget
 from gui.log_widget import LogWidget
 from gui.report_widget import ReportWidget
 from gui.result_trace_widget import ResultTraceWidget
 from gui.task_config_widget import TaskConfigWidget
+from gui.theme import application_stylesheet, install_application_font
 from gui.workflow_widget import WorkflowWidget
 from workflow.event_store import WorkflowEventStore
 
@@ -208,68 +211,86 @@ class MainWindow(QMainWindow):
 
     def __init__(self) -> None:
         super().__init__()
-        self.setWindowTitle("CSDM_cph - 复合材料耐压壳智能设计系统")
+        self.locale = LocaleManager()
+        self.font_family = install_application_font(QApplication.instance())
+        self.setWindowTitle(self.locale.text("app.title"))
         self.resize(1680, 980)
         self.session = PipelineSession()
         self.worker_thread: QThread | None = None
         self.worker: PipelineWorker | None = None
         self.workflow_event_store = WorkflowEventStore()
 
+        self.app_title_label = QLabel(self.locale.text("app.title"))
+        self.app_title_label.setObjectName("appTitle")
+        self.app_subtitle_label = QLabel(self.locale.text("app.subtitle"))
+        self.app_subtitle_label.setObjectName("appSubtitle")
+        self.language_label = QLabel(self.locale.text("section.language"))
+        self.language_label.setObjectName("appSubtitle")
+        self.language_selector = QComboBox()
+        for language, label in LANGUAGE_OPTIONS.items():
+            self.language_selector.addItem(label, language)
+        current_language_index = self.language_selector.findData(self.locale.language)
+        if current_language_index >= 0:
+            self.language_selector.setCurrentIndex(current_language_index)
+
         self.chat_widget = ChatWidget()
         self.task_browser = QTextBrowser()
         self.task_browser.setHtml(self._initial_task_html())
+        self.task_browser.setMinimumHeight(96)
+        self.task_browser.setMaximumHeight(138)
         self.workflow_browser = QTextBrowser()
         self.workflow_browser.setHtml(self._workflow_html())
-        self.status_label = QLabel("状态：等待输入设计需求")
+        self.workflow_browser.setMinimumHeight(112)
+        self.workflow_browser.setMaximumHeight(156)
+        self.workflow_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.status_label = QLabel(self.locale.text("status.waiting"))
         self.status_label.setWordWrap(True)
         self.status_label.setObjectName("statusLabel")
 
         self.input_line = QLineEdit()
-        self.input_line.setPlaceholderText(
-            "例如：请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 12 个候选，初筛保留 5 个候选"
-        )
+        self.input_line.setPlaceholderText(self.locale.text("input.placeholder"))
 
-        self.generate_button = QPushButton("开始对话设计")
-        self.confirm_yes_button = QPushButton("确认继续")
-        self.confirm_no_button = QPushButton("跳过/暂停")
+        self.generate_button = QPushButton(self.locale.text("button.start"))
+        self.confirm_yes_button = QPushButton(self.locale.text("button.confirm"))
+        self.confirm_no_button = QPushButton(self.locale.text("button.pause"))
 
-        self.example_button = QPushButton("载入示例需求")
-        self.refresh_button = QPushButton("刷新知识库")
-        self.open_report_button = QPushButton("打开最新报告")
+        self.example_button = QPushButton(self.locale.text("button.example"))
+        self.refresh_button = QPushButton(self.locale.text("button.refresh_knowledge"))
+        self.open_report_button = QPushButton(self.locale.text("button.open_report"))
         self.run_selector = QComboBox()
         self.run_selector.setMinimumHeight(42)
-        self.refresh_runs_button = QPushButton("刷新运行记录")
-        self.restore_run_button = QPushButton("载入运行快照")
+        self.refresh_runs_button = QPushButton(self.locale.text("button.refresh_runs"))
+        self.restore_run_button = QPushButton(self.locale.text("button.restore_run"))
 
-        self.screen_button = QPushButton("手动：代理初筛")
-        self.evaluate_selected_button = QPushButton("手动：校核所选样本")
-        self.evaluate_all_button = QPushButton("手动：校核当前候选")
-        self.report_button = QPushButton("手动：导出报告")
-        self.reset_button = QPushButton("重置会话")
+        self.screen_button = QPushButton(self.locale.text("button.screen"))
+        self.evaluate_selected_button = QPushButton(self.locale.text("button.evaluate_selected"))
+        self.evaluate_all_button = QPushButton(self.locale.text("button.evaluate_all"))
+        self.report_button = QPushButton(self.locale.text("button.report"))
+        self.reset_button = QPushButton(self.locale.text("button.reset"))
 
-        self.stage_card = QLabel("阶段：idle")
-        self.candidate_card = QLabel("候选：0")
-        self.pending_card = QLabel("待校核：0")
-        self.pass_card = QLabel("通过：0")
+        self.stage_card = QLabel(self.locale.text("metric.stage", value="idle"))
+        self.candidate_card = QLabel(self.locale.text("metric.candidate_zero"))
+        self.pending_card = QLabel(self.locale.text("metric.pending_zero"))
+        self.pass_card = QLabel(self.locale.text("metric.pass", count=0))
 
-        self.candidate_widget = CandidateWidget()
-        self.abaqus_widget = AbaqusWidget()
+        self.candidate_widget = CandidateWidget(language=self.locale.language)
+        self.abaqus_widget = AbaqusWidget(language=self.locale.language)
         self.knowledge_widget = KnowledgeWidget()
         self.report_widget = ReportWidget()
         self.result_trace_widget = ResultTraceWidget()
         self.log_widget = LogWidget()
-        self.task_config_widget = TaskConfigWidget()
+        self.task_config_widget = TaskConfigWidget(language=self.locale.language)
         self.workflow_widget = WorkflowWidget(event_store=self.workflow_event_store)
 
         self.tabs = QTabWidget()
-        self.tabs.addTab(self.task_config_widget, "任务配置")
-        self.tabs.addTab(self.workflow_widget, "智能体流程")
-        self.tabs.addTab(self.candidate_widget, "候选方案")
-        self.tabs.addTab(self.abaqus_widget, "ABAQUS结果")
-        self.tabs.addTab(self.result_trace_widget, "结果追踪")
-        self.tabs.addTab(self.report_widget, "报告预览")
-        self.tabs.addTab(self.knowledge_widget, "知识库")
-        self.tabs.addTab(self.log_widget, "日志")
+        self.tabs.addTab(self.task_config_widget, self.locale.text("tab.task"))
+        self.tabs.addTab(self.workflow_widget, self.locale.text("tab.workflow"))
+        self.tabs.addTab(self.candidate_widget, self.locale.text("tab.candidates"))
+        self.tabs.addTab(self.abaqus_widget, self.locale.text("tab.abaqus"))
+        self.tabs.addTab(self.result_trace_widget, self.locale.text("tab.trace"))
+        self.tabs.addTab(self.report_widget, self.locale.text("tab.report"))
+        self.tabs.addTab(self.knowledge_widget, self.locale.text("tab.knowledge"))
+        self.tabs.addTab(self.log_widget, self.locale.text("tab.log"))
 
         self._build_layout()
         self._apply_styles()
@@ -280,8 +301,8 @@ class MainWindow(QMainWindow):
         self.knowledge_widget.refresh(load_evidence=False)
 
     def _build_layout(self) -> None:
-        primary_header = QLabel("主流程")
-        primary_header.setObjectName("sectionTitle")
+        self.primary_header = QLabel(self.locale.text("section.primary"))
+        self.primary_header.setObjectName("sectionTitle")
         primary_button_layout = QGridLayout()
         primary_button_layout.setHorizontalSpacing(10)
         primary_button_layout.setVerticalSpacing(10)
@@ -289,8 +310,8 @@ class MainWindow(QMainWindow):
         primary_button_layout.addWidget(self.confirm_yes_button, 0, 1)
         primary_button_layout.addWidget(self.confirm_no_button, 0, 2)
 
-        utility_header = QLabel("辅助入口")
-        utility_header.setObjectName("sectionTitle")
+        self.utility_header = QLabel(self.locale.text("section.utility"))
+        self.utility_header.setObjectName("sectionTitle")
         utility_button_layout = QGridLayout()
         utility_button_layout.setHorizontalSpacing(10)
         utility_button_layout.setVerticalSpacing(10)
@@ -301,8 +322,8 @@ class MainWindow(QMainWindow):
         utility_button_layout.addWidget(self.refresh_runs_button, 2, 0)
         utility_button_layout.addWidget(self.restore_run_button, 2, 1, 1, 2)
 
-        stats_header = QLabel("当前会话")
-        stats_header.setObjectName("sectionTitle")
+        self.stats_header = QLabel(self.locale.text("section.session"))
+        self.stats_header.setObjectName("sectionTitle")
         stats_layout = QGridLayout()
         stats_layout.setHorizontalSpacing(10)
         stats_layout.setVerticalSpacing(10)
@@ -311,8 +332,8 @@ class MainWindow(QMainWindow):
         stats_layout.addWidget(self.pending_card, 1, 0)
         stats_layout.addWidget(self.pass_card, 1, 1)
 
-        manual_header = QLabel("人工操作")
-        manual_header.setObjectName("sectionTitle")
+        self.manual_header = QLabel(self.locale.text("section.manual"))
+        self.manual_header.setObjectName("sectionTitle")
         manual_button_layout = QGridLayout()
         manual_button_layout.setHorizontalSpacing(10)
         manual_button_layout.setVerticalSpacing(10)
@@ -323,107 +344,80 @@ class MainWindow(QMainWindow):
         manual_button_layout.addWidget(self.reset_button, 1, 1, 1, 2)
 
         left_layout = QVBoxLayout()
-        left_layout.setSpacing(10)
-        left_layout.addWidget(self.task_browser, 2)
-        left_layout.addWidget(self.workflow_browser, 2)
-        left_layout.addWidget(self.chat_widget, 6)
+        left_layout.setContentsMargins(14, 14, 14, 14)
+        left_layout.setSpacing(9)
+        left_layout.addWidget(self.task_browser)
+        left_layout.addWidget(self.workflow_browser)
+        left_layout.addWidget(self.chat_widget, 1)
         left_layout.addWidget(self.status_label)
         left_layout.addWidget(self.input_line)
-        left_layout.addWidget(primary_header)
+        left_layout.addWidget(self.primary_header)
         left_layout.addLayout(primary_button_layout)
-        left_layout.addWidget(utility_header)
+        left_layout.addWidget(self.utility_header)
         left_layout.addLayout(utility_button_layout)
-        left_layout.addWidget(stats_header)
+        left_layout.addWidget(self.stats_header)
         left_layout.addLayout(stats_layout)
-        left_layout.addWidget(manual_header)
+        left_layout.addWidget(self.manual_header)
         left_layout.addLayout(manual_button_layout)
 
         right_layout = QVBoxLayout()
+        right_layout.setContentsMargins(10, 10, 10, 10)
         right_layout.addWidget(self.tabs)
 
+        top_bar = QFrame()
+        top_bar.setObjectName("topBar")
+        top_layout = QHBoxLayout(top_bar)
+        top_layout.setContentsMargins(18, 12, 18, 12)
+        title_layout = QVBoxLayout()
+        title_layout.setSpacing(2)
+        title_layout.addWidget(self.app_title_label)
+        title_layout.addWidget(self.app_subtitle_label)
+        top_layout.addLayout(title_layout, 1)
+        top_layout.addWidget(self.language_label)
+        top_layout.addWidget(self.language_selector)
+
         main_layout = QHBoxLayout()
+        main_layout.setContentsMargins(12, 12, 12, 12)
         main_layout.setSpacing(12)
         left_container = QWidget()
         right_container = QWidget()
+        left_container.setObjectName("leftRail")
+        right_container.setObjectName("workbenchPane")
         left_container.setLayout(left_layout)
         right_container.setLayout(right_layout)
-        main_layout.addWidget(left_container, 2)
-        main_layout.addWidget(right_container, 3)
+        main_layout.addWidget(left_container, 4)
+        main_layout.addWidget(right_container, 6)
 
+        root_layout = QVBoxLayout()
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.setSpacing(0)
+        root_layout.addWidget(top_bar)
+        root_layout.addLayout(main_layout, 1)
         root = QWidget()
-        root.setLayout(main_layout)
+        root.setLayout(root_layout)
         self.setCentralWidget(root)
 
-    def _decorate_button(self, button: QPushButton, background: str, border: str, color: str = "#1f2937") -> None:
-        button.setMinimumHeight(42)
-        button.setStyleSheet(
-            f"""
-            QPushButton {{
-                background: {background};
-                border: 1px solid {border};
-                color: {color};
-                border-radius: 10px;
-                padding: 8px 14px;
-                font-weight: 600;
-            }}
-            QPushButton:hover {{
-                background: #eef4fb;
-            }}
-            QPushButton:disabled {{
-                background: #f4f6f8;
-                color: #9aa6b6;
-                border: 1px solid #d9e0e8;
-            }}
-            """
-        )
+    def _set_button_variant(self, button: QPushButton, variant: str = "default") -> None:
+        button.setMinimumHeight(38)
+        button.setProperty("variant", variant)
 
     def _apply_styles(self) -> None:
-        self.setStyleSheet(
-            """
-            QMainWindow, QWidget {
-                background: #f3f6fb;
-                color: #1f2937;
-            }
-            QTextBrowser, QTableWidget, QLineEdit, QComboBox {
-                background: white;
-                border: 1px solid #d8e1ee;
-                border-radius: 10px;
-            }
-            QLineEdit, QComboBox {
-                padding: 10px 12px;
-                font-size: 15px;
-            }
-            QLabel#sectionTitle {
-                font-size: 13px;
-                font-weight: 700;
-                color: #31435c;
-                padding: 4px 2px 0 2px;
-            }
-            QLabel#statusLabel {
-                background: #eaf1fb;
-                border: 1px solid #cfdbef;
-                border-radius: 10px;
-                padding: 10px 12px;
-            }
-            """
-        )
         for card in [self.stage_card, self.candidate_card, self.pending_card, self.pass_card]:
-            card.setStyleSheet(
-                "background:#ffffff;border:1px solid #d8e1ee;border-radius:10px;padding:12px 14px;font-weight:600;"
-            )
-        self._decorate_button(self.generate_button, "#dbeafe", "#93c5fd", "#1e3a8a")
-        self._decorate_button(self.confirm_yes_button, "#dcfce7", "#86efac", "#166534")
-        self._decorate_button(self.confirm_no_button, "#fef3c7", "#fcd34d", "#92400e")
-        self._decorate_button(self.example_button, "#ffffff", "#cfd8e6")
-        self._decorate_button(self.refresh_button, "#ffffff", "#cfd8e6")
-        self._decorate_button(self.open_report_button, "#ffffff", "#cfd8e6")
-        self._decorate_button(self.refresh_runs_button, "#ffffff", "#cfd8e6")
-        self._decorate_button(self.restore_run_button, "#eef2ff", "#c7d2fe", "#3730a3")
-        self._decorate_button(self.screen_button, "#ffffff", "#cfd8e6")
-        self._decorate_button(self.evaluate_selected_button, "#ffffff", "#cfd8e6")
-        self._decorate_button(self.evaluate_all_button, "#ffffff", "#cfd8e6")
-        self._decorate_button(self.report_button, "#ffffff", "#cfd8e6")
-        self._decorate_button(self.reset_button, "#fff1f2", "#fecdd3", "#9f1239")
+            card.setProperty("role", "metricCard")
+        self._set_button_variant(self.generate_button, "primary")
+        self._set_button_variant(self.confirm_yes_button, "success")
+        self._set_button_variant(self.confirm_no_button, "warning")
+        self._set_button_variant(self.example_button)
+        self._set_button_variant(self.refresh_button)
+        self._set_button_variant(self.open_report_button)
+        self._set_button_variant(self.refresh_runs_button)
+        self._set_button_variant(self.restore_run_button, "secondary")
+        self._set_button_variant(self.screen_button)
+        self._set_button_variant(self.evaluate_selected_button)
+        self._set_button_variant(self.evaluate_all_button)
+        self._set_button_variant(self.report_button)
+        self._set_button_variant(self.reset_button, "danger")
+        self.setStyleSheet(application_stylesheet(self.font_family))
 
     def _connect_signals(self) -> None:
         self.generate_button.clicked.connect(self._start_conversation)
@@ -436,6 +430,7 @@ class MainWindow(QMainWindow):
         self.refresh_runs_button.clicked.connect(self._refresh_run_selector)
         self.restore_run_button.clicked.connect(self._restore_selected_run)
         self.run_selector.currentIndexChanged.connect(lambda: self._update_button_states())
+        self.language_selector.currentIndexChanged.connect(self._change_language)
 
         self.screen_button.clicked.connect(self._start_screen)
         self.evaluate_selected_button.clicked.connect(self._start_evaluate_selected)
@@ -443,8 +438,60 @@ class MainWindow(QMainWindow):
         self.report_button.clicked.connect(self._start_report)
         self.reset_button.clicked.connect(self._reset_session)
 
+    def _change_language(self) -> None:
+        language = str(self.language_selector.currentData() or self.locale.language)
+        if language == self.locale.language:
+            return
+        self.locale.set_language(language)
+        self._apply_language()
+
+    def _apply_language(self) -> None:
+        self.setWindowTitle(self.locale.text("app.title"))
+        self.app_title_label.setText(self.locale.text("app.title"))
+        self.app_subtitle_label.setText(self.locale.text("app.subtitle"))
+        self.language_label.setText(self.locale.text("section.language"))
+        self.input_line.setPlaceholderText(self.locale.text("input.placeholder"))
+        self.generate_button.setText(self.locale.text("button.start"))
+        self.confirm_yes_button.setText(self.locale.text("button.confirm"))
+        self.confirm_no_button.setText(self.locale.text("button.pause"))
+        self.example_button.setText(self.locale.text("button.example"))
+        self.refresh_button.setText(self.locale.text("button.refresh_knowledge"))
+        self.open_report_button.setText(self.locale.text("button.open_report"))
+        self.refresh_runs_button.setText(self.locale.text("button.refresh_runs"))
+        self.restore_run_button.setText(self.locale.text("button.restore_run"))
+        self.screen_button.setText(self.locale.text("button.screen"))
+        self.evaluate_selected_button.setText(self.locale.text("button.evaluate_selected"))
+        self.evaluate_all_button.setText(self.locale.text("button.evaluate_all"))
+        self.report_button.setText(self.locale.text("button.report"))
+        self.reset_button.setText(self.locale.text("button.reset"))
+        self.primary_header.setText(self.locale.text("section.primary"))
+        self.utility_header.setText(self.locale.text("section.utility"))
+        self.stats_header.setText(self.locale.text("section.session"))
+        self.manual_header.setText(self.locale.text("section.manual"))
+        tab_texts = [
+            self.locale.text("tab.task"),
+            self.locale.text("tab.workflow"),
+            self.locale.text("tab.candidates"),
+            self.locale.text("tab.abaqus"),
+            self.locale.text("tab.trace"),
+            self.locale.text("tab.report"),
+            self.locale.text("tab.knowledge"),
+            self.locale.text("tab.log"),
+        ]
+        for index, label in enumerate(tab_texts):
+            self.tabs.setTabText(index, label)
+        self.candidate_widget.set_language(self.locale.language)
+        self.abaqus_widget.set_language(self.locale.language)
+        self.task_config_widget.set_language(self.locale.language)
+        if not self.session.task:
+            self.task_browser.setHtml(self._initial_task_html())
+            self.workflow_browser.setHtml(self._workflow_html())
+            self.status_label.setText(self.locale.text("status.waiting"))
+        self._update_overview_cards()
+        self._refresh_run_selector()
+
     def _set_busy(self, busy: bool, status_text: str) -> None:
-        self.status_label.setText(f"状态：{status_text}")
+        self.status_label.setText(self.locale.text("status.busy", status=status_text))
         self.generate_button.setEnabled(not busy)
         self.input_line.setEnabled(not busy)
         self.run_selector.setEnabled(not busy)
@@ -491,12 +538,18 @@ class MainWindow(QMainWindow):
         passed_count = sum(1 for result in self.session.results_by_session_id.values() if result.get("verdict") == "通过")
         candidate_pool_target = requested_candidate_pool_size(self.session.task) if self.session.task else 0
         requested_top_k = requested_screen_top_k(self.session.task) if self.session.task else 0
-        self.stage_card.setText(f"阶段：{self.session.stage or 'idle'}")
-        self.candidate_card.setText(f"候选池：{generated_count} / 目标 {candidate_pool_target}" if self.session.task else "候选池：0")
-        self.pending_card.setText(
-            f"待校核：{pending_count} / 初筛目标 {requested_top_k}" if self.session.task else "待校核：0"
+        self.stage_card.setText(self.locale.text("metric.stage", value=self.session.stage or "idle"))
+        self.candidate_card.setText(
+            self.locale.text("metric.candidate", count=generated_count, target=candidate_pool_target)
+            if self.session.task
+            else self.locale.text("metric.candidate_zero")
         )
-        self.pass_card.setText(f"通过：{passed_count}")
+        self.pending_card.setText(
+            self.locale.text("metric.pending", count=pending_count, target=requested_top_k)
+            if self.session.task
+            else self.locale.text("metric.pending_zero")
+        )
+        self.pass_card.setText(self.locale.text("metric.pass", count=passed_count))
 
     def _run_action(self, action: str, payload: dict, status_text: str) -> None:
         self._set_busy(True, status_text)
@@ -513,7 +566,7 @@ class MainWindow(QMainWindow):
         self.worker.failed.connect(self.worker.deleteLater)
         self.worker_thread.finished.connect(self.worker_thread.deleteLater)
         self.worker_thread.finished.connect(self._clear_worker_refs)
-        self.worker_thread.finished.connect(lambda: self._set_busy(False, "等待下一步操作"))
+        self.worker_thread.finished.connect(lambda: self._set_busy(False, self.locale.text("status.ready_next")))
         self.worker_thread.start()
 
     def _clear_worker_refs(self) -> None:
@@ -535,7 +588,7 @@ class MainWindow(QMainWindow):
         self.run_selector.clear()
         runs = self.workflow_event_store.list_runs(limit=20)
         if not runs:
-            self.run_selector.addItem("暂无可恢复运行", "")
+            self.run_selector.addItem(self.locale.text("snapshot.none"), "")
         else:
             for run in runs:
                 self.run_selector.addItem(self._run_selector_label(run), run.get("run_id") or "")
@@ -572,12 +625,12 @@ class MainWindow(QMainWindow):
     def _restore_selected_run(self) -> None:
         run_id = str(self.run_selector.currentData() or "").strip()
         if not run_id:
-            self.status_label.setText("状态：没有可载入的运行快照")
+            self.status_label.setText(self.locale.text("status.no_snapshot"))
             return
         try:
             snapshot = self.workflow_event_store.load_snapshot(run_id)
         except Exception as exc:
-            self.status_label.setText(f"状态：运行快照载入失败：{exc}")
+            self.status_label.setText(self.locale.text("status.snapshot_failed", error=exc))
             self.log_widget.append_log("SYSTEM", f"运行快照载入失败：{run_id} | {exc}")
             return
 
@@ -592,7 +645,7 @@ class MainWindow(QMainWindow):
             f"已载入运行快照：{run_id}，当前阶段：{self.session.stage}",
         )
         self.log_widget.append_log("SYSTEM", f"已载入运行快照：{run_id}")
-        self.status_label.setText(f"状态：已载入运行快照 {run_id}")
+        self.status_label.setText(self.locale.text("status.snapshot_loaded", run_id=run_id))
         self._update_button_states()
 
     def _apply_session(self, session: PipelineSession) -> None:
@@ -657,21 +710,21 @@ class MainWindow(QMainWindow):
 
     def _refresh_knowledge_view(self) -> None:
         self.knowledge_widget.refresh(self.session.task)
-        self.status_label.setText("状态：知识库视图已刷新")
+        self.status_label.setText(self.locale.text("status.knowledge_refreshed"))
 
     def _open_latest_report(self) -> None:
         self.report_widget.refresh_latest()
         for path in [RESULTS_DIR / "latest_report.pdf", RESULTS_DIR / "latest_report.md"]:
             if path.exists():
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
-                self.chat_widget.add_message("SYSTEM", f"已尝试打开报告：{path}")
+                self.chat_widget.add_message("SYSTEM", self.locale.text("message.open_report", path=path))
                 return
-        self.chat_widget.add_message("SYSTEM", "当前还没有可打开的报告文件。")
+        self.chat_widget.add_message("SYSTEM", self.locale.text("message.no_report"))
 
     def _respond_confirmation(self, approved: bool) -> None:
         if self.session.pending_confirmation is None:
             return
-        label = "继续" if approved else "跳过/暂停"
+        label = self.locale.text("user.continue") if approved else self.locale.text("user.pause")
         self.chat_widget.add_message("USER", label)
         self._run_action(
             "conversation_continue",
@@ -719,7 +772,7 @@ class MainWindow(QMainWindow):
             return
         selected = self._pending_candidates(self.candidate_widget.selected_candidates())
         if not selected:
-            self.chat_widget.add_message("SYSTEM", "所选候选样本均已完成 ABAQUS 校核，无需重复提交。")
+            self.chat_widget.add_message("SYSTEM", self.locale.text("message.selected_done"))
             return
         self.tabs.setCurrentWidget(self.abaqus_widget)
         self._run_action(
@@ -733,7 +786,7 @@ class MainWindow(QMainWindow):
             return
         pending = self._pending_candidates(self.session.current_candidates)
         if not pending:
-            self.chat_widget.add_message("SYSTEM", "当前候选样本都已完成 ABAQUS 校核，无需重复提交。")
+            self.chat_widget.add_message("SYSTEM", self.locale.text("message.all_done"))
             return
         self.tabs.setCurrentWidget(self.abaqus_widget)
         self._run_action(
@@ -776,7 +829,7 @@ class MainWindow(QMainWindow):
         self.task_config_widget.reset_view()
         self.workflow_widget.reset_view()
         self.knowledge_widget.refresh(load_evidence=False)
-        self.status_label.setText("状态：会话已重置")
+        self.status_label.setText(self.locale.text("status.waiting"))
         self.input_line.clear()
         self._update_overview_cards()
         self._update_button_states()
@@ -914,18 +967,14 @@ class MainWindow(QMainWindow):
 
     def _initial_task_html(self) -> str:
         return (
-            "<h3>当前任务</h3>"
-            "<p>输入自然语言需求后，系统会自动解析任务、生成候选，并在关键节点引导你确认是否继续。</p>"
+            f"<h3>{self.locale.text('task.initial.title')}</h3>"
+            f"<p>{self.locale.text('task.initial.body')}</p>"
         )
 
     def _workflow_html(self) -> str:
         return (
-            "<h3>对话流程</h3>"
-            "<p>1. 输入一句自然语言需求，系统解析候选池总数和初筛保留数并生成初始候选</p>"
-            "<p>2. 系统询问是否进行代理模型初筛，并解释当前评分机制、候选池目标和 Top-K 目标</p>"
-            "<p>3. 系统询问是否进行有限元校核，并展示入选原因</p>"
-            "<p>4. 校核完成后展示极限压力、失效模式、结论，并询问是否导出报告</p>"
-            "<p>5. 聊天区会同时显示结构化进度和助手说明；辅助与手动入口可随时介入</p>"
+            f"<h3>{self.locale.text('workflow.initial.title')}</h3>"
+            f"<p>{self.locale.text('workflow.initial.body')}</p>"
         )
 
     def _task_summary_html(self) -> str:
@@ -968,6 +1017,7 @@ class MainWindow(QMainWindow):
 def main() -> int:
     ensure_project_dirs()
     app = QApplication(sys.argv)
+    install_application_font(app)
     window = MainWindow()
     window.showMaximized()
     return app.exec()
