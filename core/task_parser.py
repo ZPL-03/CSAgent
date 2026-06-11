@@ -82,24 +82,25 @@ class TaskParser:
         return normalize_boundary_conditions(text)
 
     def _geometry_patterns(self) -> Dict[str, list[str]]:
+        connector = r"(?:\s*(?:为|是|=|:|：|固定|保持|限定|锁定|指定|严格采用|必须|等于|不变))*"
         return {
             "length_mm": [
-                r"(?:长度|壳长|筒长|length|L)\s*(?:为|是|=|:|：)?\s*([0-9]+(?:\.[0-9]+)?)\s*mm",
+                rf"(?:长度|壳长|筒长|length|L){connector}\s*([0-9]+(?:\.[0-9]+)?)\s*mm",
             ],
             "radius_mm": [
-                r"(?:半径|壳半径|内半径|radius|R)\s*(?:为|是|=|:|：)?\s*([0-9]+(?:\.[0-9]+)?)\s*mm",
+                rf"(?:半径|壳半径|内半径|radius|R){connector}\s*([0-9]+(?:\.[0-9]+)?)\s*mm",
             ],
             "thickness_mm": [
-                r"(?:厚度|壁厚|壳厚|thickness|t)\s*(?:为|是|=|:|：)?\s*([0-9]+(?:\.[0-9]+)?)\s*mm",
+                rf"(?:厚度|壁厚|壳厚|thickness|t){connector}\s*([0-9]+(?:\.[0-9]+)?)\s*mm",
             ],
             "alpha_deg": [
-                r"(?:alpha|α|铺层角\s*α|角度\s*α)\s*(?:为|是|=|:|：)?\s*([0-9]+(?:\.[0-9]+)?)",
+                rf"(?:alpha|α|铺层角\s*α|角度\s*α){connector}\s*([0-9]+(?:\.[0-9]+)?)",
             ],
             "beta_deg": [
-                r"(?:beta|β|铺层角\s*β|角度\s*β)\s*(?:为|是|=|:|：)?\s*([0-9]+(?:\.[0-9]+)?)",
+                rf"(?:beta|β|铺层角\s*β|角度\s*β){connector}\s*([0-9]+(?:\.[0-9]+)?)",
             ],
             "imperfection_ratio": [
-                r"(?:初始缺陷比|缺陷比|初始缺陷|缺陷幅值|imperfection|Ir)\s*(?:为|是|=|:|：)?\s*([0-9]+(?:\.[0-9]+)?)\s*(%|‰|permille|per\s*mille)?",
+                rf"(?:初始缺陷比|缺陷比|初始缺陷|缺陷幅值|imperfection|Ir){connector}\s*([0-9]+(?:\.[0-9]+)?)\s*(%|‰|permille|per\s*mille)?",
             ],
         }
 

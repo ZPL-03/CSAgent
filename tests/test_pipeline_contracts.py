@@ -71,6 +71,25 @@ def test_parser_distinguishes_fixed_geometry_from_reference_geometry(monkeypatch
     assert payload["geometry_envelope"]["thickness_mm"] == [10.0, 10.0]
 
 
+def test_parser_accepts_field_level_fixed_geometry_phrasing(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = TaskParser().parse_instruction(
+        "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，长度固定 500 mm，"
+        "半径必须等于 100 mm，厚度限定 10 mm，极限压力不低于 35 MPa，"
+        "生成 8 个候选，初筛保留 3 个候选"
+    )
+    payload = task_payload_from_request(task)
+    facts = payload["user_input_facts"]
+
+    assert facts["fixed_geometry"]["length_mm"] == 500.0
+    assert facts["fixed_geometry"]["radius_mm"] == 100.0
+    assert facts["fixed_geometry"]["thickness_mm"] == 10.0
+    assert "geometry_reference" not in facts
+    assert payload["geometry_envelope"]["length_mm"] == [500.0, 500.0]
+    assert payload["geometry_envelope"]["radius_mm"] == [100.0, 100.0]
+    assert payload["geometry_envelope"]["thickness_mm"] == [10.0, 10.0]
+
+
 def test_candidate_prompt_separates_user_facts_from_system_constraints(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = TaskParser().parse_instruction("生成 12 个候选，初筛保留 5 个候选")

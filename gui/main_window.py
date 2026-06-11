@@ -45,6 +45,7 @@ from gui.chat_widget import ChatWidget
 from gui.knowledge_widget import KnowledgeWidget
 from gui.log_widget import LogWidget
 from gui.report_widget import ReportWidget
+from gui.task_config_widget import TaskConfigWidget
 from gui.workflow_widget import WorkflowWidget
 from workflow.event_store import WorkflowEventStore
 
@@ -238,9 +239,11 @@ class MainWindow(QMainWindow):
         self.knowledge_widget = KnowledgeWidget()
         self.report_widget = ReportWidget()
         self.log_widget = LogWidget()
+        self.task_config_widget = TaskConfigWidget()
         self.workflow_widget = WorkflowWidget(event_store=self.workflow_event_store)
 
         self.tabs = QTabWidget()
+        self.tabs.addTab(self.task_config_widget, "任务配置")
         self.tabs.addTab(self.workflow_widget, "智能体流程")
         self.tabs.addTab(self.candidate_widget, "候选方案")
         self.tabs.addTab(self.abaqus_widget, "ABAQUS结果")
@@ -574,6 +577,7 @@ class MainWindow(QMainWindow):
     def _apply_session(self, session: PipelineSession) -> None:
         self.session = session
         self.task_browser.setHtml(self._task_summary_html())
+        self.task_config_widget.update_task(self.session.task)
         self.candidate_widget.update_candidates(self.session.current_candidates, self.session.results_by_session_id)
         self.abaqus_widget.update_results(list(self.session.results_by_session_id.values()))
         self.report_widget.update_report(self.session.report)
@@ -587,6 +591,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_design_views(self) -> None:
         self.task_browser.setHtml(self._task_summary_html())
+        self.task_config_widget.update_task(self.session.task)
         self.candidate_widget.update_candidates(self.session.current_candidates, self.session.results_by_session_id)
         self.abaqus_widget.update_results(list(self.session.results_by_session_id.values()))
         self.report_widget.update_report(self.session.report)
@@ -733,6 +738,7 @@ class MainWindow(QMainWindow):
         self.candidate_widget.reset_view()
         self.abaqus_widget.reset_view()
         self.report_widget.reset_view()
+        self.task_config_widget.reset_view()
         self.workflow_widget.reset_view()
         self.knowledge_widget.refresh(load_evidence=False)
         self.status_label.setText("状态：会话已重置")
