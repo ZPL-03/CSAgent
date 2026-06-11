@@ -51,6 +51,37 @@ class FakeOrchestrator:
             "verdict": "通过",
         }
 
+    def prepare_candidate_for_fem(self, task, candidate):
+        return {
+            **candidate,
+            "candidate_id": "C1",
+            "display_name": "C1",
+            "session_candidate_id": candidate["candidate_id"],
+        }
+
+    def evaluate_prepared_candidate(self, task, candidate):
+        self.calls.append(f"evaluate:{candidate['session_candidate_id']}")
+        self._emit("FEM", "有限元已完成", "fem_completed")
+        return {
+            "candidate_id": candidate["candidate_id"],
+            "session_candidate_id": candidate["session_candidate_id"],
+            "status": "success",
+            "ultimate_pressure_MPa": 40.0,
+            "verdict": "通过",
+        }
+
+    def persist_knowledge_records(self, task, designs, results):
+        self.calls.append("knowledge")
+        self._emit("KNOWLEDGE", "知识回流已完成", "knowledge_update_completed")
+        return [
+            {
+                "status": "stored",
+                "case_id": "CASE_100",
+                "candidate_id": designs[0]["candidate_id"],
+                "session_candidate_id": designs[0]["session_candidate_id"],
+            }
+        ]
+
     def generate_report(self, task, results, candidates=None):
         self.calls.append("report")
         self._emit("REPORT", "报告已生成", "report_completed")
@@ -111,12 +142,16 @@ def test_workflow_runtime_completes_full_approved_path(tmp_path):
     assert state["stage"] == "completed"
     assert state["pending_confirmation"] is None
     assert state["results"][0]["ultimate_pressure_MPa"] == 40.0
+    assert state["fem_designs"][0]["candidate_id"] == "C1"
+    assert state["fem_designs"][0]["session_candidate_id"] == "TMP_1"
+    assert state["knowledge_updates"][0]["case_id"] == "CASE_100"
     assert state["report"]["markdown_path"].endswith("latest_report.md")
-    assert orchestrator.calls == ["parse", "generate", "screen", "evaluate:TMP_1", "report"]
+    assert orchestrator.calls == ["parse", "generate", "screen", "evaluate:TMP_1", "knowledge", "report"]
 
     stored = store.load_snapshot(state["run_id"])
     assert stored["stage"] == "completed"
     assert stored["report"]["pdf_path"].endswith("latest_report.pdf")
+    assert stored["knowledge_updates"][0]["status"] == "stored"
 
     jobs = runtime.simulation_queue.list_jobs(state["run_id"])
     assert len(jobs) == 1
@@ -126,3 +161,6 @@ def test_workflow_runtime_completes_full_approved_path(tmp_path):
     event_types = [event["event_type"] for event in store.list_events(state["run_id"])]
     assert "simulation_job_queued" in event_types
     assert "simulation_job_completed" in event_types
+    assert "knowledge_update_completed" in event_types
+    tool_events = [event for event in store.list_events(state["run_id"]) if event["event_type"] == "tool_completed"]
+    assert any(event["agent"] == "KnowledgeMemoryAgent" for event in tool_events)

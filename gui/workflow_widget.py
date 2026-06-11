@@ -8,6 +8,7 @@ from typing import Any
 from PyQt6.QtWidgets import QPushButton, QTextBrowser, QVBoxLayout, QWidget
 
 from core.llm_status import configured_llm_backends, probe_llm_backends
+from workflow.agent_contracts import list_agent_contracts
 from workflow.event_store import WorkflowEventStore
 from workflow.simulation_queue import SimulationJobQueue
 
@@ -22,6 +23,7 @@ class WorkflowWidget(QWidget):
         ("screen_candidates", "代理初筛"),
         ("wait_fem", "有限元确认"),
         ("evaluate_candidates", "有限元校核"),
+        ("persist_knowledge", "知识回流"),
         ("wait_report", "报告确认"),
         ("generate_report", "报告生成"),
     ]
@@ -33,6 +35,7 @@ class WorkflowWidget(QWidget):
         "screen_candidates": "代理初筛",
         "wait_fem": "人工确认",
         "evaluate_candidates": "有限元作业",
+        "persist_knowledge": "案例记忆",
         "wait_report": "人工确认",
         "generate_report": "报告文件",
     }
@@ -62,6 +65,7 @@ class WorkflowWidget(QWidget):
             "<h3>智能体流程</h3>"
             "<p>启动对话式设计后，这里会显示 LangGraph 工作流节点、人工确认点和工具调用事件。</p>"
             + self._llm_status_html()
+            + self._agent_contracts_html()
         )
 
     def _run_llm_health_check(self) -> None:
@@ -77,6 +81,7 @@ class WorkflowWidget(QWidget):
                     "<h3>智能体流程</h3>"
                     "<p>当前还没有运行快照；以下为 LLM 后端实时检测结果。</p>"
                     + self._llm_status_html()
+                    + self._agent_contracts_html()
                 )
         finally:
             self.health_button.setText("检测 LLM 后端")
@@ -209,6 +214,11 @@ class WorkflowWidget(QWidget):
             return "等待有限元校核确认"
         if node_name == "evaluate_candidates":
             return f"作业={len(jobs)}；结果={len(snapshot.get('results') or [])}"
+        if node_name == "persist_knowledge":
+            updates = snapshot.get("knowledge_updates") or []
+            stored = sum(1 for item in updates if str(item.get("status") or "") == "stored")
+            failed = sum(1 for item in updates if str(item.get("status") or "") == "failed")
+            return f"回流={len(updates)}；正式={stored}；失败={failed}"
         if node_name == "wait_report":
             return "等待报告输出确认"
         if node_name == "generate_report":
@@ -243,6 +253,28 @@ class WorkflowWidget(QWidget):
             "<h4>状态图</h4>"
             "<table border='1' cellspacing='0' cellpadding='6'>"
             "<tr><th>序号</th><th>智能体节点</th><th>状态</th><th>产物类型</th><th>当前产物</th><th>最近节点事件</th></tr>"
+            + "".join(rows)
+            + "</table>"
+        )
+
+    def _agent_contracts_html(self) -> str:
+        rows = []
+        for contract in list_agent_contracts():
+            rows.append(
+                "<tr>"
+                f"<td>{self._safe(contract.label)}<br><code>{self._safe(contract.node_name)}</code></td>"
+                f"<td>{self._safe(contract.runtime_agent)}<br><code>{self._safe(contract.tool_name)}</code></td>"
+                f"<td>{self._safe(contract.responsibility)}</td>"
+                f"<td>{self._safe(contract.input_contract)}</td>"
+                f"<td>{self._safe(contract.output_contract)}</td>"
+                f"<td>{self._safe(contract.llm_policy)}</td>"
+                f"<td>{self._safe(contract.failure_policy)}</td>"
+                "</tr>"
+            )
+        return (
+            "<h4>智能体职责契约</h4>"
+            "<table border='1' cellspacing='0' cellpadding='6'>"
+            "<tr><th>节点</th><th>运行时智能体/工具</th><th>职责</th><th>输入</th><th>输出</th><th>LLM 边界</th><th>失败策略</th></tr>"
             + "".join(rows)
             + "</table>"
         )
@@ -376,6 +408,7 @@ class WorkflowWidget(QWidget):
             + self._snapshot_summary_html(workflow_run_id, snapshot, active_stage, pending_text, snapshot_error)
             + self._llm_status_html()
             + self._workflow_graph_html(events, jobs, snapshot, active_stage)
+            + self._agent_contracts_html()
             + self._diagnostics_html(events, jobs, snapshot, snapshot_error)
             + "<h4>有限元队列</h4>"
             + jobs_html

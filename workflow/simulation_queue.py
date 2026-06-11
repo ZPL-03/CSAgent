@@ -50,7 +50,7 @@ class SimulationJobQueue:
     def enqueue(self, run_id: str, candidate: Dict[str, Any]) -> str:
         """登记待校核候选并返回作业编号。"""
 
-        session_candidate_id = str(candidate.get("candidate_id") or candidate.get("session_candidate_id") or "").strip()
+        session_candidate_id = str(candidate.get("session_candidate_id") or candidate.get("candidate_id") or "").strip()
         if not session_candidate_id:
             raise ValueError("仿真作业缺少会话候选编号")
         job_id = f"{run_id}:{session_candidate_id}"

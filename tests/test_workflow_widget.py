@@ -40,6 +40,7 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
             ],
             "screened_candidates": [{"candidate_id": "TMP_1", "source": "DOE"}],
             "results": [{"candidate_id": "C1", "verdict": "通过"}],
+            "knowledge_updates": [{"status": "stored", "case_id": "CASE_100", "candidate_id": "C1"}],
             "report": {"markdown_path": str(tmp_path / "latest_report.md")},
             "source_counter": {"DOE": 1, "LLM": 1},
             "error": None,
@@ -61,6 +62,24 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
             agent="RequirementAgent",
             message="工具 parse_task 调用完成",
             stage="parse_task",
+        )
+    )
+    store.append_event(
+        WorkflowEvent(
+            run_id="RUN_TEST",
+            event_type="node_completed",
+            agent="persist_knowledge",
+            message="节点完成：persist_knowledge",
+            stage="persist_knowledge",
+        )
+    )
+    store.append_event(
+        WorkflowEvent(
+            run_id="RUN_TEST",
+            event_type="tool_completed",
+            agent="KnowledgeMemoryAgent",
+            message="工具 persist_knowledge 调用完成",
+            stage="persist_knowledge",
         )
     )
     store.append_event(
@@ -106,6 +125,12 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
         assert "诊断" in html
         assert "任务契约" in html
         assert "候选池" in html
+        assert "知识回流" in html
+        assert "案例记忆" in html
+        assert "回流=1" in html
+        assert "智能体职责契约" in html
+        assert "KnowledgeMemoryAgent" in html
+        assert "不调用 LLM" in html
         assert "DOE=1" in html
         assert "LLM=1" in html
         assert "latest_report.md" in html
@@ -119,6 +144,7 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
         assert "candidate_generation" in html
         assert "primary-model" in html
         assert "fallback-model" in html
+        assert "工具 persist_knowledge 调用完成" in html
     finally:
         widget.close()
         app.processEvents()

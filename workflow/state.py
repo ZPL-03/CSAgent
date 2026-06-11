@@ -15,7 +15,9 @@ class DesignWorkflowState(TypedDict, total=False):
     candidates: List[Dict[str, Any]]
     screened_candidates: List[Dict[str, Any]]
     evaluated_candidates: List[Dict[str, Any]]
+    fem_designs: List[Dict[str, Any]]
     results: List[Dict[str, Any]]
+    knowledge_updates: List[Dict[str, Any]]
     report: Dict[str, Any]
     stage: str
     pending_confirmation: Optional[str]
@@ -37,7 +39,9 @@ def initial_state(run_id: str, instruction: str, overrides: Dict[str, Any] | Non
         "candidates": [],
         "screened_candidates": [],
         "evaluated_candidates": [],
+        "fem_designs": [],
         "results": [],
+        "knowledge_updates": [],
         "stage": "created",
         "pending_confirmation": None,
         "screen_skipped": False,

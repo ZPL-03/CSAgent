@@ -8,6 +8,7 @@ from typing import Any, Callable, Dict
 from langgraph.graph import END, START, StateGraph
 
 from agents.orchestrator import OrchestratorAgent
+from workflow.agent_contracts import contract_by_node
 from workflow.event_store import WorkflowEventStore
 from workflow.events import WorkflowEvent
 from workflow.simulation_queue import SimulationJobQueue
@@ -72,11 +73,12 @@ class DesignWorkflowRuntime:
 
     def _build_tools(self) -> ToolRegistry:
         registry = ToolRegistry(event_sink=self._emit_event)
+        contracts = contract_by_node()
         registry.register(
             ToolSpec(
                 name="parse_task",
-                agent="RequirementAgent",
-                description="解析自然语言需求并写入任务契约。",
+                agent=contracts["parse_task"].runtime_agent,
+                description=contracts["parse_task"].responsibility,
                 input_schema={"instruction": "str", "overrides": "dict"},
                 output_schema={"task": "dict"},
                 handler=lambda payload: {
@@ -90,8 +92,8 @@ class DesignWorkflowRuntime:
         registry.register(
             ToolSpec(
                 name="generate_candidates",
-                agent="CandidateStrategyAgent",
-                description="调度 LLM、案例迁移和 DOE 生成候选池。",
+                agent=contracts["generate_candidates"].runtime_agent,
+                description=contracts["generate_candidates"].responsibility,
                 input_schema={"task": "dict"},
                 output_schema={"candidates": "list"},
                 handler=lambda payload: {"candidates": self.orchestrator.generate_candidates(payload["task"])},
@@ -100,8 +102,8 @@ class DesignWorkflowRuntime:
         registry.register(
             ToolSpec(
                 name="screen_candidates",
-                agent="SurrogateAgent",
-                description="执行 ASME RD-1172 与 PBIPF 初筛排序。",
+                agent=contracts["screen_candidates"].runtime_agent,
+                description=contracts["screen_candidates"].responsibility,
                 input_schema={"task": "dict", "candidates": "list"},
                 output_schema={"screened_candidates": "list"},
                 handler=lambda payload: {
@@ -115,18 +117,34 @@ class DesignWorkflowRuntime:
         registry.register(
             ToolSpec(
                 name="evaluate_candidates",
-                agent="FEMExecutionAgent",
-                description="执行入选候选的 Abaqus 有限元校核。",
+                agent=contracts["evaluate_candidates"].runtime_agent,
+                description=contracts["evaluate_candidates"].responsibility,
                 input_schema={"task": "dict", "candidates": "list"},
-                output_schema={"results": "list"},
+                output_schema={"results": "list", "fem_designs": "list"},
                 handler=self._evaluate_candidates_with_queue,
             )
         )
         registry.register(
             ToolSpec(
+                name="persist_knowledge",
+                agent=contracts["persist_knowledge"].runtime_agent,
+                description=contracts["persist_knowledge"].responsibility,
+                input_schema={"task": "dict", "fem_designs": "list", "results": "list"},
+                output_schema={"knowledge_updates": "list"},
+                handler=lambda payload: {
+                    "knowledge_updates": self.orchestrator.persist_knowledge_records(
+                        payload["task"],
+                        payload.get("fem_designs") or [],
+                        payload.get("results") or [],
+                    )
+                },
+            )
+        )
+        registry.register(
+            ToolSpec(
                 name="generate_report",
-                agent="ReportAgent",
-                description="基于结构化任务、候选和有限元结果生成报告。",
+                agent=contracts["generate_report"].runtime_agent,
+                description=contracts["generate_report"].responsibility,
                 input_schema={"task": "dict", "results": "list", "candidates": "list"},
                 output_schema={"report": "dict"},
                 handler=lambda payload: {
@@ -146,23 +164,34 @@ class DesignWorkflowRuntime:
         task = payload["task"]
         candidates = list(payload.get("candidates") or [])
         results = []
+        fem_designs = []
         for candidate in candidates:
-            job_id = self.simulation_queue.enqueue(self._active_run_id, candidate)
+            fem_candidate = self.orchestrator.prepare_candidate_for_fem(task, candidate)
+            fem_designs.append(fem_candidate)
+            job_id = self.simulation_queue.enqueue(self._active_run_id, fem_candidate)
             self._emit_event(
                 "simulation_job_queued",
                 "SimulationQueue",
                 f"有限元作业入队：{job_id}",
-                {"job_id": job_id, "candidate_id": candidate.get("candidate_id")},
+                {
+                    "job_id": job_id,
+                    "candidate_id": fem_candidate.get("candidate_id"),
+                    "session_candidate_id": fem_candidate.get("session_candidate_id"),
+                },
             )
             self.simulation_queue.mark_running(job_id)
             self._emit_event(
                 "simulation_job_started",
                 "FEMExecutionAgent",
                 f"有限元作业开始：{job_id}",
-                {"job_id": job_id, "candidate_id": candidate.get("candidate_id")},
+                {
+                    "job_id": job_id,
+                    "candidate_id": fem_candidate.get("candidate_id"),
+                    "session_candidate_id": fem_candidate.get("session_candidate_id"),
+                },
             )
             try:
-                result = self.orchestrator.evaluate_candidate(task, candidate)
+                result = self.orchestrator.evaluate_prepared_candidate(task, fem_candidate)
             except Exception as exc:
                 self.simulation_queue.mark_failed(job_id, str(exc))
                 self._emit_event(
@@ -180,13 +209,14 @@ class DesignWorkflowRuntime:
                 {
                     "job_id": job_id,
                     "candidate_id": result.get("candidate_id"),
+                    "session_candidate_id": result.get("session_candidate_id"),
                     "status": result.get("status"),
                     "verdict": result.get("verdict"),
                     "ultimate_pressure_MPa": result.get("ultimate_pressure_MPa"),
                 },
             )
             results.append(result)
-        return {"results": results}
+        return {"results": results, "fem_designs": fem_designs}
 
     def _node(self, node_name: str, state: DesignWorkflowState, fn) -> Dict[str, Any]:
         run_id = state["run_id"]
@@ -217,6 +247,7 @@ class DesignWorkflowRuntime:
         graph.add_node("skip_screen", lambda state: self._node("skip_screen", state, self._skip_screen))
         graph.add_node("wait_fem", lambda state: self._node("wait_fem", state, self._wait_fem))
         graph.add_node("evaluate_candidates", lambda state: self._node("evaluate_candidates", state, self._evaluate_candidates))
+        graph.add_node("persist_knowledge", lambda state: self._node("persist_knowledge", state, self._persist_knowledge))
         graph.add_node("pause_before_fem", lambda state: self._node("pause_before_fem", state, self._pause_before_fem))
         graph.add_node("wait_report", lambda state: self._node("wait_report", state, self._wait_report))
         graph.add_node("generate_report", lambda state: self._node("generate_report", state, self._generate_report))
@@ -234,6 +265,7 @@ class DesignWorkflowRuntime:
                 "skip_screen": "skip_screen",
                 "wait_fem": "wait_fem",
                 "evaluate_candidates": "evaluate_candidates",
+                "persist_knowledge": "persist_knowledge",
                 "pause_before_fem": "pause_before_fem",
                 "wait_report": "wait_report",
                 "generate_report": "generate_report",
@@ -264,15 +296,12 @@ class DesignWorkflowRuntime:
             },
         )
         graph.add_edge("pause_before_fem", END)
-        graph.add_conditional_edges(
-            "evaluate_candidates",
-            self._route_report,
-            {
-                "wait_report": "wait_report",
-                "generate_report": "generate_report",
-                "skip_report": "skip_report",
-            },
-        )
+        graph.add_edge("evaluate_candidates", "persist_knowledge")
+        graph.add_conditional_edges("persist_knowledge", self._route_report, {
+            "wait_report": "wait_report",
+            "generate_report": "generate_report",
+            "skip_report": "skip_report",
+        })
         graph.add_conditional_edges(
             "wait_report",
             self._route_report,
@@ -342,8 +371,24 @@ class DesignWorkflowRuntime:
         )
         return {
             "results": result["results"],
+            "fem_designs": result.get("fem_designs", []),
             "stage": "fem_evaluated",
             "pending_confirmation": None,
+            "error": None,
+        }
+
+    def _persist_knowledge(self, state: DesignWorkflowState) -> Dict[str, Any]:
+        result = self.tools.run(
+            "persist_knowledge",
+            {
+                "task": state["task"],
+                "fem_designs": state.get("fem_designs", []),
+                "results": state.get("results", []),
+            },
+        )
+        return {
+            "knowledge_updates": result["knowledge_updates"],
+            "stage": "knowledge_updated",
             "error": None,
         }
 
@@ -405,8 +450,11 @@ class DesignWorkflowRuntime:
             return self._route_fem(state)
         if state.get("pending_confirmation") == "export_report" or state.get("stage") in {
             "fem_evaluated",
+            "knowledge_updated",
             "awaiting_report_confirmation",
         }:
+            if state.get("stage") == "fem_evaluated" and not state.get("knowledge_updates"):
+                return "persist_knowledge"
             return self._route_report(state)
         return "end"
 

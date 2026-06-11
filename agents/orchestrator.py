@@ -161,11 +161,17 @@ class OrchestratorAgent(BaseAgent):
         )
         return [self._attach_task_context(task, candidate) for candidate in screened]
 
-    def evaluate_candidate(self, task: Dict, candidate: Dict) -> Dict:
-        fem_candidate = self._promote_candidate_for_fem(task, candidate)
+    def prepare_candidate_for_fem(self, task: Dict, candidate: Dict) -> Dict:
+        """生成正式有限元输入候选。"""
+
+        return self._promote_candidate_for_fem(task, candidate)
+
+    def evaluate_prepared_candidate(self, task: Dict, fem_candidate: Dict) -> Dict:
+        """执行已经晋级为正式编号的有限元候选。"""
+
         self.emit_event(
             "fem_started",
-            f"开始校核 {candidate.get('display_name', fem_candidate.get('session_candidate_id', '候选样本'))} "
+            f"开始校核 {fem_candidate.get('session_candidate_id', fem_candidate.get('display_name', '候选样本'))} "
             f"-> {fem_candidate['candidate_id']}",
             {**self._task_event_context(task), "candidate": fem_candidate},
         )
@@ -173,7 +179,55 @@ class OrchestratorAgent(BaseAgent):
         result["session_candidate_id"] = fem_candidate.get("session_candidate_id")
         result["display_name"] = fem_candidate.get("display_name")
         write_json(IO_DIR / f"result_{result['candidate_id']}.json", result)
-        self.knowledge_agent.run({"task": task, "design": fem_candidate, "abaqus_results": result})
+        return result
+
+    def persist_knowledge_records(self, task: Dict, designs: List[Dict], results: List[Dict]) -> List[Dict]:
+        """把有限元结果回流到案例库和案例记忆。"""
+
+        results_by_key: Dict[str, Dict] = {}
+        for result in results:
+            for key in [result.get("candidate_id"), result.get("session_candidate_id")]:
+                if key:
+                    results_by_key[str(key)] = result
+
+        updates: List[Dict] = []
+        for design in designs:
+            result = (
+                results_by_key.get(str(design.get("candidate_id") or ""))
+                or results_by_key.get(str(design.get("session_candidate_id") or ""))
+            )
+            if not result:
+                update = {
+                    "status": "missing_result",
+                    "candidate_id": design.get("candidate_id"),
+                    "session_candidate_id": design.get("session_candidate_id"),
+                    "error": "未找到匹配的有限元结果",
+                }
+                updates.append(update)
+                self.emit_event("knowledge_update_failed", "知识回流缺少匹配有限元结果", update)
+                continue
+            try:
+                update = self.knowledge_agent.run({"task": task, "design": design, "abaqus_results": result})
+                update["candidate_id"] = design.get("candidate_id")
+                update["session_candidate_id"] = design.get("session_candidate_id")
+                updates.append(update)
+                self.emit_event("knowledge_update_completed", f"知识回流完成：{update.get('case_id')}", update)
+            except Exception as exc:
+                update = {
+                    "status": "failed",
+                    "candidate_id": design.get("candidate_id"),
+                    "session_candidate_id": design.get("session_candidate_id"),
+                    "error": str(exc),
+                }
+                updates.append(update)
+                self.emit_event("knowledge_update_failed", f"知识回流失败：{exc}", update)
+        return updates
+
+    def evaluate_candidate(self, task: Dict, candidate: Dict, persist_knowledge: bool = True) -> Dict:
+        fem_candidate = self.prepare_candidate_for_fem(task, candidate)
+        result = self.evaluate_prepared_candidate(task, fem_candidate)
+        if persist_knowledge:
+            self.persist_knowledge_records(task, [fem_candidate], [result])
         return result
 
     def generate_report(self, task: Dict, results: List[Dict], candidates: List[Dict] | None = None) -> Dict:
