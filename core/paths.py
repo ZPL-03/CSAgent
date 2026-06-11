@@ -13,6 +13,7 @@ TASKS_DIR = DATA_DIR / "tasks"
 RESULTS_DIR = DATA_DIR / "results"
 CASES_DIR = DATA_DIR / "cases"
 ABAQUS_RUNS_DIR = DATA_DIR / "abaqus_runs"
+RUNTIME_DIR = DATA_DIR / "runtime"
 KNOWLEDGE_DIR = ROOT_DIR / "knowledge"
 EXTERNAL_KNOWLEDGE_DIR = KNOWLEDGE_DIR / "external"
 KNOWLEDGE_BASE_DIR = EXTERNAL_KNOWLEDGE_DIR / "rag"
@@ -34,6 +35,7 @@ def ensure_project_dirs() -> None:
         RESULTS_DIR,
         CASES_DIR,
         ABAQUS_RUNS_DIR,
+        RUNTIME_DIR,
         KNOWLEDGE_DIR,
         EXTERNAL_KNOWLEDGE_DIR,
         KNOWLEDGE_BASE_DIR,

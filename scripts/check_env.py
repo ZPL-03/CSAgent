@@ -92,6 +92,7 @@ def main() -> int:
         "yaml",
         "jsonschema",
         "openai",
+        "langgraph",
         "chromadb",
         "sentence_transformers",
         "torch",

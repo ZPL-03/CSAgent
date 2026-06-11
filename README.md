@@ -4,6 +4,8 @@ CSDM_cph 是复合材料外压圆柱耐压壳智能设计系统。主流程为�
 
 自然语言需求 -> 用户事实抽取 -> LLM 候选提案 -> 案例迁移 -> DOE 采样 -> PBIPF 公式初筛 -> ABAQUS 校核 -> 案例回流 -> 设计报告输出。
 
+当前工程化升级引入 `workflow/` 多智能体运行时。该运行时使用 LangGraph 状态图组织任务解析、候选生成、代理初筛、有限元校核和报告导出，并通过 SQLite 记录运行事件、工具调用和状态快照。现有 PyQt6 入口保持兼容，后续 GUI 工作台会逐步切换到该运行时，以支持流程恢复、智能体审计和可视化状态追踪。
+
 ## 当前设计对象
 
 - 壳体类型：外压圆柱耐压壳 `CYLINDRICAL`
@@ -40,6 +42,17 @@ P_PBIPF = d1 * lg(Q) * t / R
 | 有限元校核 | `agents/fem_agent.py` | 生成 ABAQUS 耐压壳脚本并读取标准结果 JSON |
 | 知识回流 | `agents/knowledge_agent.py` | 写入案例库、案例记忆和代理公式校准数据 |
 | 报告生成 | `agents/report_gen.py` | 基于结构化任务、初筛理由和有限元结果输出报告；工程解释与制造建议可由受控 LLM 补充 |
+
+## 工作流运行时
+
+| 模块 | 职责 |
+| --- | --- |
+| `workflow/runtime.py` | LangGraph 状态图运行时，支持启动、人工确认后继续、从快照恢复 |
+| `workflow/event_store.py` | SQLite 运行库，记录 `workflow_runs`、`workflow_events` 和 `workflow_snapshots` |
+| `workflow/tool_registry.py` | 工具注册层，统一审计任务解析、候选生成、初筛、有限元和报告工具调用 |
+| `workflow/state.py` | 工作流状态契约，保存任务、候选、初筛、有限元结果、报告和人工确认状态 |
+
+运行时数据写入 `data/runtime/`，该目录属于本地运行产物，不进入 Git。PyQt6 主界面已经包含“智能体流程”页，可读取运行时事件库并展示节点状态、人工确认点和工具调用审计。重大阶段仍以源码、配置、测试和文档入库。
 
 ## 外部知识
 

@@ -14,6 +14,7 @@ from core.task_contract import (
     requested_screen_top_k,
     task_payload_from_request,
 )
+from workflow.runtime import DesignWorkflowRuntime
 
 
 ConversationEventCallback = Optional[Callable[[str, str, Dict], None]]
@@ -30,6 +31,7 @@ def _source_counter(candidates: List[Dict]) -> Dict[str, int]:
 @dataclass
 class ConversationState:
     instruction: str = ""
+    workflow_run_id: str | None = None
     task: Dict | None = None
     candidates: List[Dict] = field(default_factory=list)
     screened_candidates: List[Dict] = field(default_factory=list)
@@ -146,18 +148,23 @@ class ConversationFlowController:
         if commentary:
             self._emit("assistant_commentary", commentary, {"stage": stage, **payload})
 
+    def _runtime(self) -> DesignWorkflowRuntime:
+        return DesignWorkflowRuntime(orchestrator=self.orchestrator)
+
     def start(self, instruction: str, overrides: Dict | None = None) -> ConversationState:
         state = ConversationState(instruction=instruction, stage="parsing")
         self._emit("conversation_started", "已接收设计需求，正在解析任务并生成初始候选。", {"instruction": instruction})
 
-        task = self.orchestrator.parse_instruction(instruction, overrides=overrides)
+        workflow_state = self._runtime().start(instruction, overrides=overrides)
+        task = workflow_state["task"]
         task_payload = task_payload_from_request(task)
-        candidates = self.orchestrator.generate_candidates(task)
+        candidates = workflow_state.get("candidates", [])
 
+        state.workflow_run_id = workflow_state["run_id"]
         state.task = task
         state.candidates = candidates
-        state.stage = "awaiting_screen_confirmation"
-        state.pending_confirmation = "screen_candidates"
+        state.stage = workflow_state.get("stage", "awaiting_screen_confirmation")
+        state.pending_confirmation = workflow_state.get("pending_confirmation", "screen_candidates")
 
         source_counter = _source_counter(candidates)
         target_counts = self._target_counts(task, len(candidates))
@@ -213,12 +220,134 @@ class ConversationFlowController:
         return state
 
     def continue_after_confirmation(self, state: ConversationState, approved: bool) -> ConversationState:
+        if state.workflow_run_id:
+            return self._continue_with_workflow_runtime(state, approved)
         if state.pending_confirmation == "screen_candidates":
             return self._handle_screen_confirmation(state, approved)
         if state.pending_confirmation == "fem_evaluation":
             return self._handle_fem_confirmation(state, approved)
         if state.pending_confirmation == "export_report":
             return self._handle_report_confirmation(state, approved)
+        return state
+
+    def _continue_with_workflow_runtime(self, state: ConversationState, approved: bool) -> ConversationState:
+        if state.task is None:
+            return state
+        confirmation = state.pending_confirmation
+        workflow_state = self._runtime().continue_after_confirmation(state.workflow_run_id, approved)
+        state.workflow_run_id = workflow_state["run_id"]
+        state.task = workflow_state.get("task", state.task)
+        state.candidates = workflow_state.get("candidates", state.candidates)
+        state.screened_candidates = workflow_state.get("screened_candidates", state.screened_candidates)
+        state.evaluated_candidates = workflow_state.get("evaluated_candidates", state.evaluated_candidates)
+        state.results = workflow_state.get("results", state.results)
+        state.report = workflow_state.get("report", state.report)
+        state.pending_confirmation = workflow_state.get("pending_confirmation")
+        state.stage = workflow_state.get("stage", state.stage)
+        state.screen_skipped = bool(workflow_state.get("screen_skipped", state.screen_skipped))
+
+        if confirmation == "screen_candidates":
+            return self._emit_runtime_screen_summary(state, approved)
+        if confirmation == "fem_evaluation":
+            return self._emit_runtime_fem_summary(state, approved)
+        if confirmation == "export_report":
+            return self._emit_runtime_report_summary(state, approved)
+        return state
+
+    def _emit_runtime_screen_summary(self, state: ConversationState, approved: bool) -> ConversationState:
+        target_counts = self._target_counts(state.task, len(state.candidates))
+        if approved:
+            self._emit(
+                "screening_summary",
+                (
+                    f"代理模型初筛已完成：{len(state.candidates)} -> {len(state.evaluated_candidates)}，"
+                    f"请求 Top-{target_counts['requested_top_k']}。"
+                ),
+                {
+                    "screened_candidates": state.evaluated_candidates,
+                    **target_counts,
+                },
+            )
+            self._emit_commentary(
+                "screening_summary",
+                {
+                    "input_count": len(state.candidates),
+                    "output_count": len(state.evaluated_candidates),
+                    "selected_candidates": state.evaluated_candidates[:3],
+                    **target_counts,
+                },
+            )
+        else:
+            self._emit(
+                "screening_summary",
+                f"已跳过代理模型初筛，将直接对全部 {len(state.candidates)} 个候选进入有限元校核。",
+                {"screened_candidates": state.candidates, "screen_skipped": True, **target_counts},
+            )
+            self._emit_commentary(
+                "screening_summary",
+                {
+                    "input_count": len(state.candidates),
+                    "output_count": len(state.candidates),
+                    "screen_skipped": True,
+                    **target_counts,
+                },
+            )
+
+        fem_targets = state.evaluated_candidates
+        preview_reasons = [candidate.get("selection_reason") for candidate in fem_targets[:3] if candidate.get("selection_reason")]
+        detail_suffix = f" 重点入选原因：{' | '.join(preview_reasons)}" if preview_reasons else ""
+        self._emit(
+            "confirmation_requested",
+            f"是否进行有限元校核？当前待校核样本 {len(fem_targets)} 个。{detail_suffix}",
+            {"confirmation_id": "fem_evaluation", "default": True, "candidate_count": len(fem_targets)},
+        )
+        return state
+
+    def _emit_runtime_fem_summary(self, state: ConversationState, approved: bool) -> ConversationState:
+        if not approved:
+            self._emit(
+                "conversation_paused",
+                "已暂停在有限元校核前。当前候选和初筛结果已保留，可稍后继续。",
+                {"stage": state.stage},
+            )
+            self._emit_commentary("conversation_paused", {"stage": state.stage})
+            return state
+
+        passed_count = sum(1 for result in state.results if result.get("verdict") == "通过")
+        self._emit(
+            "fem_summary",
+            f"有限元校核完成：共 {len(state.results)} 个样本，其中通过 {passed_count} 个。",
+            {"results": state.results, "passed_count": passed_count},
+        )
+        self._emit_commentary(
+            "fem_summary",
+            {
+                "result_count": len(state.results),
+                "passed_count": passed_count,
+                "results": state.results[:3],
+            },
+        )
+        self._emit(
+            "confirmation_requested",
+            "是否导出设计报告？报告将包含工况摘要、代理模型选择理由、有限元结果解读和工程建议。",
+            {"confirmation_id": "export_report", "default": True},
+        )
+        return state
+
+    def _emit_runtime_report_summary(self, state: ConversationState, approved: bool) -> ConversationState:
+        if approved and state.report:
+            self._emit(
+                "report_summary",
+                (
+                    f"报告已导出：{state.report.get('markdown_path')} / "
+                    f"{state.report.get('pdf_path')}"
+                ),
+                {"report": state.report},
+            )
+            self._emit_commentary("report_summary", {"report": state.report})
+        else:
+            self._emit("report_summary", "已跳过报告导出。", {"report": None})
+            self._emit_commentary("report_summary", {"report": None, "skipped": True})
         return state
 
     def _handle_screen_confirmation(self, state: ConversationState, approved: bool) -> ConversationState:

@@ -18,6 +18,7 @@ dependencies:
       - python-dotenv
       - jsonschema==4.25.1
       - openai==2.30.0
+      - langgraph
       - chromadb==1.5.5
       - sentence-transformers==2.6.1
       - scikit-learn==1.6.1

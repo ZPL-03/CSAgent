@@ -43,11 +43,13 @@ from gui.candidate_widget import CandidateWidget
 from gui.chat_widget import ChatWidget
 from gui.knowledge_widget import KnowledgeWidget
 from gui.log_widget import LogWidget
+from gui.workflow_widget import WorkflowWidget
 
 
 @dataclass
 class PipelineSession:
     task: dict | None = None
+    workflow_run_id: str | None = None
     instruction: str = ""
     candidates: list[dict] = field(default_factory=list)
     screened_candidates: list[dict] = field(default_factory=list)
@@ -69,6 +71,7 @@ class PipelineSession:
     def to_flow_state(self) -> ConversationState:
         return ConversationState(
             instruction=self.instruction,
+            workflow_run_id=self.workflow_run_id,
             task=self.task,
             candidates=list(self.candidates),
             screened_candidates=list(self.screened_candidates),
@@ -89,6 +92,7 @@ class PipelineSession:
                 results_by_session_id[str(session_candidate_id)] = result
         return cls(
             task=state.task,
+            workflow_run_id=state.workflow_run_id,
             instruction=state.instruction,
             candidates=list(state.candidates),
             screened_candidates=list(state.screened_candidates),
@@ -225,8 +229,10 @@ class MainWindow(QMainWindow):
         self.abaqus_widget = AbaqusWidget()
         self.knowledge_widget = KnowledgeWidget()
         self.log_widget = LogWidget()
+        self.workflow_widget = WorkflowWidget()
 
         self.tabs = QTabWidget()
+        self.tabs.addTab(self.workflow_widget, "智能体流程")
         self.tabs.addTab(self.candidate_widget, "候选方案")
         self.tabs.addTab(self.abaqus_widget, "ABAQUS结果")
         self.tabs.addTab(self.knowledge_widget, "知识库")
@@ -472,6 +478,11 @@ class MainWindow(QMainWindow):
         self.task_browser.setHtml(self._task_summary_html())
         self.candidate_widget.update_candidates(self.session.current_candidates, self.session.results_by_session_id)
         self.abaqus_widget.update_results(list(self.session.results_by_session_id.values()))
+        self.workflow_widget.refresh(
+            self.session.workflow_run_id,
+            self.session.stage,
+            self.session.pending_confirmation,
+        )
         self.knowledge_widget.refresh()
         self._update_overview_cards()
 
@@ -479,6 +490,11 @@ class MainWindow(QMainWindow):
         self.task_browser.setHtml(self._task_summary_html())
         self.candidate_widget.update_candidates(self.session.current_candidates, self.session.results_by_session_id)
         self.abaqus_widget.update_results(list(self.session.results_by_session_id.values()))
+        self.workflow_widget.refresh(
+            self.session.workflow_run_id,
+            self.session.stage,
+            self.session.pending_confirmation,
+        )
         self._update_overview_cards()
 
     def _start_conversation(self) -> None:
@@ -613,6 +629,7 @@ class MainWindow(QMainWindow):
         self.abaqus_widget.update_results([])
         self.candidate_widget.reset_view()
         self.abaqus_widget.reset_view()
+        self.workflow_widget.reset_view()
         self.knowledge_widget.refresh()
         self.status_label.setText("状态：会话已重置")
         self.input_line.clear()
