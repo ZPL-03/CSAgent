@@ -37,6 +37,7 @@ DEFAULT_EVIDENCE_QUERY = "复合材料外压圆柱耐压壳 外部静水压力 �
 class KnowledgeIngestWorker(QObject):
     """在后台线程执行资料入库。"""
 
+    progress = pyqtSignal(list)
     finished = pyqtSignal(dict)
     failed = pyqtSignal(str)
 
@@ -46,7 +47,7 @@ class KnowledgeIngestWorker(QObject):
 
     def run(self) -> None:
         try:
-            result = KnowledgeIngestionService().ingest_file(self.path)
+            result = KnowledgeIngestionService(progress_callback=self.progress.emit).ingest_file(self.path)
         except Exception as exc:
             self.failed.emit(str(exc))
             return
@@ -199,6 +200,7 @@ class KnowledgeWidget(QWidget):
         self._ingest_worker = KnowledgeIngestWorker(str(path))
         self._ingest_worker.moveToThread(self._ingest_thread)
         self._ingest_thread.started.connect(self._ingest_worker.run)
+        self._ingest_worker.progress.connect(self._on_ingest_progress)
         self._ingest_worker.finished.connect(self._on_ingest_finished)
         self._ingest_worker.failed.connect(self._on_ingest_failed)
         self._ingest_worker.finished.connect(self._cleanup_ingest_worker)
@@ -212,6 +214,12 @@ class KnowledgeWidget(QWidget):
         self._ingest_thread = None
         self._ingest_worker = None
         self.upload_button.setEnabled(True)
+
+    def _on_ingest_progress(self, steps: list) -> None:
+        self.pipeline_widget.set_steps(steps)
+        active_step = next((step for step in steps if isinstance(step, dict) and step.get("status") == "running"), None)
+        if isinstance(active_step, dict):
+            self.parser_pill.set_state(str(active_step.get("name") or "入库运行中"), "running")
 
     def _on_ingest_finished(self, payload: dict) -> None:
         steps = payload.get("steps") if isinstance(payload.get("steps"), list) else []

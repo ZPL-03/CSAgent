@@ -14,7 +14,7 @@ import tempfile
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from core.config_loader import load_app_config
 from core.domain_knowledge import trim_text
@@ -256,6 +256,7 @@ class KnowledgeIngestionService:
         chunk_token_size: int | None = None,
         chunk_overlap_tokens: int | None = None,
         min_chunk_tokens: int | None = None,
+        progress_callback: Callable[[list[dict[str, Any]]], None] | None = None,
     ) -> None:
         app_config = load_app_config()
         knowledge_config = dict(app_config.get("project_knowledge", {}))
@@ -288,6 +289,11 @@ class KnowledgeIngestionService:
             self.vector_chroma_dir = self.base_dir / "chroma_db"
         else:
             self.vector_chroma_dir = CHROMA_DIR
+        self.progress_callback = progress_callback
+
+    def _notify_progress(self, steps: list[PipelineStep]) -> None:
+        if self.progress_callback is not None:
+            self.progress_callback([asdict(step) for step in steps])
 
     def ensure_dirs(self) -> None:
         for path in [
@@ -323,11 +329,13 @@ class KnowledgeIngestionService:
             PipelineStep(STEP_VECTOR),
             PipelineStep(STEP_KG),
         ]
+        self._notify_progress(steps)
 
         try:
             markdown, parser_backend = self._parse_document(stored_path)
         except Exception as exc:
             steps[0] = PipelineStep(STEP_PARSE, "failed", "解析失败", str(exc))
+            self._notify_progress(steps)
             result = IngestionResult(
                 document_id=document_id,
                 title=source.stem,
@@ -347,6 +355,7 @@ class KnowledgeIngestionService:
         markdown = self._clean_markdown(markdown)
         if not markdown:
             steps[0] = PipelineStep(STEP_PARSE, "failed", "解析结果为空", "解析器没有返回可检索文本。")
+            self._notify_progress(steps)
             result = IngestionResult(
                 document_id=document_id,
                 title=source.stem,
@@ -363,11 +372,29 @@ class KnowledgeIngestionService:
             self._write_manifest(last_result=result)
             raise RuntimeError(f"解析结果为空：{source.name}")
 
+        steps[0] = PipelineStep(STEP_PARSE, "success", f"{parser_backend} 解析完成", f"Markdown 长度 {len(markdown)} 字符")
+        steps[1] = PipelineStep(
+            STEP_CHUNK,
+            "running",
+            "正在生成语义文本块",
+            f"{self.chunk_token_size} token 目标窗口，overlap={self.chunk_overlap_tokens} token",
+        )
+        self._notify_progress(steps)
+
         markdown_path = self.markdown_dir / f"{document_id}.md"
         markdown_path.write_text(markdown, encoding="utf-8")
         blocks = self._build_blocks(document_id, source.stem, stored_path, markdown, parser_backend)
         chunks = self._build_chunks(document_id, source.stem, stored_path, blocks)
         entities, relations = self._build_kg(document_id, source.stem, chunks)
+        steps[1] = PipelineStep(
+            STEP_CHUNK,
+            "success",
+            f"生成 {len(chunks)} 个候选 RAG 文本块",
+            f"{len(blocks)} 个结构化文本块",
+        )
+        steps[2] = PipelineStep(STEP_VECTOR, "running", "正在写入向量索引", self.vector_collection_name)
+        steps[3] = PipelineStep(STEP_KG, "running", "正在整理实体/关系", f"候选实体 {len(entities)} 个，候选关系 {len(relations)} 条")
+        self._notify_progress(steps)
 
         write_stats = self._replace_document_records(
             document_id,
@@ -400,6 +427,7 @@ class KnowledgeIngestionService:
             f"抽取 {write_stats['entity_count']} 个实体、{write_stats['relation_count']} 条关系",
             "规则词典抽取；后续可接入 LLM/Neo4j 在线抽取",
         )
+        self._notify_progress(steps)
         result = IngestionResult(
             document_id=document_id,
             title=source.stem,

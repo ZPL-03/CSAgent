@@ -50,3 +50,39 @@ def test_runtime_knowledge_ingestion_builds_chunks_kg_vector_index_and_dedupes(t
     relations = [json.loads(line) for line in service.relations_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     chunk_ids = {item["chunk_id"] for item in chunks}
     assert all(item["evidence_chunk_id"] in chunk_ids for item in relations)
+
+
+def test_runtime_knowledge_ingestion_emits_step_progress(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_USE_HASH_EMBEDDING", "1")
+    source = tmp_path / "pressure_hull_progress.md"
+    source.write_text(
+        "\n\n".join(
+            [
+                "# 复合材料外压圆柱耐压壳",
+                "T800G composite pressure hull 在 external pressure 下需要关注 buckling 和 imperfection sensitivity。",
+                "ASME RD-1172、PBIPF、Abaqus Lanczos 与 Static Riks 用于校核设计结果。",
+                "filament winding、curing 和铺层角度偏差是制造质量控制重点。",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    progress_events: list[list[dict]] = []
+
+    service = KnowledgeIngestionService(
+        base_dir=tmp_path / "knowledge",
+        chunk_token_size=40,
+        chunk_overlap_tokens=6,
+        progress_callback=lambda steps: progress_events.append([dict(step) for step in steps]),
+    )
+    result = service.ingest_file(source)
+
+    assert result.success
+    assert len(progress_events) >= 4
+    assert progress_events[0][0]["status"] == "running"
+    assert any(event[1]["status"] == "running" for event in progress_events)
+    assert any(event[2]["status"] == "running" for event in progress_events)
+    assert progress_events[-1][0]["status"] == "success"
+    assert progress_events[-1][1]["status"] == "success"
+    assert progress_events[-1][2]["status"] == "success"
+    assert progress_events[-1][3]["status"] in {"success", "warning"}

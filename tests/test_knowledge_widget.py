@@ -119,3 +119,32 @@ def test_knowledge_widget_renders_runtime_pipeline_and_evidence(monkeypatch, tmp
     finally:
         widget.close()
         app.processEvents()
+
+
+def test_knowledge_widget_updates_pipeline_from_ingest_progress(monkeypatch, tmp_path) -> None:
+    global _DOCS_PATH
+    _DOCS_PATH = tmp_path / "documents.jsonl"
+    _DOCS_PATH.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr("gui.knowledge_widget.DomainKnowledgeBase", FakeKnowledge)
+    monkeypatch.setattr("gui.knowledge_widget.KnowledgeIngestionService", FakeIngestionService)
+
+    app = _app()
+    widget = KnowledgeWidget()
+    try:
+        widget._on_ingest_progress(
+            [
+                {"name": "MinerU / Docling 文档解析", "status": "success", "message": "解析完成"},
+                {"name": "语义分块", "status": "running", "message": "正在生成文本块"},
+                {"name": "BGE-M3 向量化索引", "status": "pending", "message": "等待文本块"},
+                {"name": "Neo4j 实体/关系抽取", "status": "pending", "message": "等待文本块"},
+            ]
+        )
+
+        assert widget.pipeline_widget.steps[1].name == "语义分块"
+        assert widget.pipeline_widget.steps[1].detail == "正在生成文本块"
+        assert widget.pipeline_widget.steps[1].status == "running"
+        assert widget.parser_pill.text == "语义分块"
+    finally:
+        widget.close()
+        app.processEvents()
