@@ -2,25 +2,36 @@
 
 from __future__ import annotations
 
-from html import escape
-
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QTextBrowser
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from gui.theme import resolve_theme
 
 
-class ChatWidget(QTextBrowser):
-    """用于展示用户与智能体消息。"""
+class ChatWidget(QWidget):
+    """用于展示用户、智能体和工具调用消息的工作台消息流。"""
 
     def __init__(self) -> None:
         super().__init__()
         self.theme = "dark"
         self._messages: list[tuple[str, str]] = []
         self.empty_text = ""
-        self.setReadOnly(True)
-        self.setOpenExternalLinks(False)
-        self.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.empty_state: dict[str, str] = {}
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.content = QWidget()
+        self.content_layout = QVBoxLayout(self.content)
+        self.content_layout.setContentsMargins(18, 14, 18, 14)
+        self.content_layout.setSpacing(12)
+        self.scroll_area.setWidget(self.content)
+
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.addWidget(self.scroll_area)
         self.set_theme(self.theme)
 
     def set_empty_text(self, text: str) -> None:
@@ -28,23 +39,38 @@ class ChatWidget(QTextBrowser):
         if not self._messages:
             self._render_messages()
 
+    def set_empty_state(self, **items: str) -> None:
+        self.empty_state = {key: str(value) for key, value in items.items()}
+        if not self._messages:
+            self._render_messages()
+
     def set_theme(self, theme: str) -> None:
         self.theme = resolve_theme(theme)
-        self.document().setDefaultStyleSheet(self._stylesheet())
+        palette = self._palette()
+        self.scroll_area.setStyleSheet(
+            f"QScrollArea {{ background: {palette['canvas']}; border: none; }}"
+            f"QWidget {{ background: {palette['canvas']}; }}"
+        )
         self._render_messages()
 
     def clear(self) -> None:
         self._messages.clear()
-        super().clear()
+        self._render_messages()
 
     def add_message(self, sender: str, message: str) -> None:
         self._messages.append((str(sender), str(message)))
         self._render_messages()
-        self.verticalScrollBar().setValue(self.verticalScrollBar().maximum())
+        self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
+
+    def toPlainText(self) -> str:
+        if not self._messages:
+            return "\n".join(value for value in self.empty_state.values() if value)
+        return "\n".join(f"{sender}: {message}" for sender, message in self._messages)
 
     def _palette(self) -> dict[str, str]:
         if self.theme == "light":
             return {
+                "canvas": "#f8fbff",
                 "body": "#172033",
                 "muted": "#64748b",
                 "user_bg": "#2563eb",
@@ -60,8 +86,11 @@ class ChatWidget(QTextBrowser):
                 "tool_text": "#9a3412",
                 "avatar_bg": "#2563eb",
                 "avatar_text": "#ffffff",
+                "chip_bg": "#f1f5f9",
+                "chip_border": "#c8d2df",
             }
         return {
+            "canvas": "#0b111a",
             "body": "#dbe4ef",
             "muted": "#94a3b8",
             "user_bg": "#3b82f6",
@@ -77,32 +106,9 @@ class ChatWidget(QTextBrowser):
             "tool_text": "#ddd6fe",
             "avatar_bg": "#2563eb",
             "avatar_text": "#ffffff",
+            "chip_bg": "#182337",
+            "chip_border": "#334155",
         }
-
-    def _stylesheet(self) -> str:
-        color = self._palette()
-        return f"""
-            body {{
-                margin: 0;
-                color: {color["body"]};
-                font-size: 13px;
-                line-height: 1.45;
-            }}
-            .sender {{
-                font-weight: 700;
-                letter-spacing: 0;
-            }}
-            .time {{
-                color: {color["muted"]};
-                font-size: 11px;
-                padding-left: 8px;
-            }}
-            .bubble {{
-                border-radius: 10px;
-                padding: 10px 12px;
-                line-height: 1.45;
-            }}
-        """
 
     def _role(self, sender: str) -> str:
         upper = sender.upper()
@@ -124,47 +130,159 @@ class ChatWidget(QTextBrowser):
             return "".join(part[:1] for part in parts[:2]).upper()
         return sender[:1].upper()
 
-    def _message_html(self, sender: str, message: str) -> str:
-        text = escape(str(message)).replace("\n", "<br>")
-        sender_text = escape(str(sender))
-        color = self._palette()
-        role = self._role(sender)
-        if role == "user":
-            return (
-                "<table width='100%' cellspacing='0' cellpadding='4'>"
-                "<tr><td width='24%'></td><td align='right'>"
-                f"<div class='bubble' style='background:{color['user_bg']};color:{color['user_text']};'>"
-                f"<span class='sender'>{sender_text}</span><br>{text}</div>"
-                "</td></tr></table>"
-            )
-        if role == "system":
-            bg, border, fg = color["system_bg"], color["system_border"], color["system_text"]
-        elif role == "tool":
-            bg, border, fg = color["tool_bg"], color["tool_border"], color["tool_text"]
-        else:
-            bg, border, fg = color["agent_bg"], color["agent_border"], color["agent_text"]
-        avatar = escape(self._avatar(sender))
-        return (
-            "<table width='100%' cellspacing='0' cellpadding='4'>"
-            "<tr>"
-            f"<td width='36' valign='top'><div style='background:{color['avatar_bg']};color:{color['avatar_text']};"
-            "border-radius:16px;width:28px;height:28px;text-align:center;font-weight:700;'>"
-            f"{avatar}</div></td>"
-            "<td valign='top'>"
-            f"<div><span class='sender' style='color:{fg};'>{sender_text}</span></div>"
-            f"<div class='bubble' style='background:{bg};border:1px solid {border};color:{fg};'>{text}</div>"
-            "</td></tr></table>"
+    def _clear_layout(self) -> None:
+        while self.content_layout.count():
+            item = self.content_layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
+
+    def _label(self, text: str, color: str, size: int = 13, bold: bool = False) -> QLabel:
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        weight = "700" if bold else "400"
+        label.setStyleSheet(f"color:{color};font-size:{size}px;font-weight:{weight};background:transparent;")
+        return label
+
+    def _bubble(self, text: str, bg: str, border: str, fg: str, max_width: int = 760) -> QFrame:
+        frame = QFrame()
+        frame.setObjectName("chatBubble")
+        frame.setMaximumWidth(max_width)
+        frame.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Minimum)
+        frame.setStyleSheet(
+            f"QFrame#chatBubble {{ background:{bg}; border:1px solid {border}; border-radius:14px; }}"
         )
+        layout = QVBoxLayout(frame)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(6)
+        layout.addWidget(self._label(text, fg, 13))
+        return frame
+
+    def _avatar_label(self, text: str, bg: str, fg: str) -> QLabel:
+        avatar = QLabel(text)
+        avatar.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        avatar.setFixedSize(32, 32)
+        avatar.setStyleSheet(
+            f"background:{bg}; color:{fg}; border-radius:16px; font-size:13px; font-weight:700;"
+        )
+        return avatar
+
+    def _message_widget(self, sender: str, message: str) -> QWidget:
+        palette = self._palette()
+        role = self._role(sender)
+        row = QWidget()
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(10)
+
+        if role == "user":
+            row_layout.addStretch(1)
+            bubble = self._bubble(message, palette["user_bg"], palette["user_bg"], palette["user_text"], 700)
+            row_layout.addWidget(bubble)
+            return row
+
+        if role == "system":
+            bg, border, fg = palette["system_bg"], palette["system_border"], palette["system_text"]
+        elif role == "tool":
+            bg, border, fg = palette["tool_bg"], palette["tool_border"], palette["tool_text"]
+        else:
+            bg, border, fg = palette["agent_bg"], palette["agent_border"], palette["agent_text"]
+
+        row_layout.addWidget(self._avatar_label(self._avatar(sender), palette["avatar_bg"], palette["avatar_text"]), 0, Qt.AlignmentFlag.AlignTop)
+        column = QWidget()
+        column_layout = QVBoxLayout(column)
+        column_layout.setContentsMargins(0, 0, 0, 0)
+        column_layout.setSpacing(5)
+        column_layout.addWidget(self._label(sender, fg, 12, True))
+        column_layout.addWidget(self._bubble(message, bg, border, fg, 760))
+        row_layout.addWidget(column, 1)
+        return row
+
+    def _empty_widget(self) -> QWidget:
+        palette = self._palette()
+        box = QWidget()
+        layout = QVBoxLayout(box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(14)
+
+        layout.addWidget(self._label(self.empty_state.get("title", ""), palette["body"], 15, True))
+        layout.addWidget(self._label(self.empty_text, palette["muted"], 13))
+
+        user_row = QWidget()
+        user_layout = QHBoxLayout(user_row)
+        user_layout.setContentsMargins(0, 0, 0, 0)
+        user_layout.addStretch(1)
+        user_layout.addWidget(
+            self._bubble(
+                self.empty_state.get("user_prompt", ""),
+                palette["user_bg"],
+                palette["user_bg"],
+                palette["user_text"],
+                660,
+            )
+        )
+        layout.addWidget(user_row)
+
+        agent_row = QWidget()
+        agent_layout = QHBoxLayout(agent_row)
+        agent_layout.setContentsMargins(0, 0, 0, 0)
+        agent_layout.setSpacing(10)
+        agent_layout.addWidget(self._avatar_label("O", palette["avatar_bg"], palette["avatar_text"]), 0, Qt.AlignmentFlag.AlignTop)
+        agent_column = QWidget()
+        agent_column_layout = QVBoxLayout(agent_column)
+        agent_column_layout.setContentsMargins(0, 0, 0, 0)
+        agent_column_layout.setSpacing(6)
+        agent_column_layout.addWidget(self._label(self.empty_state.get("agent_title", "ORCHESTRATOR"), palette["user_bg"], 12, True))
+        agent_column_layout.addWidget(
+            self._bubble(
+                self.empty_state.get("agent_body", ""),
+                palette["agent_bg"],
+                palette["agent_border"],
+                palette["agent_text"],
+                760,
+            )
+        )
+        agent_layout.addWidget(agent_column, 1)
+        layout.addWidget(agent_row)
+
+        tool = self._bubble(
+            f"{self.empty_state.get('tool_title', '')}\n{self.empty_state.get('tool_body', '')}",
+            palette["tool_bg"],
+            palette["tool_border"],
+            palette["tool_text"],
+            760,
+        )
+        tool_container = QWidget()
+        tool_layout = QHBoxLayout(tool_container)
+        tool_layout.setContentsMargins(42, 0, 0, 0)
+        tool_layout.addWidget(tool)
+        tool_layout.addStretch(1)
+        layout.addWidget(tool_container)
+
+        chips = QWidget()
+        chips_layout = QHBoxLayout(chips)
+        chips_layout.setContentsMargins(42, 0, 0, 0)
+        chips_layout.setSpacing(10)
+        for key in ["evidence_a", "evidence_b"]:
+            chip = QLabel(self.empty_state.get(key, ""))
+            chip.setStyleSheet(
+                f"background:{palette['chip_bg']}; color:{palette['muted']}; border:1px solid {palette['chip_border']};"
+                "border-radius:12px; padding:4px 12px; font-size:12px;"
+            )
+            chips_layout.addWidget(chip)
+        chips_layout.addStretch(1)
+        layout.addWidget(chips)
+        layout.addStretch(1)
+        return box
 
     def _render_messages(self) -> None:
+        self._clear_layout()
         if not self._messages:
-            color = self._palette()
-            text = escape(self.empty_text)
-            super().setHtml(
-                f"<div style='border:1px dashed {color['agent_border']};"
-                f"background:{color['agent_bg']};color:{color['muted']};"
-                "border-radius:10px;padding:18px;line-height:1.6;'>"
-                f"{text}</div>"
-            )
+            self.content_layout.addWidget(self._empty_widget())
             return
-        super().setHtml("".join(self._message_html(sender, message) for sender, message in self._messages))
+        for sender, message in self._messages:
+            self.content_layout.addWidget(self._message_widget(sender, message))
+        self.content_layout.addStretch(1)

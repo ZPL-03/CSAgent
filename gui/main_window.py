@@ -283,6 +283,7 @@ class MainWindow(QMainWindow):
         self.chat_widget = ChatWidget()
         self.chat_widget.setMinimumHeight(220)
         self.chat_widget.set_empty_text(self.locale.text("chat.empty"))
+        self._apply_chat_empty_state()
         self.task_browser = QTextBrowser()
         self.task_browser.setHtml(self._initial_task_html())
         self.task_browser.setMinimumHeight(96)
@@ -887,6 +888,7 @@ class MainWindow(QMainWindow):
             button.setText(self.locale.text(key))
         self.input_line.setPlaceholderText(self.locale.text("input.placeholder"))
         self.chat_widget.set_empty_text(self.locale.text("chat.empty"))
+        self._apply_chat_empty_state()
         self.generate_button.setText(self.locale.text("button.start"))
         self.confirm_yes_button.setText(self.locale.text("button.confirm"))
         self.confirm_no_button.setText(self.locale.text("button.pause"))
@@ -930,6 +932,18 @@ class MainWindow(QMainWindow):
             self.status_label.setText(self.locale.text("status.waiting"))
         self._update_overview_cards()
         self._refresh_run_selector()
+
+    def _apply_chat_empty_state(self) -> None:
+        self.chat_widget.set_empty_state(
+            title=self.locale.text("chat.empty.title"),
+            user_prompt=self.locale.text("chat.empty.user_prompt"),
+            agent_title=self.locale.text("chat.empty.agent_title"),
+            agent_body=self.locale.text("chat.empty.agent_body"),
+            tool_title=self.locale.text("chat.empty.tool_title"),
+            tool_body=self.locale.text("chat.empty.tool_body"),
+            evidence_a=self.locale.text("chat.empty.evidence_a"),
+            evidence_b=self.locale.text("chat.empty.evidence_b"),
+        )
 
     def _set_busy(self, busy: bool, status_text: str) -> None:
         self.status_label.setText(self.locale.text("status.busy", status=status_text))

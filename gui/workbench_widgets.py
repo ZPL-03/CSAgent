@@ -198,7 +198,7 @@ class FlowDagWidget(QWidget):
         DagNode("FEM_AGENT", "有限元校核", "FEM_AGENT"),
         DagNode("REPORT_GEN", "报告生成", "REPORT_GEN"),
     ]
-    KNOWLEDGE_NODE = DagNode("KNOWLEDGE_AGENT", "项目 RAG/KG", "KNOWLEDGE_AGENT")
+    KNOWLEDGE_NODE = DagNode("KNOWLEDGE_AGENT", "检索证据 / RAG-KG", "KNOWLEDGE_AGENT")
 
     def __init__(self) -> None:
         super().__init__()
@@ -318,43 +318,81 @@ class FlowDagWidget(QWidget):
             painter.drawText(QRectF(x + 10, 25, 66, 20), Qt.AlignmentFlag.AlignLeft, label)
 
         count = len(self.MAIN_NODES)
-        gap = 16
+        gap = 22
         left = 26
         right = self.width() - 26
-        node_w = max(112, min(150, (right - left - gap * (count - 1)) / count))
-        node_h = 42
+        node_w = max(120, min(154, (right - left - gap * (count - 1)) / count))
+        node_h = 44
         y = 58
         rects: list[QRectF] = []
         for index, node in enumerate(self.MAIN_NODES):
             x = left + index * (node_w + gap)
             rect = QRectF(x, y, node_w, node_h)
             rects.append(rect)
-            self._draw_node(painter, rect, node, self.agent_states.get(node.agent, "waiting"), colors)
-            if index > 0:
-                prev = rects[index - 1]
-                self._draw_arrow(painter, QPointF(prev.right(), prev.center().y()), QPointF(rect.left(), rect.center().y()), colors)
 
-        knowledge_w = node_w * 1.35
+        for index in range(1, len(rects)):
+            prev = rects[index - 1]
+            rect = rects[index]
+            self._draw_arrow(
+                painter,
+                QPointF(prev.right(), prev.center().y()),
+                QPointF(rect.left(), rect.center().y()),
+                colors,
+            )
+
+        knowledge_w = min(node_w * 1.45, 236)
         branch_x = (rects[1].right() + rects[2].left()) / 2
-        knowledge_rect = QRectF(branch_x - knowledge_w / 2, y + 60, knowledge_w, 38)
-        branch_bottom = QPointF(branch_x, knowledge_rect.top())
-        painter.setPen(QPen(colors["line"], 1.1))
-        painter.drawLine(QPointF(branch_x, rects[1].bottom()), branch_bottom)
+        knowledge_rect = QRectF(branch_x - knowledge_w / 2, y + 62, knowledge_w, 40)
+        self._draw_branch(painter, branch_x, rects[1], knowledge_rect, colors)
+
+        for rect, node in zip(rects, self.MAIN_NODES):
+            self._draw_node(painter, rect, node, self.agent_states.get(node.agent, "waiting"), colors)
+
         painter.setFont(small_font)
         painter.setPen(colors["muted"])
-        painter.drawText(QRectF(branch_x - 86, rects[1].bottom() + 4, 172, 16), Qt.AlignmentFlag.AlignCenter, "检索 / 注入上下文")
+        painter.drawText(
+            QRectF(branch_x + 16, rects[1].bottom() + 9, 180, 16),
+            Qt.AlignmentFlag.AlignCenter,
+            "检索 / 证据注入",
+        )
         self._draw_node(painter, knowledge_rect, self.KNOWLEDGE_NODE, self.agent_states.get("KNOWLEDGE_AGENT", "waiting"), colors, accent="rag")
 
     def _draw_arrow(self, painter: QPainter, start: QPointF, end: QPointF, colors: dict[str, QColor]) -> None:
         y = start.y()
-        painter.setPen(QPen(colors["line"], 1.2))
-        painter.drawLine(QPointF(start.x() + 4, y), QPointF(end.x() - 9, y))
+        painter.setPen(QPen(colors["line"], 1.4))
+        painter.drawLine(QPointF(start.x() + 8, y), QPointF(end.x() - 10, y))
         painter.setBrush(QBrush(colors["line"]))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawPolygon(
             QPointF(end.x() - 3, y),
             QPointF(end.x() - 10, y - 4),
             QPointF(end.x() - 10, y + 4),
+        )
+
+    def _draw_branch(
+        self,
+        painter: QPainter,
+        branch_x: float,
+        orchestrator_rect: QRectF,
+        knowledge_rect: QRectF,
+        colors: dict[str, QColor],
+    ) -> None:
+        main_y = orchestrator_rect.center().y()
+        branch_start = QPointF(branch_x, main_y)
+        branch_end = QPointF(branch_x, knowledge_rect.top() - 8)
+
+        pen = QPen(colors["rag"], 1.3)
+        pen.setStyle(Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+        painter.drawLine(branch_start, branch_end)
+
+        painter.setBrush(QBrush(colors["rag"]))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(branch_start, 3.5, 3.5)
+        painter.drawPolygon(
+            QPointF(branch_end.x(), branch_end.y() + 6),
+            QPointF(branch_end.x() - 4, branch_end.y() - 2),
+            QPointF(branch_end.x() + 4, branch_end.y() - 2),
         )
 
     def _draw_node(
