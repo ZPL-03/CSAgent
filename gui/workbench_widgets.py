@@ -197,7 +197,7 @@ class PipelineStatusWidget(QWidget):
             PipelineStepView("KG 实体/关系抽取", "领域词典抽取 · JSONL 关系库", "pending"),
             PipelineStepView("检索验证 / 证据引用", "Top-k 命中 · chunk/关系可追溯", "pending"),
         ]
-        self.setMinimumHeight(260)
+        self.setMinimumHeight(270)
 
     def set_theme(self, theme: str) -> None:
         self.theme = resolve_theme(theme)
@@ -222,7 +222,7 @@ class PipelineStatusWidget(QWidget):
         self.update()
 
     def sizeHint(self) -> QSize:
-        return QSize(360, max(210, 70 + len(self.steps) * 46))
+        return QSize(360, max(280, 70 + len(self.steps) * 40))
 
     def paintEvent(self, event) -> None:
         colors = self._colors()
@@ -241,11 +241,18 @@ class PipelineStatusWidget(QWidget):
         painter.setPen(QPen(colors["border"], 1.1))
         painter.drawRoundedRect(card, 12, 12)
 
-        start_y = 68
+        start_y = 62.0
+        inner_bottom = max(start_y + 36.0, self.height() - 22.0)
+        step_gap = 40.0
+        if self.steps:
+            step_gap = min(46.0, max(36.0, (inner_bottom - start_y) / max(1, len(self.steps))))
         line_x = 34
         if len(self.steps) > 1:
             painter.setPen(QPen(colors["line"], 2.0))
-            painter.drawLine(QPointF(line_x, start_y + 9), QPointF(line_x, start_y + 9 + (len(self.steps) - 1) * 46))
+            painter.drawLine(
+                QPointF(line_x, start_y + 9),
+                QPointF(line_x, start_y + 9 + (len(self.steps) - 1) * step_gap),
+            )
 
         name_font = QFont(self.font())
         name_font.setPointSize(10)
@@ -253,17 +260,17 @@ class PipelineStatusWidget(QWidget):
         detail_font = QFont(self.font())
         detail_font.setPointSize(9)
         for index, step in enumerate(self.steps):
-            y = start_y + index * 46
+            y = start_y + index * step_gap
             color = _status_color(step.status)
             painter.setBrush(QBrush(color))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawEllipse(QPointF(line_x, y + 9), 6.5, 6.5)
             painter.setFont(name_font)
             painter.setPen(colors["text"])
-            painter.drawText(QRectF(58, y - 1, self.width() - 74, 20), Qt.AlignmentFlag.AlignLeft, step.name)
+            painter.drawText(QRectF(58, y - 1, self.width() - 74, 18), Qt.AlignmentFlag.AlignLeft, step.name)
             painter.setFont(detail_font)
             painter.setPen(colors["muted"])
-            painter.drawText(QRectF(58, y + 21, self.width() - 74, 18), Qt.AlignmentFlag.AlignLeft, step.detail)
+            painter.drawText(QRectF(58, y + 20, self.width() - 74, 16), Qt.AlignmentFlag.AlignLeft, step.detail)
 
     def _colors(self) -> dict[str, QColor]:
         if self.theme == "light":

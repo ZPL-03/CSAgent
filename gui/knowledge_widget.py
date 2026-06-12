@@ -353,6 +353,7 @@ class KnowledgeWidget(QWidget):
         self.graph_view = KnowledgeGraphView()
         self.evidence_browser = QTextBrowser()
         self.evidence_browser.setOpenExternalLinks(True)
+        self.evidence_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.summary_browser = QTextBrowser()
         self.summary_browser.setMaximumHeight(210)
         self.summary_browser.setOpenExternalLinks(True)
@@ -450,7 +451,7 @@ class KnowledgeWidget(QWidget):
         self._update_pipeline(merged_status)
         evidence_payload = self._retrieve_evidence(task, query_text) if load_evidence else {"query": "", "chunks": [], "relations": []}
         self._update_graph_view(evidence_payload)
-        self.evidence_browser.setHtml(self._evidence_html(evidence_payload))
+        self._set_evidence_payload(evidence_payload)
 
     def toHtml(self) -> str:
         """兼容测试和外部读取当前 HTML 摘要。"""
@@ -551,7 +552,7 @@ class KnowledgeWidget(QWidget):
             failure_html = f"<h3>批量入库部分失败</h3><p>{detail}</p>"
         self.refresh(query_text=self.search_input.text().strip() or DEFAULT_EVIDENCE_QUERY)
         if failure_html:
-            self.evidence_browser.setHtml(failure_html)
+            self._set_evidence_html(failure_html, scrollable=True)
 
     def _on_ingest_failed(self, message: str) -> None:
         self.parser_pill.set_state("解析失败", "failed")
@@ -564,7 +565,7 @@ class KnowledgeWidget(QWidget):
                 {"name": "检索验证 / 证据引用", "status": "pending", "message": "解析失败，未生成证据"},
             ]
         )
-        self.evidence_browser.setHtml(f"<h3>入库失败</h3><p>{escape(message)}</p>")
+        self._set_evidence_html(f"<h3>入库失败</h3><p>{escape(message)}</p>", scrollable=True)
 
     def _run_maintenance(self, operation: str) -> None:
         if self._maintenance_thread is not None or self._ingest_thread is not None:
@@ -615,11 +616,11 @@ class KnowledgeWidget(QWidget):
             path = str(payload.get("path") or "")
             self.refresh(load_evidence=False)
             self.parser_pill.set_state("快照已导出", "success")
-            self.evidence_browser.setHtml(f"<h3>知识库快照已导出</h3><p>{escape(path)}</p>")
+            self._set_evidence_html(f"<h3>知识库快照已导出</h3><p>{escape(path)}</p>", scrollable=True)
 
     def _on_maintenance_failed(self, message: str) -> None:
         self.parser_pill.set_state("维护失败", "failed")
-        self.evidence_browser.setHtml(f"<h3>知识库维护失败</h3><p>{escape(message)}</p>")
+        self._set_evidence_html(f"<h3>知识库维护失败</h3><p>{escape(message)}</p>", scrollable=True)
 
     def _search_from_input(self) -> None:
         query = self.search_input.text().strip() or DEFAULT_EVIDENCE_QUERY
@@ -872,6 +873,19 @@ class KnowledgeWidget(QWidget):
         else:
             lines.append("<p>当前没有命中的知识图谱关系。</p>")
         return "".join(lines)
+
+    def _set_evidence_payload(self, payload: dict[str, Any]) -> None:
+        chunks = payload.get("chunks") if isinstance(payload.get("chunks"), list) else []
+        relations = payload.get("relations") if isinstance(payload.get("relations"), list) else []
+        query = str(payload.get("query") or "").strip()
+        scrollable = bool(query or chunks or relations)
+        self._set_evidence_html(self._evidence_html(payload), scrollable=scrollable)
+
+    def _set_evidence_html(self, html: str, scrollable: bool) -> None:
+        policy = Qt.ScrollBarPolicy.ScrollBarAsNeeded if scrollable else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        self.evidence_browser.setVerticalScrollBarPolicy(policy)
+        self.evidence_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.evidence_browser.setHtml(html)
 
     def _page_text(self, item: dict[str, Any]) -> str:
         page_start = item.get("page_start")
