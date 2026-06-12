@@ -640,7 +640,11 @@ def test_settings_page_exposes_editable_runtime_configuration(monkeypatch) -> No
         assert "llm.primary.model" in window.settings_fields
         assert "abaqus.command" in window.settings_fields
         assert "knowledge.chunk_token_size" in window.settings_fields
+        assert "primary" in window.settings_health_labels
+        assert "fallback" in window.settings_health_labels
+        assert "knowledge" in window.settings_health_labels
         assert isinstance(window.settings_fields["llm.primary.model"], QLineEdit)
+        assert "csllm" in window.settings_health_labels["primary"].text()
         assert window.settings_save_button.isVisible() is True
         assert window.settings_reload_button.isVisible() is True
         assert window.settings_status_label.text()
@@ -702,6 +706,8 @@ def test_settings_page_persists_editable_runtime_configuration(monkeypatch, tmp_
     app = _app()
     window = MainWindow()
     try:
+        assert "csllm" in window.settings_health_labels["primary"].text()
+        assert "API_KEY" not in window.settings_health_labels["fallback"].text()
         window.settings_fields["llm.primary.model"].setText("csllm-check")
         window.settings_fields["abaqus.command"].setText("D:/Abaqus/Commands/abaqus.bat")
         window.settings_fields["pipeline.ratio.llm"].setText("3")

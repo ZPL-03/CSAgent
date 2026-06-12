@@ -186,6 +186,13 @@ def test_knowledge_graph_view_filters_and_resets_interactive_state() -> None:
         assert graph._pan.x() == 0.0
         assert graph._pan.y() == 0.0
         assert graph._manual_node_offsets == {}
+
+        graph.zoom_by(1.4)
+        assert graph._scale > 1.0
+        graph.set_show_labels(False)
+        assert graph.show_labels is False
+        graph.set_show_labels(True)
+        assert graph.show_labels is True
     finally:
         graph.close()
         app.processEvents()

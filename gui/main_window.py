@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import os
 import sys
 from datetime import datetime
 from dataclasses import dataclass, field
@@ -772,14 +773,71 @@ class MainWindow(QMainWindow):
         return page
 
     def _build_settings_right_page(self) -> QWidget:
-        return self._right_page(
-            "配置状态 · FACTS",
-            [
-                ("主模型", "默认调用耐压壳领域模型；不可用时走回退模型。"),
-                ("知识库", "项目运行时 RAG/KG 支持用户上传资料并实时更新。"),
-                ("主题语言", "支持简体中文 / English 和深色 / 亮色工程主题。"),
-            ],
-        )
+        page = QWidget()
+        page.setObjectName("resultRail")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(9)
+        header = QLabel("配置状态 · HEALTH")
+        header.setObjectName("sectionTitle")
+        layout.addWidget(header)
+        self.settings_health_labels: dict[str, QLabel] = {}
+        for key in ["primary", "fallback", "abaqus", "knowledge", "pipeline", "confirm"]:
+            card = QLabel()
+            card.setObjectName("statusLabel")
+            card.setWordWrap(True)
+            layout.addWidget(card)
+            self.settings_health_labels[key] = card
+        layout.addStretch(1)
+        self._refresh_settings_health_panel()
+        return page
+
+    def _refresh_settings_health_panel(self) -> None:
+        labels = getattr(self, "settings_health_labels", None)
+        if not labels:
+            return
+        app_config = load_app_config()
+        llm_config = load_llm_config()
+        backends = llm_config.get("backends") if isinstance(llm_config.get("backends"), list) else []
+        primary = backends[0] if backends else {}
+        fallback = backends[1] if len(backends) > 1 else {}
+        abaqus = app_config.get("abaqus") if isinstance(app_config.get("abaqus"), dict) else {}
+        pipeline = app_config.get("pipeline") if isinstance(app_config.get("pipeline"), dict) else {}
+        ratio = pipeline.get("candidate_source_ratio") if isinstance(pipeline.get("candidate_source_ratio"), dict) else {}
+        knowledge = app_config.get("project_knowledge") if isinstance(app_config.get("project_knowledge"), dict) else {}
+        conversation = app_config.get("conversation") if isinstance(app_config.get("conversation"), dict) else {}
+
+        def env_status(*names: object) -> str:
+            valid_names = [str(name).strip() for name in names if str(name or "").strip()]
+            if not valid_names:
+                return "未配置环境变量名"
+            configured = [name for name in valid_names if bool(os.getenv(name))]
+            return f"环境变量 {len(configured)}/{len(valid_names)} 已提供"
+
+        primary_env = env_status(primary.get("base_url_env"), primary.get("api_key_env"), primary.get("model_env"))
+        fallback_env = env_status(fallback.get("base_url_env"), fallback.get("api_key_env"), fallback.get("model_env"))
+        ratio_text = f"LLM:{ratio.get('llm', 0)} / 案例:{ratio.get('case_transfer', 0)} / DOE:{ratio.get('doe', 0)}"
+        confirm_steps = conversation.get("confirmation_steps", [])
+        if isinstance(confirm_steps, list) and confirm_steps:
+            confirm_text = "、".join(str(item) for item in confirm_steps)
+        else:
+            confirm_text = "未配置人工确认节点"
+        cards = {
+            "primary": ("主模型", f"{primary.get('model') or primary.get('model_env') or '-'}；{primary_env}"),
+            "fallback": ("回退模型", f"{fallback.get('model') or fallback.get('model_env') or '-'}；{fallback_env}"),
+            "abaqus": ("ABAQUS", f"{abaqus.get('command') or 'abaqus'}；用户子程序 {'启用' if abaqus.get('use_user_subroutine') else '关闭'}"),
+            "knowledge": (
+                "知识库",
+                f"chunk {knowledge.get('chunk_token_size', 512)} / overlap {knowledge.get('chunk_overlap_tokens', 64)}；"
+                f"top_k {knowledge.get('top_k', 5)} / KG {knowledge.get('kg_top_k', 8)}",
+            ),
+            "pipeline": ("候选来源", ratio_text),
+            "confirm": ("人工确认", confirm_text),
+        }
+        for key, (primary_text, secondary) in cards.items():
+            label = labels.get(key)
+            if label is not None:
+                label.setText(f"<b>{primary_text}</b><br>{secondary}")
 
     def _switch_workspace_page(self, index: int) -> None:
         button = self.nav_group.button(index)
@@ -1107,6 +1165,7 @@ class MainWindow(QMainWindow):
         for key, value in values.items():
             self._set_settings_value(key, value)
         self.settings_status_label.setText("配置已从本项目 YAML 文件重新载入。")
+        self._refresh_settings_health_panel()
 
     def _save_settings_from_page(self) -> None:
         app_config = load_app_config()
@@ -1179,6 +1238,7 @@ class MainWindow(QMainWindow):
         load_app_config.cache_clear()
         load_llm_config.cache_clear()
         self.settings_status_label.setText("设置已保存，新启动的流程会读取当前配置。")
+        self._refresh_settings_health_panel()
 
     def _build_monitor_page(self) -> QWidget:
         page = QWidget()
