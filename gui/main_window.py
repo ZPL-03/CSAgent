@@ -243,10 +243,10 @@ class MainWindow(QMainWindow):
         self.app_title_label.setObjectName("appTitle")
         self.app_subtitle_label = QLabel(self.locale.text("app.subtitle"))
         self.app_subtitle_label.setObjectName("appSubtitle")
-        self.logo_label = QLabel("C")
+        self.logo_label = QLabel("CS")
         self.logo_label.setObjectName("logoBadge")
         self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.logo_label.setFixedSize(36, 36)
+        self.logo_label.setFixedSize(38, 38)
         self.model_status_label = StatusPill(self.locale.text("model.current"), "success")
         self.language_label = QLabel(self.locale.text("section.language"))
         self.language_label.setObjectName("appSubtitle")
@@ -431,8 +431,8 @@ class MainWindow(QMainWindow):
 
         workflow_panel = QWidget()
         workflow_panel.setObjectName("centerWorkbench")
-        workflow_panel.setMinimumHeight(184)
-        workflow_panel.setMaximumHeight(232)
+        workflow_panel.setMinimumHeight(168)
+        workflow_panel.setMaximumHeight(198)
         workflow_layout = QVBoxLayout(workflow_panel)
         workflow_layout.setContentsMargins(0, 0, 0, 0)
         workflow_layout.setSpacing(0)
@@ -1063,12 +1063,35 @@ class MainWindow(QMainWindow):
         if stage == "completed":
             for key in states:
                 states[key] = "done"
+        failed_agent = self._failed_agent_for_stage(stage)
+        if failed_agent:
+            states[failed_agent] = "failed"
         return states
+
+    def _failed_agent_for_stage(self, stage: str) -> str | None:
+        if stage == "failed":
+            return "ORCHESTRATOR"
+        if not stage.endswith("_failed"):
+            return None
+        if stage.startswith("parse_task"):
+            return "ORCHESTRATOR"
+        if stage.startswith("generate_candidates"):
+            return "CANDIDATE_GEN"
+        if stage.startswith("screen_candidates"):
+            return "SCREENER"
+        if stage.startswith("evaluate_candidates"):
+            return "FEM_AGENT"
+        if stage.startswith("persist_knowledge"):
+            return "KNOWLEDGE_AGENT"
+        if stage.startswith("generate_report"):
+            return "REPORT_GEN"
+        return "ORCHESTRATOR"
 
     def _agent_status_label(self, state: str) -> str:
         key = {
             "done": "agent.done",
             "active": "agent.active",
+            "failed": "agent.failed",
             "waiting": "agent.waiting",
         }.get(state, "agent.waiting")
         return self.locale.text(key)
@@ -1660,9 +1683,14 @@ class MainWindow(QMainWindow):
         self._update_button_states()
 
     def _handle_failed(self, error_message: str) -> None:
+        self.session.stage = "failed"
+        self.session.pending_confirmation = None
         self.chat_widget.add_message("SYSTEM", f"执行失败：{error_message}")
         self.log_widget.append_log("SYSTEM", error_message)
         self.monitor_log_widget.append_log("SYSTEM", error_message)
+        self.status_label.setText(self.locale.text("status.busy", status=f"failed: {error_message}"))
+        self._update_overview_cards()
+        self._update_runtime_panel()
         self._update_button_states()
 
     def _initial_task_html(self) -> str:

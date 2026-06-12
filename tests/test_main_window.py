@@ -199,6 +199,26 @@ def test_monitor_page_contains_workflow_audit_widget(monkeypatch) -> None:
         app.processEvents()
 
 
+def test_main_window_marks_failed_stage_and_agent(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window.session.stage = "screen_candidates_failed"
+        assert window._agent_state_map()["SCREENER"] == "failed"
+        assert window._agent_status_label("failed") == "失败"
+
+        window._handle_failed("worker error")
+
+        assert window.session.stage == "failed"
+        assert window.session.pending_confirmation is None
+        assert window._agent_state_map()["ORCHESTRATOR"] == "failed"
+        assert "worker error" in window.status_label.text()
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_main_window_restores_workflow_snapshot(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     monkeypatch.setattr("gui.knowledge_widget.DomainKnowledgeBase", FakeKnowledge)

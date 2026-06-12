@@ -259,7 +259,7 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         background: {color["primary"]};
         color: #ffffff;
         border-radius: 8px;
-        font-size: 16px;
+        font-size: 13px;
         font-weight: 800;
     }}
     QLabel#modelChip {{
@@ -319,6 +319,11 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         background: {color["agent_card_done"]};
         border-color: {color["agent_done"]};
         color: {color["agent_done_text"]};
+    }}
+    QWidget#agentRail QLabel#agentCard[state="failed"] {{
+        background: {color["danger_bg"]};
+        border-color: {color["danger_border"]};
+        color: {color["danger_text"]};
     }}
     QWidget#agentRail QLabel#statusLabel {{
         background: {color["button_bg"]};

@@ -24,6 +24,7 @@ def test_locale_manager_persists_language(tmp_path) -> None:
     assert locale.language == "zh"
     assert locale.theme == "dark"
     assert locale.text("app.title") == "CSAgent"
+    assert locale.text("agent.failed") == "失败"
 
     locale.set_language("en")
     locale.set_theme("light")
@@ -47,6 +48,8 @@ def test_main_window_switches_primary_shell_language(monkeypatch, tmp_path) -> N
         assert window.locale.language == "en"
         assert window.app_title_label.text() == "CSAgent"
         assert window.app_subtitle_label.text() == "Multi-Agent Intelligent Design Platform"
+        assert window.logo_label.text() == "CS"
+        assert window.locale.text("agent.failed") == "Failed"
         assert window.generate_button.text() == "Send"
         assert window.restore_run_button.text() == "Restore Run State"
         assert "without re-running LLM or ABAQUS" in window.restore_run_button.toolTip()

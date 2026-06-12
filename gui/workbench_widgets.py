@@ -200,11 +200,11 @@ class FlowDagWidget(QWidget):
         self.agent_states: dict[str, str] = {node.agent: "waiting" for node in self.MAIN_NODES}
         self.agent_states["KNOWLEDGE_AGENT"] = "waiting"
         self.stage_text = "等待任务输入"
-        self.setMinimumHeight(176)
-        self.setMaximumHeight(222)
+        self.setMinimumHeight(166)
+        self.setMaximumHeight(190)
 
     def sizeHint(self) -> QSize:
-        return QSize(1040, 204)
+        return QSize(1040, 178)
 
     def set_theme(self, theme: str) -> None:
         self.theme = resolve_theme(theme)
@@ -225,9 +225,11 @@ class FlowDagWidget(QWidget):
                 "muted": QColor("#64748b"),
                 "done": QColor("#10b981"),
                 "active": QColor("#f59e0b"),
+                "failed": QColor("#dc2626"),
                 "waiting": QColor("#64748b"),
                 "active_fill": QColor("#fff7ed"),
                 "done_fill": QColor("#ecfdf5"),
+                "failed_fill": QColor("#fff1f2"),
                 "wait_fill": QColor("#f8fafc"),
                 "line": QColor("#334155"),
                 "rag": QColor("#8b5cf6"),
@@ -241,9 +243,11 @@ class FlowDagWidget(QWidget):
             "muted": QColor("#94a3b8"),
             "done": QColor("#34d399"),
             "active": QColor("#f59e0b"),
+            "failed": QColor("#fb7185"),
             "waiting": QColor("#64748b"),
             "active_fill": QColor("#1f2937"),
             "done_fill": QColor("#10251f"),
+            "failed_fill": QColor("#3c1822"),
             "wait_fill": QColor("#182337"),
             "line": QColor("#3b4a63"),
             "rag": QColor("#a78bfa"),
@@ -255,6 +259,8 @@ class FlowDagWidget(QWidget):
             return colors["done"]
         if state == "active":
             return colors["active"]
+        if state == "failed":
+            return colors["failed"]
         return colors["waiting"]
 
     def _fill_color(self, state: str, colors: dict[str, QColor]) -> QColor:
@@ -262,9 +268,13 @@ class FlowDagWidget(QWidget):
             return colors["done_fill"]
         if state == "active":
             return colors["active_fill"]
+        if state == "failed":
+            return colors["failed_fill"]
         return colors["wait_fill"]
 
     def _status_text(self, state: str) -> str:
+        if state == "failed":
+            return "失败"
         return {"done": "完成", "active": "运行中"}.get(state, "等待")
 
     def paintEvent(self, event) -> None:
@@ -291,9 +301,10 @@ class FlowDagWidget(QWidget):
         painter.setPen(colors["active"])
         painter.drawText(QRectF(250, 25, 320, 20), Qt.AlignmentFlag.AlignLeft, self.stage_text)
 
-        legend_x = max(470, self.width() - 265)
-        for index, (label, key) in enumerate([("完成", "done"), ("运行中", "active"), ("等待", "waiting")]):
-            x = legend_x + index * 82
+        legend_items = [("完成", "done"), ("运行中", "active"), ("失败", "failed"), ("等待", "waiting")]
+        legend_x = max(440, self.width() - 330)
+        for index, (label, key) in enumerate(legend_items):
+            x = legend_x + index * 76
             painter.setBrush(QBrush(colors[key]))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawEllipse(QPointF(x, 34), 5, 5)
@@ -301,12 +312,12 @@ class FlowDagWidget(QWidget):
             painter.drawText(QRectF(x + 10, 25, 66, 20), Qt.AlignmentFlag.AlignLeft, label)
 
         count = len(self.MAIN_NODES)
-        gap = 20
-        left = 34
-        right = self.width() - 34
-        node_w = max(116, min(166, (right - left - gap * (count - 1)) / count))
-        node_h = 44
-        y = 60
+        gap = 16
+        left = 26
+        right = self.width() - 26
+        node_w = max(112, min(150, (right - left - gap * (count - 1)) / count))
+        node_h = 42
+        y = 58
         rects: list[QRectF] = []
         for index, node in enumerate(self.MAIN_NODES):
             x = left + index * (node_w + gap)
@@ -319,7 +330,7 @@ class FlowDagWidget(QWidget):
 
         knowledge_w = node_w * 1.35
         branch_x = (rects[1].right() + rects[2].left()) / 2
-        knowledge_rect = QRectF(branch_x - knowledge_w / 2, y + 70, knowledge_w, 40)
+        knowledge_rect = QRectF(branch_x - knowledge_w / 2, y + 60, knowledge_w, 38)
         branch_bottom = QPointF(branch_x, knowledge_rect.top())
         painter.setPen(QPen(colors["line"], 1.1))
         painter.drawLine(QPointF(branch_x, rects[1].bottom()), branch_bottom)
