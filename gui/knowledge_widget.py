@@ -50,10 +50,15 @@ class KnowledgeGraphView(QWidget):
         self.relations: list[dict[str, Any]] = []
         self.highlight_relations: list[dict[str, Any]] = []
         self.filter_text = ""
+        self.show_labels = True
         self._scale = 1.0
         self._pan = QPointF(0.0, 0.0)
         self._drag_start: QPointF | None = None
         self._drag_pan_start = QPointF(0.0, 0.0)
+        self._drag_node_name: str | None = None
+        self._drag_node_start = QPointF(0.0, 0.0)
+        self._node_offset_start = QPointF(0.0, 0.0)
+        self._manual_node_offsets: dict[str, QPointF] = {}
         self._last_node_positions: dict[str, QPointF] = {}
         self.setMinimumHeight(190)
         self.setSizePolicy(self.sizePolicy().horizontalPolicy(), self.sizePolicy().verticalPolicy())
@@ -88,6 +93,19 @@ class KnowledgeGraphView(QWidget):
 
         self._scale = 1.0
         self._pan = QPointF(0.0, 0.0)
+        self._manual_node_offsets.clear()
+        self.update()
+
+    def zoom_by(self, factor: float) -> None:
+        """按比例缩放图谱画布。"""
+
+        self._scale = max(0.55, min(2.4, self._scale * factor))
+        self.update()
+
+    def set_show_labels(self, enabled: bool) -> None:
+        """设置节点标签显示状态。"""
+
+        self.show_labels = bool(enabled)
         self.update()
 
     def _colors(self) -> dict[str, QColor]:
@@ -214,7 +232,11 @@ class KnowledgeGraphView(QWidget):
         count = len(visible_nodes)
         for index, (name, _entity_type) in enumerate(visible_nodes):
             angle = -math.pi / 2.0 + 2.0 * math.pi * index / max(1, count)
-            positions[name] = QPointF(center.x() + radius_x * math.cos(angle), center.y() + radius_y * math.sin(angle))
+            offset = self._manual_node_offsets.get(name, QPointF(0.0, 0.0))
+            positions[name] = QPointF(
+                center.x() + radius_x * math.cos(angle) + offset.x(),
+                center.y() + radius_y * math.sin(angle) + offset.y(),
+            )
         self._last_node_positions = positions
 
         highlighted = {
@@ -248,11 +270,12 @@ class KnowledgeGraphView(QWidget):
             painter.setPen(QPen(colors["panel"], 1.5))
             radius = 10 if self.filter_text and self.filter_text in name.lower() else 8
             painter.drawEllipse(point, radius, radius)
-            label = label_metrics.elidedText(name, Qt.TextElideMode.ElideRight, 92)
-            label_rect = QRectF(point.x() - 48, point.y() + 11, 96, 18)
-            painter.setFont(label_font)
-            painter.setPen(colors["text"])
-            painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
+            if self.show_labels or (self.filter_text and self.filter_text in name.lower()):
+                label = label_metrics.elidedText(name, Qt.TextElideMode.ElideRight, 92)
+                label_rect = QRectF(point.x() - 48, point.y() + 11, 96, 18)
+                painter.setFont(label_font)
+                painter.setPen(colors["text"])
+                painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
 
     def wheelEvent(self, event) -> None:
         old_scale = self._scale
@@ -274,14 +297,29 @@ class KnowledgeGraphView(QWidget):
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
-            self._drag_start = event.position()
-            self._drag_pan_start = QPointF(self._pan)
+            hovered = self._hovered_node(event.position())
+            if hovered:
+                self._drag_node_name = hovered
+                self._drag_node_start = event.position()
+                self._node_offset_start = QPointF(self._manual_node_offsets.get(hovered, QPointF(0.0, 0.0)))
+            else:
+                self._drag_start = event.position()
+                self._drag_pan_start = QPointF(self._pan)
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
             event.accept()
             return
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event) -> None:
+        if self._drag_node_name is not None:
+            delta = event.position() - self._drag_node_start
+            self._manual_node_offsets[self._drag_node_name] = QPointF(
+                self._node_offset_start.x() + delta.x(),
+                self._node_offset_start.y() + delta.y(),
+            )
+            self.update()
+            event.accept()
+            return
         if self._drag_start is not None:
             delta = event.position() - self._drag_start
             self._pan = QPointF(self._drag_pan_start.x() + delta.x(), self._drag_pan_start.y() + delta.y())
@@ -293,6 +331,11 @@ class KnowledgeGraphView(QWidget):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._drag_node_name is not None:
+            self._drag_node_name = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return
         if event.button() == Qt.MouseButton.LeftButton and self._drag_start is not None:
             self._drag_start = None
             self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -449,7 +492,7 @@ class KnowledgeWidget(QWidget):
         self.document_stack = QStackedWidget()
         self.document_stack.addWidget(empty_page)
         self.document_stack.addWidget(self.document_table)
-        self.document_stack.setMaximumHeight(170)
+        self.document_stack.setMinimumHeight(160)
 
         self.pipeline_widget = PipelineStatusWidget()
         self.pipeline_widget.setMinimumHeight(238)
@@ -458,13 +501,31 @@ class KnowledgeWidget(QWidget):
         self.graph_view.setMinimumHeight(232)
         self.graph_search_input = QLineEdit()
         self.graph_search_input.setPlaceholderText("搜索图谱节点或关系")
-        self.graph_reset_button = QPushButton("适配图谱")
+        self.graph_reset_button = QPushButton("⟳")
+        self.graph_reset_button.setToolTip("适配图谱")
+        self.graph_zoom_in_button = QPushButton("+")
+        self.graph_zoom_in_button.setToolTip("放大图谱")
+        self.graph_zoom_out_button = QPushButton("−")
+        self.graph_zoom_out_button.setToolTip("缩小图谱")
+        self.graph_label_button = QPushButton("A")
+        self.graph_label_button.setToolTip("显示或隐藏节点标签")
+        self.graph_label_button.setCheckable(True)
+        self.graph_label_button.setChecked(True)
+        for button in [
+            self.graph_reset_button,
+            self.graph_zoom_in_button,
+            self.graph_zoom_out_button,
+            self.graph_label_button,
+        ]:
+            button.setObjectName("graphToolButton")
+            button.setFixedSize(34, 32)
         self.evidence_browser = QTextBrowser()
         self.evidence_browser.setOpenExternalLinks(True)
         self.evidence_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.evidence_browser.setMinimumHeight(150)
         self.summary_browser = QTextBrowser()
         self.summary_browser.setMaximumHeight(168)
+        self.summary_browser.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.summary_browser.setOpenExternalLinks(True)
         self.summary_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.summary_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -526,6 +587,9 @@ class KnowledgeWidget(QWidget):
         graph_header.addWidget(graph_label)
         graph_header.addWidget(self.graph_search_input, 1)
         graph_header.addWidget(self.graph_reset_button)
+        graph_header.addWidget(self.graph_zoom_in_button)
+        graph_header.addWidget(self.graph_zoom_out_button)
+        graph_header.addWidget(self.graph_label_button)
         right_layout.addLayout(graph_header)
         right_layout.addWidget(self.graph_view, 1)
         evidence_label = QLabel("检索证据 · EVIDENCE")
@@ -537,7 +601,7 @@ class KnowledgeWidget(QWidget):
         splitter.addWidget(left)
         splitter.addWidget(right)
         splitter.setChildrenCollapsible(False)
-        splitter.setSizes([760, 500])
+        splitter.setSizes([700, 560])
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -558,6 +622,9 @@ class KnowledgeWidget(QWidget):
         self.graph_search_input.returnPressed.connect(self._filter_graph_from_input)
         self.graph_search_input.textChanged.connect(lambda value: self.graph_view.set_filter_text(value))
         self.graph_reset_button.clicked.connect(self.graph_view.reset_view)
+        self.graph_zoom_in_button.clicked.connect(lambda: self.graph_view.zoom_by(1.18))
+        self.graph_zoom_out_button.clicked.connect(lambda: self.graph_view.zoom_by(0.84))
+        self.graph_label_button.toggled.connect(self.graph_view.set_show_labels)
 
     def refresh(
         self,
@@ -653,6 +720,9 @@ class KnowledgeWidget(QWidget):
             self.export_snapshot_button,
             self.refresh_button,
             self.graph_reset_button,
+            self.graph_zoom_in_button,
+            self.graph_zoom_out_button,
+            self.graph_label_button,
         ]:
             button.setEnabled(enabled)
 
@@ -907,8 +977,8 @@ class KnowledgeWidget(QWidget):
             self.document_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             return
         self.document_stack.setCurrentIndex(1)
-        self.document_stack.setMaximumHeight(16777215)
-        self.document_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.document_stack.setMaximumHeight(420)
+        self.document_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         for row_index, item in enumerate(rows):
             values = [
                 item.get("title") or item.get("file_name") or item.get("document_id") or "",

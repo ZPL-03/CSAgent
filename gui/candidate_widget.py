@@ -92,9 +92,12 @@ class CandidateWidget(QWidget):
         self.empty_body = QLabel(tr("candidate.empty_body", language=self.language))
         self.empty_body.setObjectName("configSubtitle")
         self.empty_body.setWordWrap(True)
+        self.empty_flow = QLabel("来源比例 LLM:案例迁移:DOE = 2:1:1；结构签名去重；候选阶段使用 TMP 编号；FEM 后分配正式 C 编号。")
+        self.empty_flow.setObjectName("configSubtitle")
+        self.empty_flow.setWordWrap(True)
         empty_layout.addWidget(self.empty_title)
         empty_layout.addWidget(self.empty_body)
-        empty_layout.addStretch(1)
+        empty_layout.addWidget(self.empty_flow)
 
         self.table_stack = QStackedWidget()
         self.table_stack.addWidget(self.empty_state)
@@ -146,6 +149,7 @@ class CandidateWidget(QWidget):
 
         right_widget = QWidget()
         right_widget.setLayout(right_layout)
+        self.right_widget = right_widget
 
         splitter = QSplitter()
         splitter.addWidget(left_widget)
@@ -178,6 +182,11 @@ class CandidateWidget(QWidget):
         )
         self.empty_title.setText(tr("candidate.empty", language=self.language))
         self.empty_body.setText(tr("candidate.empty_body", language=self.language))
+        self.empty_flow.setText(
+            "Source ratio LLM:case transfer:DOE = 2:1:1; structural signature deduplication; TMP IDs before FEM; formal C IDs after FEM."
+            if self.language == "en"
+            else "来源比例 LLM:案例迁移:DOE = 2:1:1；结构签名去重；候选阶段使用 TMP 编号；FEM 后分配正式 C 编号。"
+        )
         self._update_metric_cards()
         if not self.candidates:
             self.summary_label.setText(tr("candidate.empty", language=self.language))
@@ -273,12 +282,16 @@ class CandidateWidget(QWidget):
             self.table_stack.setMaximumHeight(16777215)
             self.table_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             self.detail_tabs.setMaximumHeight(16777215)
+            self.summary_label.setVisible(True)
             self.detail_tabs.setVisible(True)
+            self.right_widget.setVisible(True)
         else:
-            self.table_stack.setMaximumHeight(160)
+            self.table_stack.setMaximumHeight(148)
             self.table_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             self.detail_tabs.setMaximumHeight(360)
+            self.summary_label.setVisible(False)
             self.detail_tabs.setVisible(False)
+            self.right_widget.setVisible(False)
         source_counter: dict[str, int] = {}
 
         for row, candidate in enumerate(self.candidates):

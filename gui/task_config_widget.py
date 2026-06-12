@@ -112,7 +112,7 @@ class TaskConfigWidget(QWidget):
         self.content = QWidget()
         self.content_layout = QVBoxLayout(self.content)
         self.content_layout.setContentsMargins(14, 14, 14, 14)
-        self.content_layout.setSpacing(10)
+        self.content_layout.setSpacing(9)
         self.scroll_area.setWidget(self.content)
 
         layout = QVBoxLayout(self)
@@ -228,7 +228,7 @@ class TaskConfigWidget(QWidget):
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(10)
-        columns = columns or 2
+        columns = columns or (3 if len(groups) >= 5 else 2)
         for index, (group_title, rows) in enumerate(groups):
             card = self._card_widget(group_title, rows)
             grid.addWidget(card, index // columns, index % columns)
@@ -238,7 +238,6 @@ class TaskConfigWidget(QWidget):
 
         if note:
             self.content_layout.addWidget(self._fact_boundary_widget())
-        self.content_layout.addStretch(1)
         self._plain_text = self._compose_plain_text(title, subtitle, groups, note)
 
     def _header_widget(self, title: str, subtitle: str) -> QWidget:
@@ -262,8 +261,8 @@ class TaskConfigWidget(QWidget):
         card.setObjectName("configCard")
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 9, 12, 10)
-        layout.setSpacing(7)
+        layout.setContentsMargins(11, 8, 11, 9)
+        layout.setSpacing(6)
 
         title_label = QLabel(title)
         title_label.setObjectName("configCardTitle")
@@ -271,8 +270,8 @@ class TaskConfigWidget(QWidget):
 
         row_grid = QGridLayout()
         row_grid.setContentsMargins(0, 0, 0, 0)
-        row_grid.setHorizontalSpacing(9)
-        row_grid.setVerticalSpacing(5)
+        row_grid.setHorizontalSpacing(8)
+        row_grid.setVerticalSpacing(4)
         for row, (label, value) in enumerate(rows):
             key_label = QLabel(str(label))
             key_label.setObjectName("configKey")
@@ -285,7 +284,7 @@ class TaskConfigWidget(QWidget):
             row_grid.addWidget(value_label, row, 1, Qt.AlignmentFlag.AlignTop)
         row_grid.setColumnStretch(0, 0)
         row_grid.setColumnStretch(1, 1)
-        row_grid.setColumnMinimumWidth(0, 92)
+        row_grid.setColumnMinimumWidth(0, 82)
         layout.addLayout(row_grid)
         return card
 

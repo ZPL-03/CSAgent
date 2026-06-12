@@ -24,6 +24,7 @@ from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
     QComboBox,
+    QFileDialog,
     QFrame,
     QFormLayout,
     QGridLayout,
@@ -815,8 +816,24 @@ class MainWindow(QMainWindow):
         subtitle = QLabel("这里调整本地运行参数。密钥和私密凭据不写入 YAML，仍由 .env 和系统环境变量提供。")
         subtitle.setObjectName("configSubtitle")
         subtitle.setWordWrap(True)
-        content_layout.addWidget(header)
-        content_layout.addWidget(subtitle)
+        header_text = QWidget()
+        header_text_layout = QVBoxLayout(header_text)
+        header_text_layout.setContentsMargins(0, 0, 0, 0)
+        header_text_layout.setSpacing(5)
+        header_text_layout.addWidget(header)
+        header_text_layout.addWidget(subtitle)
+        header_text_layout.addWidget(self.settings_status_label)
+        header_actions = QHBoxLayout()
+        header_actions.setContentsMargins(0, 0, 0, 0)
+        header_actions.setSpacing(10)
+        header_actions.addWidget(self.settings_reload_button)
+        header_actions.addWidget(self.settings_save_button)
+        header_row = QHBoxLayout()
+        header_row.setContentsMargins(0, 0, 0, 0)
+        header_row.setSpacing(16)
+        header_row.addWidget(header_text, 1)
+        header_row.addLayout(header_actions)
+        content_layout.addLayout(header_row)
 
         app_config = load_app_config()
         llm_config = load_llm_config()
@@ -849,10 +866,9 @@ class MainWindow(QMainWindow):
             settings_overview.setColumnStretch(column, 1)
         content_layout.addLayout(settings_overview)
 
-        grid = QGridLayout()
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(12)
-        grid.setVerticalSpacing(12)
+        forms_layout = QVBoxLayout()
+        forms_layout.setContentsMargins(0, 0, 0, 0)
+        forms_layout.setSpacing(12)
         cards = [
             self._settings_form_card(
                 "模型与 API",
@@ -870,8 +886,8 @@ class MainWindow(QMainWindow):
             self._settings_form_card(
                 "求解器集成 · ABAQUS",
                 [
-                    ("命令", self._settings_line("abaqus.command", abaqus.get("command", "abaqus"))),
-                    ("用户子程序", self._settings_line("abaqus.user_subroutine", abaqus.get("user_subroutine", ""))),
+                    ("命令", self._settings_path_field("abaqus.command", abaqus.get("command", "abaqus"), "file")),
+                    ("用户子程序", self._settings_path_field("abaqus.user_subroutine", abaqus.get("user_subroutine", ""), "file")),
                     ("启用用户子程序", self._settings_combo("abaqus.use_user_subroutine", abaqus.get("use_user_subroutine", False), [("否", "false"), ("是", "true")])),
                     ("作业超时秒数", self._settings_line("abaqus.job_timeout_seconds", abaqus.get("job_timeout_seconds", 3600))),
                     ("最大重试", self._settings_line("abaqus.max_retries", abaqus.get("max_retries", 3))),
@@ -908,23 +924,11 @@ class MainWindow(QMainWindow):
                 ],
             ),
         ]
-        for index, card in enumerate(cards):
-            if len(cards) % 2 == 1 and index == len(cards) - 1:
-                grid.addWidget(card, index // 2, 0, 1, 2)
-            else:
-                grid.addWidget(card, index // 2, index % 2)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
-        content_layout.addLayout(grid)
+        for card in cards:
+            forms_layout.addWidget(card)
+        content_layout.addLayout(forms_layout)
 
-        actions = QHBoxLayout()
-        actions.setContentsMargins(0, 0, 0, 0)
-        actions.setSpacing(10)
-        actions.addWidget(self.settings_status_label, 1)
-        actions.addWidget(self.settings_reload_button)
-        actions.addWidget(self.settings_save_button)
-        content_layout.addLayout(actions)
-        content_layout.addStretch(1)
+        content_layout.addSpacing(8)
 
         scroll_area.setWidget(content)
         layout = QVBoxLayout(page)
@@ -960,6 +964,32 @@ class MainWindow(QMainWindow):
         field.setObjectName("settingsInput")
         self.settings_fields[key] = field
         return field
+
+    def _settings_path_field(self, key: str, value: object, mode: str) -> QWidget:
+        wrapper = QWidget()
+        wrapper.setObjectName("settingsPathField")
+        layout = QHBoxLayout(wrapper)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        field = self._settings_line(key, value)
+        button = QPushButton("…")
+        self._set_button_variant(button, "icon")
+        button.setFixedSize(34, 30)
+        button.setToolTip("选择本地路径")
+        button.clicked.connect(lambda _checked=False, line=field, pick_mode=mode: self._browse_settings_path(line, pick_mode))
+        layout.addWidget(field, 1)
+        layout.addWidget(button)
+        return wrapper
+
+    def _browse_settings_path(self, field: QLineEdit, mode: str) -> None:
+        current = field.text().strip()
+        start_dir = str(Path(current).parent) if current and Path(current).parent.exists() else str(PROJECT_ROOT)
+        if mode == "directory":
+            path = QFileDialog.getExistingDirectory(self, "选择目录", start_dir)
+        else:
+            path, _ = QFileDialog.getOpenFileName(self, "选择文件", start_dir, "All Files (*)")
+        if path:
+            field.setText(path)
 
     def _settings_combo(self, key: str, value: object, options: list[tuple[str, str]]) -> QComboBox:
         combo = QComboBox()

@@ -338,7 +338,7 @@ class FlowDagWidget(QWidget):
         left = 26.0
         right = max(left + 1.0, width - 26.0)
         available = max(1.0, right - left)
-        gap = max(6.0, min(14.0, available * 0.011))
+        gap = max(8.0, min(16.0, available * 0.012))
         node_w = (available - gap * (count - 1)) / count
         if node_w < 118.0:
             gap = max(4.0, min(10.0, (available - 106.0 * count) / max(1, count - 1)))
@@ -356,7 +356,7 @@ class FlowDagWidget(QWidget):
         branch_x = (rects[0].right() + rects[1].left()) / 2.0 if len(rects) > 1 else width / 2.0
         knowledge_h = 50.0
         knowledge_top = min(y + 66.0, max(y + 60.0, height - 22.0 - knowledge_h))
-        knowledge_w = min(max(220.0, node_w * 1.34), 252.0)
+        knowledge_w = min(max(236.0, node_w * 1.52), 308.0)
         knowledge_x = min(max(18.0, branch_x - knowledge_w / 2.0), max(18.0, width - knowledge_w - 18.0))
         knowledge_rect = QRectF(knowledge_x, knowledge_top, knowledge_w, knowledge_h)
         return {

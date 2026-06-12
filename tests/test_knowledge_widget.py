@@ -145,6 +145,9 @@ def test_knowledge_widget_renders_runtime_pipeline_and_evidence(monkeypatch, tmp
         assert widget.document_table.rowCount() == 1
         assert len(widget.graph_view.relations) == 1
         assert widget.graph_view.relations[0]["source"] == "Initial Imperfection"
+        assert widget.graph_zoom_in_button.toolTip()
+        assert widget.graph_zoom_out_button.toolTip()
+        assert widget.graph_label_button.isChecked() is True
     finally:
         widget.close()
         app.processEvents()
@@ -177,10 +180,12 @@ def test_knowledge_graph_view_filters_and_resets_interactive_state() -> None:
 
         graph._scale = 1.8
         graph._pan = QPointF(24.0, -12.0)
+        graph._manual_node_offsets["ASME RD-1172"] = QPointF(16.0, 8.0)
         graph.reset_view()
         assert graph._scale == 1.0
         assert graph._pan.x() == 0.0
         assert graph._pan.y() == 0.0
+        assert graph._manual_node_offsets == {}
     finally:
         graph.close()
         app.processEvents()
@@ -201,13 +206,51 @@ def test_knowledge_graph_view_pans_with_mouse_drag() -> None:
         graph.show()
         app.processEvents()
 
-        QTest.mousePress(graph, Qt.MouseButton.LeftButton, pos=QPoint(120, 120))
-        QTest.mouseMove(graph, QPoint(170, 146))
-        QTest.mouseRelease(graph, Qt.MouseButton.LeftButton, pos=QPoint(170, 146))
+        QTest.mousePress(graph, Qt.MouseButton.LeftButton, pos=QPoint(28, 232))
+        QTest.mouseMove(graph, QPoint(78, 246))
+        QTest.mouseRelease(graph, Qt.MouseButton.LeftButton, pos=QPoint(78, 246))
         app.processEvents()
 
         assert graph._pan.x() != 0.0
         assert graph._pan.y() != 0.0
+    finally:
+        graph.close()
+        app.processEvents()
+
+
+def test_knowledge_graph_view_drags_visible_node() -> None:
+    app = _app()
+    graph = KnowledgeGraphView()
+    try:
+        graph.resize(420, 260)
+        graph.set_graph(
+            entities=[
+                {"name": "ASME RD-1172", "type": "DesignFormula"},
+                {"name": "Buckling", "type": "FailureMode"},
+                {"name": "Manufacturing Quality", "type": "ManufacturingProcess"},
+            ],
+            relations=[
+                {"source": "ASME RD-1172", "relation": "PREDICTS", "target": "Buckling"},
+                {"source": "Manufacturing Quality", "relation": "AFFECTS", "target": "Buckling"},
+            ],
+        )
+        graph.show()
+        app.processEvents()
+        graph.grab()
+        app.processEvents()
+
+        start = graph._last_node_positions["ASME RD-1172"]
+        start_point = QPoint(int(start.x()), int(start.y()))
+        end_point = QPoint(int(start.x() + 34), int(start.y() + 18))
+        QTest.mousePress(graph, Qt.MouseButton.LeftButton, pos=start_point)
+        QTest.mouseMove(graph, end_point)
+        QTest.mouseRelease(graph, Qt.MouseButton.LeftButton, pos=end_point)
+        app.processEvents()
+
+        offset = graph._manual_node_offsets.get("ASME RD-1172")
+        assert offset is not None
+        assert offset.x() != 0.0
+        assert offset.y() != 0.0
     finally:
         graph.close()
         app.processEvents()

@@ -176,13 +176,31 @@ class ChatWidget(QWidget):
         target_min = min(max(min_width, 180), target_max)
         return target_max, target_min
 
+    def _wrapped_line_count(self, text: str, content_width: int) -> int:
+        metrics = self._text_metrics(13)
+        rect = metrics.boundingRect(
+            QRect(0, 0, max(120, content_width), 4000),
+            Qt.TextFlag.TextWordWrap,
+            str(text),
+        )
+        return max(1, round(rect.height() / max(1, metrics.lineSpacing())))
+
     def _content_width(self, text: str, target_max: int, target_min: int) -> int:
         metrics = self._text_metrics(13)
         value = str(text)
         line_widths = [metrics.horizontalAdvance(line.rstrip()) for line in value.splitlines() if line.strip()]
         natural = max(line_widths, default=0) + 28
         if natural >= target_max:
-            return target_max
+            best_width = target_max
+            best_lines = self._wrapped_line_count(value, max(120, target_max - 24))
+            for width in range(target_min, target_max + 1, 12):
+                lines = self._wrapped_line_count(value, max(120, width - 24))
+                if lines < best_lines:
+                    best_lines = lines
+                    best_width = width
+                if lines == best_lines and width < best_width:
+                    best_width = width
+            return min(target_max, max(target_min, best_width))
         return max(target_min, min(target_max, natural))
 
     def _wrapped_text_height(self, text: str, width: int) -> int:

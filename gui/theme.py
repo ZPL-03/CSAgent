@@ -527,6 +527,24 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         border-color: {color["accent"]};
         color: {color["accent"]};
     }}
+    QPushButton#graphToolButton {{
+        background: {color["button_bg"]};
+        border: 1px solid {color["border_soft"]};
+        color: {color["text"]};
+        border-radius: 8px;
+        min-width: 34px;
+        max-width: 34px;
+        min-height: 32px;
+        max-height: 32px;
+        padding: 0;
+        font-size: 13px;
+        font-weight: 800;
+    }}
+    QPushButton#graphToolButton:hover, QPushButton#graphToolButton:checked {{
+        background: {color["accent_soft"]};
+        border-color: {color["accent"]};
+        color: {color["accent"]};
+    }}
     QPushButton[variant="link"] {{
         background: transparent;
         border: 0;
@@ -549,6 +567,10 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
     }}
     QWidget#settingsCard QLabel {{
         background: transparent;
+    }}
+    QWidget#settingsPathField {{
+        background: transparent;
+        border: 0;
     }}
     QLabel#configTitle {{
         background: transparent;
