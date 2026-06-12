@@ -82,6 +82,18 @@ class WorkflowEventStore:
                 (status, utc_now_iso(), run_id),
             )
 
+    @staticmethod
+    def _snapshot_run_status(stage: str, pending_confirmation: Any) -> str:
+        if stage == "completed":
+            return "completed"
+        if stage.endswith("_failed"):
+            return "failed"
+        if stage.startswith("paused"):
+            return "paused"
+        if pending_confirmation or stage.startswith("awaiting_"):
+            return "waiting"
+        return "running"
+
     def append_event(self, event: WorkflowEvent) -> None:
         with self._connect() as conn:
             conn.execute(
@@ -107,6 +119,7 @@ class WorkflowEventStore:
     def save_snapshot(self, run_id: str, state: Dict[str, Any]) -> None:
         stage = str(state.get("stage") or "")
         pending = state.get("pending_confirmation")
+        run_status = self._snapshot_run_status(stage, pending)
         now = utc_now_iso()
         with self._connect() as conn:
             conn.execute(
@@ -118,7 +131,7 @@ class WorkflowEventStore:
             )
             conn.execute(
                 "UPDATE workflow_runs SET status = ?, updated_at = ? WHERE run_id = ?",
-                ("completed" if stage == "completed" else "running", now, run_id),
+                (run_status, now, run_id),
             )
 
     def load_snapshot(self, run_id: str) -> Dict[str, Any]:

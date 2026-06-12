@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from workflow.event_store import WorkflowEventStore
 from workflow.runtime import DesignWorkflowRuntime
 
@@ -88,6 +90,12 @@ class FakeOrchestrator:
         return {"markdown_path": "data/results/latest_report.md", "pdf_path": "data/results/latest_report.pdf"}
 
 
+class FailingScreenOrchestrator(FakeOrchestrator):
+    def screen_candidates(self, task, candidates):
+        self.calls.append("screen")
+        raise RuntimeError("screen failed")
+
+
 def test_workflow_runtime_persists_and_resumes_without_repeating_completed_nodes(tmp_path):
     store = WorkflowEventStore(tmp_path / "workflow.sqlite3")
     orchestrator = FakeOrchestrator()
@@ -99,6 +107,8 @@ def test_workflow_runtime_persists_and_resumes_without_repeating_completed_nodes
     assert state["pending_confirmation"] == "screen_candidates"
     assert state["source_counter"] == {"DOE": 1, "LLM": 1}
     assert orchestrator.calls == ["parse", "generate"]
+    waiting_runs = store.list_runs(limit=5)
+    assert waiting_runs[0]["status"] == "waiting"
 
     resumed = runtime.resume(state["run_id"])
     assert resumed["stage"] == "awaiting_screen_confirmation"
@@ -130,6 +140,7 @@ def test_workflow_runtime_persists_and_resumes_without_repeating_completed_nodes
 
     runs = store.list_runs(limit=5)
     assert runs[0]["run_id"] == state["run_id"]
+    assert runs[0]["status"] == "paused"
     assert runs[0]["stage"] == "paused_before_fem"
     assert runs[0]["pending_confirmation"] is None
 
@@ -172,3 +183,28 @@ def test_workflow_runtime_completes_full_approved_path(tmp_path):
     evaluate_event = next(event for event in tool_events if event["payload"].get("tool") == "evaluate_candidates")
     assert evaluate_event["payload"]["input_summary"]["candidates"]["count"] == 1
     assert evaluate_event["payload"]["output_summary"]["results"]["count"] == 1
+    runs = store.list_runs(limit=5)
+    assert runs[0]["status"] == "completed"
+
+
+def test_workflow_runtime_marks_failed_snapshot_and_run_status(tmp_path):
+    store = WorkflowEventStore(tmp_path / "workflow.sqlite3")
+    orchestrator = FailingScreenOrchestrator()
+    runtime = DesignWorkflowRuntime(orchestrator=orchestrator, event_store=store)
+
+    state = runtime.start("generate 2 candidates and keep 1")
+
+    with pytest.raises(RuntimeError, match="screen failed"):
+        runtime.continue_after_confirmation(state["run_id"], True)
+
+    runs = store.list_runs(limit=5)
+    assert runs[0]["run_id"] == state["run_id"]
+    assert runs[0]["status"] == "failed"
+    assert runs[0]["stage"] == "screen_candidates_failed"
+
+    snapshot = store.load_snapshot(state["run_id"])
+    assert snapshot["stage"] == "screen_candidates_failed"
+    assert "screen failed" in snapshot["error"]
+
+    event_types = [event["event_type"] for event in store.list_events(state["run_id"])]
+    assert "node_failed" in event_types
