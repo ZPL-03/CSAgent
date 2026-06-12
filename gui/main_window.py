@@ -57,7 +57,7 @@ from gui.log_widget import LogWidget
 from gui.report_widget import ReportWidget
 from gui.result_trace_widget import ResultTraceWidget
 from gui.task_config_widget import TaskConfigWidget
-from gui.theme import application_stylesheet, install_application_font
+from gui.theme import application_stylesheet, install_application_font, resolve_theme
 from gui.workbench_widgets import FlowDagWidget, StatusPill
 from gui.workflow_widget import WorkflowWidget
 from workflow.event_store import WorkflowEventStore
@@ -304,6 +304,8 @@ class MainWindow(QMainWindow):
         self.refresh_button = QPushButton(self.locale.text("button.refresh_knowledge"))
         self.open_report_button = QPushButton(self.locale.text("button.open_report"))
         self.export_data_button = QPushButton(self.locale.text("button.export_data"))
+        self.reset_view_button = QPushButton(self.locale.text("button.reset_view"))
+        self.fit_view_button = QPushButton(self.locale.text("button.fit_view"))
         self.run_selector = QComboBox()
         self.run_selector.setMinimumHeight(42)
         self.refresh_runs_button = QPushButton(self.locale.text("button.refresh_runs"))
@@ -340,6 +342,8 @@ class MainWindow(QMainWindow):
         self.dialog_header.setObjectName("sectionTitle")
         self.details_header = QLabel(self.locale.text("section.details"))
         self.details_header.setObjectName("sectionTitle")
+        self.live_view_control_label = QLabel(self.locale.text("plot.controls"))
+        self.live_view_control_label.setObjectName("chatStatus")
         self.agent_cards: dict[str, QLabel] = {}
         self.queue_label = QLabel(self.locale.text("queue.idle"))
         self.queue_label.setObjectName("statusLabel")
@@ -455,6 +459,7 @@ class MainWindow(QMainWindow):
         workbench_splitter.addWidget(workflow_panel)
         workbench_splitter.addWidget(chat_panel)
         workbench_splitter.setSizes([210, 800])
+        self.workbench_splitter = workbench_splitter
 
         workbench_page = QWidget()
         workbench_page.setObjectName("centerWorkbench")
@@ -467,6 +472,12 @@ class MainWindow(QMainWindow):
         right_layout.setSpacing(10)
         right_layout.addWidget(self.details_header)
         right_layout.addWidget(self.live_result_view, 2)
+        view_control_layout = QHBoxLayout()
+        view_control_layout.setSpacing(8)
+        view_control_layout.addWidget(self.live_view_control_label, 1)
+        view_control_layout.addWidget(self.reset_view_button)
+        view_control_layout.addWidget(self.fit_view_button)
+        right_layout.addLayout(view_control_layout)
         right_layout.addWidget(self.stats_header)
         right_layout.addLayout(stats_layout)
         right_layout.addWidget(self.log_header)
@@ -555,6 +566,7 @@ class MainWindow(QMainWindow):
         main_splitter.addWidget(self.right_stack)
         main_splitter.setChildrenCollapsible(False)
         main_splitter.setSizes([270, 960, 360])
+        self.main_splitter = main_splitter
         self.setCentralWidget(main_splitter)
 
     def _sidebar_page(self, title: str, cards: list[tuple[str, str]], footer: str = "") -> QWidget:
@@ -794,6 +806,8 @@ class MainWindow(QMainWindow):
         self._set_button_variant(self.refresh_button)
         self._set_button_variant(self.open_report_button, "secondary")
         self._set_button_variant(self.export_data_button, "secondary")
+        self._set_button_variant(self.reset_view_button, "secondary")
+        self._set_button_variant(self.fit_view_button, "secondary")
         self._set_button_variant(self.refresh_runs_button)
         self._set_button_variant(self.restore_run_button, "secondary")
         self._set_button_variant(self.screen_button)
@@ -805,14 +819,7 @@ class MainWindow(QMainWindow):
         self.flow_dag_widget.set_theme(self.locale.theme)
         self.model_status_label.set_theme(self.locale.theme)
         self.live_result_view.set_theme(self.locale.theme)
-        for pill in [
-            self.knowledge_widget.store_pill,
-            self.knowledge_widget.rag_pill,
-            self.knowledge_widget.kg_pill,
-            self.knowledge_widget.parser_pill,
-        ]:
-            pill.set_theme(self.locale.theme)
-        self.knowledge_widget.pipeline_widget.set_theme(self.locale.theme)
+        self.knowledge_widget.set_theme(self.locale.theme)
         self.chat_widget.set_theme(self.locale.theme)
         self.setStyleSheet(application_stylesheet(self.font_family, self.locale.theme))
 
@@ -837,6 +844,8 @@ class MainWindow(QMainWindow):
         self.refresh_button.clicked.connect(self._refresh_knowledge_view)
         self.open_report_button.clicked.connect(self._open_latest_report)
         self.export_data_button.clicked.connect(self._export_session_data)
+        self.reset_view_button.clicked.connect(self.live_result_view.reset_view)
+        self.fit_view_button.clicked.connect(self.live_result_view.fit_view)
         self.refresh_runs_button.clicked.connect(self._refresh_run_selector)
         self.restore_run_button.clicked.connect(self._restore_selected_run)
         self.run_selector.currentIndexChanged.connect(lambda: self._update_button_states())
@@ -897,6 +906,9 @@ class MainWindow(QMainWindow):
         self.refresh_button.setText(self.locale.text("button.refresh_knowledge"))
         self.open_report_button.setText(self.locale.text("button.open_report"))
         self.export_data_button.setText(self.locale.text("button.export_data"))
+        self.reset_view_button.setText(self.locale.text("button.reset_view"))
+        self.fit_view_button.setText(self.locale.text("button.fit_view"))
+        self.live_view_control_label.setText(self.locale.text("plot.controls"))
         self.refresh_runs_button.setText(self.locale.text("button.refresh_runs"))
         self.restore_run_button.setText(self.locale.text("button.restore_run"))
         self.restore_run_button.setToolTip(self.locale.text("tooltip.restore_run"))
@@ -957,6 +969,8 @@ class MainWindow(QMainWindow):
             self.refresh_button,
             self.open_report_button,
             self.export_data_button,
+            self.reset_view_button,
+            self.fit_view_button,
             self.refresh_runs_button,
             self.restore_run_button,
             self.screen_button,
@@ -998,7 +1012,7 @@ class MainWindow(QMainWindow):
         candidate_pool_target = requested_candidate_pool_size(self.session.task) if self.session.task else 0
         requested_top_k = requested_screen_top_k(self.session.task) if self.session.task else 0
         def metric_html(label: str, value: str) -> str:
-            value_color = "#172033" if self.locale.theme == "light" else "#e5edf7"
+            value_color = "#172033" if resolve_theme(self.locale.theme) == "light" else "#e5edf7"
             return (
                 "<span style='color:#94a3b8;font-size:12px;'>"
                 f"{label}</span><br>"
@@ -1141,6 +1155,7 @@ class MainWindow(QMainWindow):
 
         percent = self._stage_progress()
         self.queue_progress.setValue(percent)
+        self.queue_progress.setVisible(bool(self.session.task))
         if self.session.task:
             self.queue_label.setText(
                 self.locale.text("queue.progress", percent=percent)

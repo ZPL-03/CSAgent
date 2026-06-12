@@ -205,6 +205,19 @@ class InteractivePlotWidget(QWidget):
         self.plotter.reset_camera()
         self.plotter.render()
 
+    def reset_view(self) -> None:
+        """恢复当前视口的初始工程等轴测视角。"""
+        self._restore_initial_camera()
+
+    def fit_view(self) -> None:
+        """将当前三维结果重新适配到可视窗口。"""
+        if self.plotter is None:
+            self._update_static_pixmap()
+            return
+        self.plotter.reset_camera()
+        self._store_initial_camera()
+        self.plotter.render()
+
     def eventFilter(self, watched, event):
         if self.plotter is not None and watched is getattr(self.plotter, "interactor", None):
             if event.type() == QEvent.Type.MouseButtonDblClick:

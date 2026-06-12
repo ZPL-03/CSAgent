@@ -28,6 +28,7 @@ from core.case_memory import CaseMemoryIndex
 from core.domain_knowledge import DomainKnowledgeBase
 from core.knowledge_ingestion import KnowledgeIngestionService
 from core.paths import ABAQUS_RUNS_DIR, CASES_DIR, CASE_LIBRARY_DIR, MODELS_DIR
+from gui.theme import resolve_theme
 from gui.workbench_widgets import PipelineStatusWidget, StatusPill
 
 
@@ -63,6 +64,7 @@ class KnowledgeWidget(QWidget):
         super().__init__()
         self.knowledge_base = DomainKnowledgeBase()
         self.ingestion_service = KnowledgeIngestionService()
+        self.theme = "dark"
         self._last_task: dict[str, Any] | None = None
         self._ingest_thread: QThread | None = None
         self._ingest_worker: KnowledgeIngestWorker | None = None
@@ -100,6 +102,13 @@ class KnowledgeWidget(QWidget):
         self._build_layout()
         self._connect_signals()
         self.refresh(load_evidence=False)
+
+    def set_theme(self, theme: str) -> None:
+        self.theme = resolve_theme(theme)
+        for pill in [self.store_pill, self.rag_pill, self.vector_pill, self.kg_pill, self.parser_pill]:
+            pill.set_theme(self.theme)
+        self.pipeline_widget.set_theme(self.theme)
+        self.refresh(query_text=self.search_input.text().strip(), load_evidence=bool(self.search_input.text().strip()))
 
     def _build_layout(self) -> None:
         top_layout = QHBoxLayout()
@@ -305,12 +314,27 @@ class KnowledgeWidget(QWidget):
         self.summary_browser.setHtml("".join(html))
 
     def _summary_card(self, title: str, value: str) -> str:
+        if self.theme == "light":
+            border = "#c8d2df"
+            background = "#f8fafc"
+            muted = "#64748b"
+            foreground = "#172033"
+        else:
+            border = "#2b3a52"
+            background = "#111a28"
+            muted = "#64748b"
+            foreground = "#dbe4ef"
         return (
-            "<div style='border:1px solid #2b3a52;border-radius:8px;padding:8px 10px;background:#111a28;'>"
-            f"<span style='color:#64748b;font-size:12px;'>{escape(title)}</span><br>"
-            f"<span style='font-size:18px;font-weight:800;color:#dbe4ef;'>{escape(value)}</span>"
+            f"<div style='border:1px solid {border};border-radius:8px;padding:8px 10px;background:{background};'>"
+            f"<span style='color:{muted};font-size:12px;'>{escape(title)}</span><br>"
+            f"<span style='font-size:18px;font-weight:800;color:{foreground};'>{escape(value)}</span>"
             "</div>"
         )
+
+    def _html_card_style(self) -> str:
+        if self.theme == "light":
+            return "border:1px solid #c8d2df;border-radius:10px;padding:10px;margin:8px 0;background:#f8fafc;"
+        return "border:1px solid #2b3a52;border-radius:10px;padding:10px;margin:8px 0;background:#111a28;"
 
     def _update_document_table(self) -> None:
         documents_path = self.ingestion_service.documents_path
@@ -401,7 +425,7 @@ class KnowledgeWidget(QWidget):
                 ]
                 source_line = " · ".join(escape(str(part)) for part in source_parts if part)
                 lines.append(
-                    "<div style='border:1px solid #2b3a52;border-radius:10px;padding:10px;margin:8px 0;background:#111a28;'>"
+                    f"<div style='{self._html_card_style()}'>"
                     f"<b>{index}. {escape(str(title))}</b><br>"
                     f"<span style='color:#34d399;'>score {escape(str(item.get('score', '-')))}</span><br>"
                     f"<span style='color:#64748b;'>{source_line}</span>"

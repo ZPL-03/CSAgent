@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -150,6 +151,102 @@ def test_knowledge_widget_updates_pipeline_from_ingest_progress(monkeypatch, tmp
         assert widget.pipeline_widget.steps[1].status == "running"
         assert widget.pipeline_widget.steps[4].name == "检索验证 / 证据引用"
         assert widget.parser_pill.text == "语义分块"
+    finally:
+        widget.close()
+        app.processEvents()
+
+
+def test_knowledge_widget_runs_real_ingestion_pipeline(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CSDM_cph_USE_HASH_EMBEDDING", "1")
+
+    import gui.knowledge_widget as knowledge_module
+    from core.domain_knowledge import DomainKnowledgeBase as RealDomainKnowledgeBase
+    from core.knowledge_ingestion import KnowledgeIngestionService as RealKnowledgeIngestionService
+
+    base_dir = tmp_path / "runtime_knowledge"
+    vector_dir = base_dir / "chroma_db"
+    config = {
+        "project_knowledge": {
+            "enabled": True,
+            "base_dir": str(base_dir),
+            "upload_dir": str(base_dir / "uploads"),
+            "structured_dir": str(base_dir / "structured_text"),
+            "manifest_path": str(base_dir / "manifest.json"),
+            "rag_chunks_path": str(base_dir / "rag" / "rag_chunks.jsonl"),
+            "kg_dir": str(base_dir / "kg"),
+            "top_k": 5,
+            "kg_top_k": 8,
+            "max_snippet_chars": 1200,
+            "chunk_token_size": 48,
+            "chunk_overlap_tokens": 8,
+            "min_chunk_tokens": 20,
+            "vector_enabled": True,
+            "vector_chroma_dir": str(vector_dir),
+            "vector_collection_name": "csdm_cph_project_knowledge_test",
+            "vector_top_k_multiplier": 2,
+        }
+    }
+
+    class TempIngestionService(RealKnowledgeIngestionService):
+        def __init__(self, *args, **kwargs) -> None:
+            kwargs.setdefault("base_dir", base_dir)
+            kwargs.setdefault("chunk_token_size", 48)
+            kwargs.setdefault("chunk_overlap_tokens", 8)
+            kwargs.setdefault("min_chunk_tokens", 20)
+            super().__init__(*args, **kwargs)
+            self.vector_chroma_dir = vector_dir
+            self.vector_collection_name = "csdm_cph_project_knowledge_test"
+
+    monkeypatch.setattr(knowledge_module, "KnowledgeIngestionService", TempIngestionService)
+    monkeypatch.setattr(knowledge_module, "DomainKnowledgeBase", lambda: RealDomainKnowledgeBase(config))
+
+    source = tmp_path / "pressure_hull_upload.md"
+    source.write_text(
+        "\n\n".join(
+            [
+                "# pressure_hull_upload",
+                "复合材料外压圆柱耐压壳设计需要同时检查 ASME RD-1172 线性屈曲压力、PBIPF 极限压力预测和 ABAQUS 后屈曲校核。",
+                "初始缺陷幅值、铺层角 alpha beta、壁厚、半径和长度会影响 buckling 与 ultimate pressure，制造阶段需要控制缠绕角偏差和固化质量。",
+                "RAG 证据只用于候选提案上下文和人工审计，不替代代理公式、排序或有限元结果。",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    app = _app()
+    widget = KnowledgeWidget()
+    try:
+        widget.search_input.setText("外压圆柱壳 ASME PBIPF buckling")
+        widget.ingest_path(source)
+        deadline = time.monotonic() + 45
+        while widget._ingest_thread is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.05)
+        app.processEvents()
+
+        assert widget._ingest_thread is None
+        assert widget.store_pill.text == "知识库 1 文档"
+        assert widget.rag_pill.text.startswith("RAG ")
+        assert widget.vector_pill.text.startswith("Vector ")
+        assert widget.kg_pill.text.startswith("KG ")
+        assert widget.parser_pill.status == "success"
+        assert widget.document_table.rowCount() == 1
+        assert widget.pipeline_widget.steps[0].status == "success"
+        assert widget.pipeline_widget.steps[1].status == "success"
+        assert widget.pipeline_widget.steps[2].status in {"success", "warning"}
+        assert widget.pipeline_widget.steps[4].status in {"success", "warning"}
+
+        manifest = json.loads((base_dir / "manifest.json").read_text(encoding="utf-8"))
+        assert manifest["document_count"] == 1
+        assert manifest["rag_chunk_count"] >= 1
+        assert manifest["last_ingestion"]["title"] == "pressure_hull_upload"
+        verification = manifest["last_retrieval_verification"]
+        assert verification["hit_count"] >= 1
+        assert len(verification["evidence_chunks"]) >= 1
+
+        html = widget.toHtml()
+        assert "pressure_hull_upload" in html
+        assert "ASME" in html or "PBIPF" in html or "buckling" in html
     finally:
         widget.close()
         app.processEvents()

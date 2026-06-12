@@ -324,3 +324,50 @@ def test_main_window_updates_model_pill_for_fallback_llm_trace(monkeypatch) -> N
     finally:
         window.close()
         app.processEvents()
+
+
+def test_main_window_shell_layout_keeps_reference_workbench_structure(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window.resize(1680, 980)
+        window.main_splitter.setSizes([270, 1040, 370])
+        window.workbench_splitter.setSizes([190, 760])
+        window.locale.set_theme("dark")
+        window._apply_styles()
+        window._update_overview_cards()
+        window.show()
+        app.processEvents()
+
+        assert window.logo_label.text() == "CS"
+        assert window.app_title_label.text() == "CSAgent"
+        assert window.model_status_label.isVisible() is True
+        assert window.reset_view_button.isVisible() is True
+        assert window.fit_view_button.isVisible() is True
+        assert window.live_view_control_label.text()
+        assert "#e5edf7" in window.stage_card.text()
+        assert window.queue_progress.isVisible() is False
+
+        left_width, center_width, right_width = window.main_splitter.sizes()
+        assert 240 <= left_width <= 310
+        assert center_width >= 900
+        assert 320 <= right_width <= 430
+
+        dag_height, chat_height = window.workbench_splitter.sizes()
+        assert 160 <= dag_height <= 230
+        assert chat_height >= 520
+
+        for index, button in enumerate(window.nav_buttons):
+            window._switch_workspace_page(index)
+            app.processEvents()
+            assert button.isChecked() is True
+            assert window.stack.currentIndex() == index
+            assert window.left_stack.currentIndex() == index
+            assert window.right_stack.currentIndex() == index
+            assert window.stack.currentWidget().width() > 0
+            assert window.left_stack.currentWidget().width() > 0
+            assert window.right_stack.currentWidget().width() > 0
+    finally:
+        window.close()
+        app.processEvents()
