@@ -1,0 +1,274 @@
+{
+  "case_id": "CASE_13",
+  "candidate_id": "C13",
+  "display_name": "C13",
+  "created_at": "2026-06-12T06:59:19.757870",
+  "source": "abaqus_auto",
+  "task": {
+    "application": "复合材料外压圆柱耐压壳",
+    "load_conditions": {
+      "type": "external_pressure",
+      "label": "外部静水压力",
+      "external_pressure_MPa": 15.0
+    },
+    "boundary_conditions": {
+      "type": "END_CLAMPED",
+      "label": "两端固支",
+      "description": "圆柱耐压壳两端截面平动与转动约束，用于基准外压屈曲与后屈曲校核。",
+      "axial_edges": [
+        "X0",
+        "X1"
+      ],
+      "radial_constraint": true,
+      "rotation_constraint": true
+    },
+    "geometry_envelope": {
+      "length_mm": [
+        300.0,
+        800.0
+      ],
+      "radius_mm": [
+        80.0,
+        180.0
+      ],
+      "thickness_mm": [
+        5.0,
+        20.0
+      ],
+      "alpha_deg": [
+        10.0,
+        80.0
+      ],
+      "beta_deg": [
+        10.0,
+        80.0
+      ],
+      "imperfection_ratio": [
+        0.001,
+        0.01
+      ]
+    },
+    "material_system": {
+      "name": "T700/Epoxy",
+      "density_kg_per_m3": 1550,
+      "E1_GPa": 102.0,
+      "E2_GPa": 7.0,
+      "G12_GPa": 3.35,
+      "nu12": 0.16,
+      "Xt_MPa": 1400,
+      "Xc_MPa": 1050,
+      "Yt_MPa": 28,
+      "Yc_MPa": 105,
+      "S_MPa": 75,
+      "material_key": "T700_Epoxy",
+      "is_user_specified": false
+    },
+    "layup_constraints": {
+      "allowed_angles": [
+        0,
+        45,
+        -45,
+        90
+      ],
+      "symmetric": true,
+      "balanced": true,
+      "min_ratio_per_angle": 0.05
+    },
+    "candidate_generation_preferences": {
+      "total_candidates": 4,
+      "llm_candidates": null,
+      "case_transfer_candidates": null,
+      "doe_candidates": null,
+      "source_allocation_mode": "ratio_2_1_1"
+    },
+    "screening_preferences": {
+      "top_k_candidates": 1
+    },
+    "hull_type": "CYLINDRICAL",
+    "design_targets": {
+      "ultimate_pressure_min_MPa": 20.0,
+      "primary_objective": "最小壳体质量"
+    }
+  },
+  "design": {
+    "candidate_id": "C13",
+    "display_name": "C13",
+    "source": "DOE",
+    "hull_type": "CYLINDRICAL",
+    "geometry": {
+      "length_mm": 555.886,
+      "radius_mm": 107.84,
+      "thickness_mm": 18.064,
+      "alpha_deg": 65.233,
+      "beta_deg": 60.581,
+      "imperfection_ratio": 0.00441
+    },
+    "layup": {
+      "template_name": "BENCHMARK_A",
+      "layup": "[90_4/(90/±45/0)_8/90_4]",
+      "skin_layup": "[90_4/(90/±45/0)_8/90_4]",
+      "alpha_deg": 65.233,
+      "beta_deg": 60.581,
+      "ply_count": 40,
+      "angles_deg": [
+        90.0,
+        90.0,
+        90.0,
+        90.0,
+        90.0,
+        45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0,
+        -45.0,
+        0.0,
+        90.0,
+        90.0,
+        90.0,
+        90.0
+      ],
+      "skin_f0": 0.2,
+      "skin_f45": 0.4,
+      "skin_f90": 0.4
+    },
+    "material_system": {
+      "name": "T700/Epoxy",
+      "density_kg_per_m3": 1550.0,
+      "E1_GPa": 102.0,
+      "E2_GPa": 7.0,
+      "G12_GPa": 3.35,
+      "nu12": 0.16,
+      "Xt_MPa": 1400.0,
+      "Xc_MPa": 1050.0,
+      "Yt_MPa": 28.0,
+      "Yc_MPa": 105.0,
+      "S_MPa": 75.0,
+      "material_key": "T700_Epoxy"
+    },
+    "load_conditions": {
+      "type": "external_pressure",
+      "label": "外部静水压力",
+      "external_pressure_MPa": 15.0
+    },
+    "boundary_conditions": {
+      "type": "END_CLAMPED",
+      "label": "两端固支",
+      "description": "圆柱耐压壳两端截面平动与转动约束，用于基准外压屈曲与后屈曲校核。",
+      "axial_edges": [
+        "X0",
+        "X1"
+      ],
+      "radial_constraint": true,
+      "rotation_constraint": true
+    },
+    "design_targets": {
+      "ultimate_pressure_min_MPa": 20.0,
+      "primary_objective": "最小壳体质量"
+    },
+    "rule_check": {
+      "is_valid": true,
+      "errors": [],
+      "suggestions": [],
+      "details": {
+        "length_mm_ok": true,
+        "radius_mm_ok": true,
+        "thickness_mm_ok": true,
+        "alpha_deg_ok": true,
+        "beta_deg_ok": true,
+        "imperfection_ratio_ok": true,
+        "slenderness_ok": true,
+        "thickness_radius_ratio_ok": true,
+        "imperfection_positive_ok": true,
+        "layup_defined": true,
+        "ply_count_ok": true,
+        "balanced": true,
+        "angle_range_ok": true,
+        "solver_length_ok": true,
+        "solver_radius_ok": true,
+        "solver_thickness_ok": true,
+        "solver_imperfection_ok": true
+      }
+    },
+    "surrogate_ultimate_pressure_MPa": 200.176,
+    "surrogate_PBIPF_MPa": 200.176,
+    "surrogate_uncertainty_MPa": 6.111,
+    "asme_linear_buckling_pressure_MPa": 129.085,
+    "linear_buckling_source": "ASME RD-1172线性屈曲公式",
+    "surrogate_weight": 27.999,
+    "rationale": "DOE 拉丁超立方探索生成 | 材料=T700/Epoxy | 铺层模板=BENCHMARK_A",
+    "origin_summary": "",
+    "llm_output_excerpt": null,
+    "session_candidate_id": "TMP_4"
+  },
+  "abaqus_results": {
+    "candidate_id": "C13",
+    "session_candidate_id": "TMP_4",
+    "display_name": "C13",
+    "status": "success",
+    "retry_count": 0,
+    "ultimate_pressure_MPa": 119.308934,
+    "failure_pressure_MPa": 119.308934,
+    "linear_buckling_pressure_MPa": 115.15,
+    "first_mode_eigenvalue": 115.15,
+    "postbuckling_pressure_MPa": 119.308934,
+    "postbuckling_reference_pressure_MPa": 110.0,
+    "postbuckling_last_pressure_MPa": 119.308934,
+    "riks_lpf_max": 1.08462667,
+    "riks_lpf_last": 1.08462667,
+    "riks_time_at_lpf_max": 21.51781273,
+    "riks_time_last": 21.51781273,
+    "imperfection_amplitude_mm": 0.51540552,
+    "ultimate_pressure_basis": "一阶屈曲模态缺陷 Static Riks 最大 LPF × 基准外压",
+    "failure_mode": "非线性后屈曲极限点",
+    "max_displacement_mm": 65.807777,
+    "weight_kg_per_m2": 27.9992,
+    "verdict": "通过",
+    "abaqus_odb": "D:\\Project\\VS_Code\\CSDM_cph\\data\\abaqus_runs\\C13\\C13_post.odb",
+    "linear_buckling_odb": "D:\\Project\\VS_Code\\CSDM_cph\\data\\abaqus_runs\\C13\\C13.odb",
+    "postbuckling_odb": "D:\\Project\\VS_Code\\CSDM_cph\\data\\abaqus_runs\\C13\\C13_post.odb",
+    "abaqus_inp": "D:\\Project\\VS_Code\\CSDM_cph\\data\\abaqus_runs\\C13\\C13.inp",
+    "postbuckling_inp": "D:\\Project\\VS_Code\\CSDM_cph\\data\\abaqus_runs\\C13\\C13_post.inp",
+    "visualization_json": "D:\\Project\\VS_Code\\CSDM_cph\\data\\abaqus_runs\\C13\\C13_mode1.json",
+    "artifact_dir": "D:\\Project\\VS_Code\\CSDM_cph\\data\\abaqus_runs\\C13",
+    "error_type": null,
+    "error_log": null,
+    "mode_eigenvalues": [
+      115.15
+    ],
+    "load_summary": "外部静水压力：p=15.0 MPa",
+    "boundary_summary": "两端固支",
+    "diagnosis_summary": "外压圆柱壳有限元校核已完成，线性屈曲压力 115.15 MPa；极限压力按“一阶屈曲模态缺陷 Static Riks 最大 LPF × 基准外压”计算，基准外压 110.0 MPa，最大 LPF=1.08462667，得到极限压力 119.308934 MPa，当前结论为“通过”。",
+    "analysis_type": "linear_buckling_plus_first_mode_imperfection_riks",
+    "user_subroutine_used": false
+  },
+  "verdict": "通过",
+  "surrogate_pressure_error_pct": 67.78,
+  "fem_agent_retry_count": 0,
+  "task_id": "TASK_25",
+  "session_candidate_id": "TMP_4"
+}
