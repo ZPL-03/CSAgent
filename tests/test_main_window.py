@@ -539,7 +539,7 @@ def test_chat_empty_state_uses_adaptive_engineering_message_cards() -> None:
         bubbles = [item for item in widget.findChildren(QFrame) if item.objectName() == "chatBubble"]
         assert len(bubbles) >= 3
         widths = [bubble.width() for bubble in bubbles]
-        assert max(widths) <= int(widget.width() * 0.72)
+        assert max(widths) <= int(widget.width() * 0.78)
         assert min(widths) >= 220
         assert len(set(widths)) > 1
         assert any(label.text() == "U" for label in widget.findChildren(QLabel))

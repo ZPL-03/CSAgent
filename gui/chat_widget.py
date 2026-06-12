@@ -160,7 +160,7 @@ class ChatWidget(QWidget):
         if viewport_width <= 0:
             viewport_width = self.width()
         available = max(260, viewport_width - 136)
-        conversational_cap = max(320, int(viewport_width * 0.68))
+        conversational_cap = max(320, int(viewport_width * 0.78))
         available = min(available, conversational_cap)
         target_max = min(max_width, available)
         target_min = min(max(min_width, 180), target_max)
@@ -202,7 +202,7 @@ class ChatWidget(QWidget):
         units_by_line = [self._display_units(line) for line in value.splitlines() if line.strip()]
         display_units = max(units_by_line, default=self._display_units(value))
         cjk_unit = max(metrics.horizontalAdvance("汉"), metrics.averageCharWidth())
-        line_units = min(56, max(14, int(display_units * 0.62)))
+        line_units = min(76, max(14, int(display_units * 1.14)))
         estimated_line = int(line_units * cjk_unit + 30)
         natural = max(estimated_line, longest_token + 30)
         if natural >= target_max:
@@ -311,7 +311,7 @@ class ChatWidget(QWidget):
                 palette["user_bg"],
                 palette["user_bg"],
                 palette["user_text"],
-                760,
+                920,
                 220,
                 fit_content=True,
             )
@@ -337,7 +337,7 @@ class ChatWidget(QWidget):
                 palette["agent_bg"],
                 palette["agent_border"],
                 palette["agent_text"],
-                820,
+                980,
                 220,
                 fit_content=True,
             )
@@ -348,7 +348,7 @@ class ChatWidget(QWidget):
             palette["tool_bg"],
             palette["tool_border"],
             palette["tool_text"],
-            760,
+            980,
             220,
             fit_content=True,
         )
