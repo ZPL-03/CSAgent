@@ -72,66 +72,6 @@ class ConversationFlowController:
                 f"我已经把你的需求整理成结构化任务了，当前按 {describe_load_conditions(task_payload.get('load_conditions', {}))} "
                 f"和 {describe_boundary_conditions(task_payload.get('boundary_conditions', {}))} 来生成方案，候选池先按 {target_total} 个目标展开，后续初筛会保留 Top-{top_k}。"
             )
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
         if stage == "candidate_summary":
             return "我先按默认来源比例铺开初始方案池，再用代理模型做一轮便宜但有解释性的预筛选；来源拆分以有效候选统计为准。"
         if stage == "screening_summary":

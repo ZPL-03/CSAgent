@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import os
 from typing import Dict
 
@@ -41,18 +42,19 @@ class InteractivePlotWidget(QWidget):
         self._static_payload: Dict | None = None
         self._static_fallback: str = empty_message
         self._static_render_size: tuple[int, int] | None = None
+        self._scene_bounds: tuple[float, float, float, float, float, float] | None = None
         self._display_mode = "message"
 
         self.message_label = QLabel(empty_message)
         self.message_label.setObjectName("plotEmpty")
         self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.message_label.setWordWrap(True)
-        self.message_label.setMinimumHeight(320)
+        self.message_label.setMinimumHeight(0)
 
         self.static_label = QLabel()
         self.static_label.setObjectName("plotCanvas")
         self.static_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.static_label.setMinimumHeight(360)
+        self.static_label.setMinimumHeight(0)
         self.static_label.setWordWrap(True)
 
         self.plot_container = QWidget()
@@ -162,6 +164,7 @@ class InteractivePlotWidget(QWidget):
         self._static_payload = None
         self._static_fallback = message or self.empty_message
         self._static_render_size = None
+        self._scene_bounds = None
         self.static_label.clear()
         self._display_mode = "message"
         self.stack.setCurrentWidget(self.message_label)
@@ -210,9 +213,9 @@ class InteractivePlotWidget(QWidget):
         )
 
     def _target_static_size(self) -> tuple[int, int]:
-        size = self.static_label.size()
-        width = size.width() if size.width() > 0 else self.width()
-        height = size.height() if size.height() > 0 else self.height()
+        size = self.size()
+        width = size.width() if size.width() > 0 else self.static_label.width()
+        height = size.height() if size.height() > 0 else self.static_label.height()
         return max(320, width), max(240, height)
 
     def _rerender_static_if_needed(self) -> None:
@@ -246,11 +249,77 @@ class InteractivePlotWidget(QWidget):
         if self.plotter is not None:
             self._initial_camera_position = self.plotter.camera_position
 
-    def _apply_default_camera(self, zoom: float) -> None:
+    def _combined_bounds(self, meshes: list[tuple[object, Dict]]) -> tuple[float, float, float, float, float, float] | None:
+        bounds: list[tuple[float, float, float, float, float, float]] = []
+        for mesh, _kwargs in meshes:
+            raw_bounds = getattr(mesh, "bounds", None)
+            if raw_bounds is None or len(raw_bounds) != 6:
+                continue
+            try:
+                bounds.append(tuple(float(value) for value in raw_bounds))
+            except (TypeError, ValueError):
+                continue
+        if not bounds:
+            return None
+        return (
+            min(item[0] for item in bounds),
+            max(item[1] for item in bounds),
+            min(item[2] for item in bounds),
+            max(item[3] for item in bounds),
+            min(item[4] for item in bounds),
+            max(item[5] for item in bounds),
+        )
+
+    def _mesh_bounds(self, mesh: object) -> tuple[float, float, float, float, float, float] | None:
+        raw_bounds = getattr(mesh, "bounds", None)
+        if raw_bounds is None or len(raw_bounds) != 6:
+            return None
+        try:
+            return tuple(float(value) for value in raw_bounds)
+        except (TypeError, ValueError):
+            return None
+
+    def _apply_default_camera(self, zoom: float, bounds: tuple[float, float, float, float, float, float] | None = None) -> None:
         assert self.plotter is not None
-        self.plotter.view_isometric()
-        self.plotter.reset_camera()
-        self.plotter.camera.zoom(zoom)
+        bounds = bounds or self._scene_bounds
+        if bounds is None:
+            self.plotter.view_isometric()
+            self.plotter.reset_camera()
+            self.plotter.camera.zoom(zoom)
+            self._store_initial_camera()
+            self.plotter.render()
+            return
+
+        xmin, xmax, ymin, ymax, zmin, zmax = bounds
+        center = ((xmin + xmax) * 0.5, (ymin + ymax) * 0.5, (zmin + zmax) * 0.5)
+        dx = max(xmax - xmin, 1.0)
+        dy = max(ymax - ymin, 1.0)
+        dz = max(zmax - zmin, 1.0)
+        diagonal = max(math.sqrt(dx * dx + dy * dy + dz * dz), 1.0)
+        direction = (1.55, -1.8, 1.05)
+        norm = math.sqrt(sum(value * value for value in direction))
+        unit = tuple(value / norm for value in direction)
+        distance = diagonal * 1.85
+        camera_position = (
+            center[0] + unit[0] * distance,
+            center[1] + unit[1] * distance,
+            center[2] + unit[2] * distance,
+        )
+        camera = self.plotter.camera
+        camera.SetFocalPoint(*center)
+        camera.SetPosition(*camera_position)
+        camera.SetViewUp(0.0, 0.0, 1.0)
+        try:
+            camera.ParallelProjectionOn()
+            camera.SetParallelScale(max(diagonal * 0.44, dz * 0.82, dy * 0.68))
+        except Exception:
+            pass
+        try:
+            self.plotter.reset_camera_clipping_range(bounds)
+        except Exception:
+            self.plotter.reset_camera_clipping_range()
+        if zoom != 1.0:
+            self.plotter.camera.zoom(zoom)
         self._store_initial_camera()
         self.plotter.render()
 
@@ -270,7 +339,7 @@ class InteractivePlotWidget(QWidget):
         if self.plotter is None:
             self._update_static_pixmap()
             return
-        self.plotter.reset_camera()
+        self._apply_default_camera(1.0)
         self._store_initial_camera()
         self.plotter.render()
 
@@ -287,9 +356,9 @@ class InteractivePlotWidget(QWidget):
         assert self.plotter is not None
         self.plotter.clear()
         self.plotter.set_background(self._plot_background())
-        text_color = "#172033" if self.theme == "light" else "#dbe4ef"
-        self.plotter.add_text(title, position="upper_left", font_size=11, color=text_color)
+        self.plot_container.setToolTip(title)
         self.plotter.add_axes(line_width=2)
+        self._scene_bounds = None
         self._static_kind = None
         self._static_payload = None
         self._display_mode = "plot"
@@ -317,7 +386,8 @@ class InteractivePlotWidget(QWidget):
         assert self.plotter is not None
         for mesh, kwargs in meshes:
             self.plotter.add_mesh(mesh, **kwargs)
-        self._apply_default_camera(0.94)
+        self._scene_bounds = self._combined_bounds(meshes)
+        self._apply_default_camera(1.0, self._scene_bounds)
         return True
 
     def closeEvent(self, event) -> None:
@@ -357,7 +427,8 @@ class InteractivePlotWidget(QWidget):
         assert self.plotter is not None
         for mesh, kwargs in meshes:
             self.plotter.add_mesh(mesh, **kwargs)
-        self._apply_default_camera(0.94)
+        self._scene_bounds = self._combined_bounds(meshes)
+        self._apply_default_camera(1.0, self._scene_bounds)
 
     def show_mode_shape(self, result: Dict) -> None:
         scene = build_mode_shape_scene(result)
@@ -384,4 +455,5 @@ class InteractivePlotWidget(QWidget):
                 "width": 0.07,
             },
         )
-        self._apply_default_camera(0.92)
+        self._scene_bounds = self._mesh_bounds(mesh)
+        self._apply_default_camera(1.02, self._scene_bounds)

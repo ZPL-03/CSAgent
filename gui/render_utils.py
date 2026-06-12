@@ -191,9 +191,22 @@ def render_candidate_png_bytes(
                 )
             axis.plot([-length / 2.0, length / 2.0], [radius, radius], [0, 0], color=edge, linewidth=1.0, alpha=0.82)
             axis.plot([-length / 2.0, length / 2.0], [-radius, -radius], [0, 0], color=edge, linewidth=1.0, alpha=0.82)
-            axis.set_position([0.01, 0.01, 0.98, 0.98])
-            axis.set_box_aspect((max(length, 1.0), max(radius * 2.0, 1.0), max(radius * 2.0, 1.0)))
-            axis.view_init(elev=20, azim=-56)
+            axis.set_position([0.0, 0.0, 1.0, 1.0])
+            figure.subplots_adjust(left=0, right=1, bottom=0, top=1)
+            try:
+                axis.set_proj_type("ortho")
+            except Exception:
+                pass
+            try:
+                axis.set_box_aspect((max(length, 1.0), max(radius * 2.0, 1.0), max(radius * 2.0, 1.0)), zoom=1.14)
+            except TypeError:
+                axis.set_box_aspect((max(length, 1.0), max(radius * 2.0, 1.0), max(radius * 2.0, 1.0)))
+            radial_limit = radius * 1.1
+            axial_limit = length * 0.56
+            axis.set_xlim(-axial_limit, axial_limit)
+            axis.set_ylim(-radial_limit, radial_limit)
+            axis.set_zlim(-radial_limit, radial_limit)
+            axis.view_init(elev=18, azim=-56)
             axis.set_axis_off()
             if show_annotations:
                 axis.set_position([0.02, 0.02, 0.96, 0.9])
@@ -389,8 +402,15 @@ def render_mode_shape_png_bytes(
     axis.set_xlim(centers[0] - half, centers[0] + half)
     axis.set_ylim(centers[1] - half, centers[1] + half)
     axis.set_zlim(centers[2] - half, centers[2] + half)
-    axis.set_box_aspect((1, 1, 1))
-    axis.view_init(elev=22, azim=-58)
+    try:
+        axis.set_proj_type("ortho")
+    except Exception:
+        pass
+    try:
+        axis.set_box_aspect((1, 1, 1), zoom=1.08)
+    except TypeError:
+        axis.set_box_aspect((1, 1, 1))
+    axis.view_init(elev=20, azim=-58)
     axis.set_xlabel("X / mm", **text_props)
     axis.set_ylabel("Y / mm", **text_props)
     axis.set_zlabel("Z / mm", **text_props)
@@ -410,7 +430,7 @@ def render_mode_shape_png_bytes(
     mappable.set_array(face_values)
     colorbar = figure.colorbar(mappable, ax=axis, shrink=0.72, pad=0.08)
     colorbar.set_label(str(scalar_name), **text_props)
-    figure.tight_layout()
+    figure.subplots_adjust(left=0.02, right=0.92, bottom=0.02, top=0.96)
 
     buffer = io.BytesIO()
     canvas.print_png(buffer)
