@@ -10,8 +10,11 @@ from PyQt6.QtWidgets import (
     QGridLayout,
     QHeaderView,
     QHBoxLayout,
+    QFrame,
     QLabel,
+    QSizePolicy,
     QSplitter,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -79,6 +82,26 @@ class CandidateWidget(QWidget):
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.itemSelectionChanged.connect(self._refresh_detail)
 
+        self.empty_state = QFrame()
+        self.empty_state.setObjectName("configCard")
+        empty_layout = QVBoxLayout(self.empty_state)
+        empty_layout.setContentsMargins(16, 14, 16, 14)
+        empty_layout.setSpacing(8)
+        self.empty_title = QLabel(tr("candidate.empty", language=self.language))
+        self.empty_title.setObjectName("configCardTitle")
+        self.empty_body = QLabel(tr("candidate.empty_body", language=self.language))
+        self.empty_body.setObjectName("configSubtitle")
+        self.empty_body.setWordWrap(True)
+        empty_layout.addWidget(self.empty_title)
+        empty_layout.addWidget(self.empty_body)
+        empty_layout.addStretch(1)
+
+        self.table_stack = QStackedWidget()
+        self.table_stack.addWidget(self.empty_state)
+        self.table_stack.addWidget(self.table)
+        self.table_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.table_stack.setMaximumHeight(160)
+
         self.summary_label = QLabel(tr("candidate.empty", language=self.language))
         self.summary_label.setWordWrap(True)
 
@@ -104,12 +127,14 @@ class CandidateWidget(QWidget):
         self.detail_tabs.addTab(self.detail_browser, tr("candidate.tab.detail", language=self.language))
         self.detail_tabs.addTab(self.audit_browser, tr("candidate.tab.audit", language=self.language))
         self.detail_tabs.addTab(self.preview_widget, tr("candidate.tab.preview", language=self.language))
+        self.detail_tabs.setMaximumHeight(360)
 
         left_layout = QVBoxLayout()
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
         left_layout.addLayout(metric_layout)
-        left_layout.addWidget(self.table, 1)
+        left_layout.addWidget(self.table_stack)
+        left_layout.addStretch(1)
         left_widget = QWidget()
         left_widget.setLayout(left_layout)
 
@@ -129,7 +154,7 @@ class CandidateWidget(QWidget):
 
         layout = QHBoxLayout(self)
         layout.addWidget(splitter)
-        self._update_metric_cards()
+        self.update_candidates([])
 
     def _metric_label(self) -> QLabel:
         label = QLabel()
@@ -151,6 +176,8 @@ class CandidateWidget(QWidget):
             language,
             tr("candidate.preview_empty", language=self.language),
         )
+        self.empty_title.setText(tr("candidate.empty", language=self.language))
+        self.empty_body.setText(tr("candidate.empty_body", language=self.language))
         self._update_metric_cards()
         if not self.candidates:
             self.summary_label.setText(tr("candidate.empty", language=self.language))
@@ -241,6 +268,17 @@ class CandidateWidget(QWidget):
             self.results_by_session_id = dict(results_by_session_id)
 
         self.table.setRowCount(len(self.candidates))
+        self.table_stack.setCurrentIndex(1 if self.candidates else 0)
+        if self.candidates:
+            self.table_stack.setMaximumHeight(16777215)
+            self.table_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            self.detail_tabs.setMaximumHeight(16777215)
+            self.detail_tabs.setVisible(True)
+        else:
+            self.table_stack.setMaximumHeight(160)
+            self.table_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            self.detail_tabs.setMaximumHeight(360)
+            self.detail_tabs.setVisible(False)
         source_counter: dict[str, int] = {}
 
         for row, candidate in enumerate(self.candidates):

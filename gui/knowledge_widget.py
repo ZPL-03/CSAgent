@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QLineEdit,
     QPushButton,
     QFrame,
+    QSizePolicy,
     QSplitter,
     QStackedWidget,
     QTableWidget,
@@ -448,9 +449,13 @@ class KnowledgeWidget(QWidget):
         self.document_stack = QStackedWidget()
         self.document_stack.addWidget(empty_page)
         self.document_stack.addWidget(self.document_table)
+        self.document_stack.setMaximumHeight(170)
 
         self.pipeline_widget = PipelineStatusWidget()
+        self.pipeline_widget.setMinimumHeight(238)
+        self.pipeline_widget.setMaximumHeight(276)
         self.graph_view = KnowledgeGraphView()
+        self.graph_view.setMinimumHeight(232)
         self.graph_search_input = QLineEdit()
         self.graph_search_input.setPlaceholderText("搜索图谱节点或关系")
         self.graph_reset_button = QPushButton("适配图谱")
@@ -459,7 +464,7 @@ class KnowledgeWidget(QWidget):
         self.evidence_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.evidence_browser.setMinimumHeight(150)
         self.summary_browser = QTextBrowser()
-        self.summary_browser.setMaximumHeight(190)
+        self.summary_browser.setMaximumHeight(168)
         self.summary_browser.setOpenExternalLinks(True)
         self.summary_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.summary_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -478,12 +483,12 @@ class KnowledgeWidget(QWidget):
 
     def _build_layout(self) -> None:
         top_layout = QHBoxLayout()
-        top_layout.setSpacing(10)
+        top_layout.setSpacing(8)
         top_layout.addWidget(self.search_input, 1)
         top_layout.addWidget(self.search_button)
 
         action_layout = QHBoxLayout()
-        action_layout.setSpacing(10)
+        action_layout.setSpacing(8)
         action_layout.addWidget(self.upload_button)
         action_layout.addWidget(self.batch_button)
         action_layout.addWidget(self.rebuild_button)
@@ -492,7 +497,7 @@ class KnowledgeWidget(QWidget):
         action_layout.addStretch(1)
 
         pill_layout = QHBoxLayout()
-        pill_layout.setSpacing(10)
+        pill_layout.setSpacing(8)
         for pill in [self.store_pill, self.rag_pill, self.vector_pill, self.kg_pill, self.parser_pill]:
             pill_layout.addWidget(pill)
         pill_layout.addStretch(1)
@@ -500,35 +505,43 @@ class KnowledgeWidget(QWidget):
         left = QWidget()
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(12)
+        left_layout.setSpacing(9)
         left_layout.addWidget(self.summary_browser)
-        left_layout.addWidget(QLabel("资料库 · DOCUMENTS"))
-        left_layout.addWidget(self.document_stack, 1)
+        document_label = QLabel("资料库 · DOCUMENTS")
+        document_label.setObjectName("sectionTitle")
+        left_layout.addWidget(document_label)
+        left_layout.addWidget(self.document_stack)
+        left_layout.addStretch(1)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
         right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(12)
+        right_layout.setSpacing(9)
         right_layout.addWidget(self.pipeline_widget)
         graph_header = QHBoxLayout()
         graph_header.setContentsMargins(0, 0, 0, 0)
         graph_header.setSpacing(8)
-        graph_header.addWidget(QLabel("知识图谱 · GRAPH"))
+        graph_label = QLabel("知识图谱 · GRAPH")
+        graph_label.setObjectName("sectionTitle")
+        graph_header.addWidget(graph_label)
         graph_header.addWidget(self.graph_search_input, 1)
         graph_header.addWidget(self.graph_reset_button)
         right_layout.addLayout(graph_header)
-        right_layout.addWidget(self.graph_view)
-        right_layout.addWidget(QLabel("检索证据 · EVIDENCE"))
+        right_layout.addWidget(self.graph_view, 1)
+        evidence_label = QLabel("检索证据 · EVIDENCE")
+        evidence_label.setObjectName("sectionTitle")
+        right_layout.addWidget(evidence_label)
         right_layout.addWidget(self.evidence_browser, 1)
 
         splitter = QSplitter()
         splitter.addWidget(left)
         splitter.addWidget(right)
-        splitter.setSizes([700, 390])
+        splitter.setChildrenCollapsible(False)
+        splitter.setSizes([760, 500])
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(12)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
         layout.addLayout(top_layout)
         layout.addLayout(action_layout)
         layout.addLayout(pill_layout)
@@ -890,8 +903,12 @@ class KnowledgeWidget(QWidget):
         self.document_table.setRowCount(len(rows))
         if not rows:
             self.document_stack.setCurrentIndex(0)
+            self.document_stack.setMaximumHeight(170)
+            self.document_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             return
         self.document_stack.setCurrentIndex(1)
+        self.document_stack.setMaximumHeight(16777215)
+        self.document_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         for row_index, item in enumerate(rows):
             values = [
                 item.get("title") or item.get("file_name") or item.get("document_id") or "",

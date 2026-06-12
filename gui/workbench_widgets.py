@@ -311,11 +311,11 @@ class FlowDagWidget(QWidget):
         self.agent_states: dict[str, str] = {node.agent: "waiting" for node in self.MAIN_NODES}
         self.agent_states["KNOWLEDGE_AGENT"] = "waiting"
         self.stage_text = "等待任务输入"
-        self.setMinimumHeight(190)
-        self.setMaximumHeight(218)
+        self.setMinimumHeight(178)
+        self.setMaximumHeight(206)
 
     def sizeHint(self) -> QSize:
-        return QSize(1040, 204)
+        return QSize(1040, 194)
 
     def set_theme(self, theme: str) -> None:
         self.theme = resolve_theme(theme)
@@ -354,9 +354,9 @@ class FlowDagWidget(QWidget):
         y = 58.0
         rects = [QRectF(left + index * (node_w + gap), y, node_w, node_h) for index in range(count)]
         branch_x = (rects[0].right() + rects[1].left()) / 2.0 if len(rects) > 1 else width / 2.0
-        knowledge_h = 52.0
-        knowledge_top = min(y + 70.0, max(y + 64.0, height - 24.0 - knowledge_h))
-        knowledge_w = min(max(236.0, node_w * 1.54), 280.0)
+        knowledge_h = 50.0
+        knowledge_top = min(y + 66.0, max(y + 60.0, height - 22.0 - knowledge_h))
+        knowledge_w = min(max(220.0, node_w * 1.34), 252.0)
         knowledge_x = min(max(18.0, branch_x - knowledge_w / 2.0), max(18.0, width - knowledge_w - 18.0))
         knowledge_rect = QRectF(knowledge_x, knowledge_top, knowledge_w, knowledge_h)
         return {

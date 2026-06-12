@@ -111,8 +111,8 @@ class TaskConfigWidget(QWidget):
 
         self.content = QWidget()
         self.content_layout = QVBoxLayout(self.content)
-        self.content_layout.setContentsMargins(12, 12, 12, 12)
-        self.content_layout.setSpacing(12)
+        self.content_layout.setContentsMargins(14, 14, 14, 14)
+        self.content_layout.setSpacing(10)
         self.scroll_area.setWidget(self.content)
 
         layout = QVBoxLayout(self)
@@ -132,21 +132,37 @@ class TaskConfigWidget(QWidget):
 
     def reset_view(self) -> None:
         self.task = None
+        if self.language == "en":
+            empty_rows = {
+                "facts": "Stores only facts explicitly stated by the user",
+                "reference": "Design-center reference, not a fixed candidate value",
+                "fixed": "Fixed only when the user explicitly constrains it",
+                "control": "Candidate and screening counts come from user input",
+                "domain": "Domain ranges serve rules, DOE, and FEM interfaces",
+            }
+        else:
+            empty_rows = {
+                "facts": "仅保存用户明确给出的事实",
+                "reference": "作为设计中心参考，不固定候选",
+                "fixed": "只有明确限定时才固定参数",
+                "control": "候选总数和初筛数量来自用户输入",
+                "domain": "参数域用于规则、DOE 和 FEM 接口",
+            }
         groups = [
-            (self._label("facts"), [("user_input_facts", self._label("fact_user"))]),
-            (self._label("reference_geometry"), [("geometry_reference", self._label("fact_reference"))]),
-            (self._label("fixed_geometry"), [("fixed_geometry", self._label("fact_fixed"))]),
-            (self._label("control"), [("candidate_generation / screening", self._label("unspecified"))]),
+            (self._label("facts"), [("user_input_facts", empty_rows["facts"])]),
+            (self._label("reference_geometry"), [("geometry_reference", empty_rows["reference"])]),
+            (self._label("fixed_geometry"), [("fixed_geometry", empty_rows["fixed"])]),
+            (self._label("control"), [("generation / screening", empty_rows["control"])]),
             (
                 self._label("geometry_domain"),
-                [("length / radius / thickness / alpha / beta / imperfection", self._label("fact_system"))],
+                [("design_domain", empty_rows["domain"])],
             ),
         ]
         self._render(
             header=(self._label("title"), self._label("empty")),
             groups=groups,
             note=False,
-            columns=2,
+            columns=3,
         )
 
     def update_task(self, task: dict[str, Any] | None) -> None:
@@ -222,10 +238,12 @@ class TaskConfigWidget(QWidget):
 
         if note:
             self.content_layout.addWidget(self._fact_boundary_widget())
+        self.content_layout.addStretch(1)
         self._plain_text = self._compose_plain_text(title, subtitle, groups, note)
 
     def _header_widget(self, title: str, subtitle: str) -> QWidget:
         widget = QWidget()
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         layout = QVBoxLayout(widget)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(4)
@@ -242,10 +260,10 @@ class TaskConfigWidget(QWidget):
     def _card_widget(self, title: str, rows: list[tuple[str, Any]]) -> QFrame:
         card = QFrame()
         card.setObjectName("configCard")
-        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 9, 12, 10)
+        layout.setSpacing(7)
 
         title_label = QLabel(title)
         title_label.setObjectName("configCardTitle")
@@ -253,8 +271,8 @@ class TaskConfigWidget(QWidget):
 
         row_grid = QGridLayout()
         row_grid.setContentsMargins(0, 0, 0, 0)
-        row_grid.setHorizontalSpacing(10)
-        row_grid.setVerticalSpacing(6)
+        row_grid.setHorizontalSpacing(9)
+        row_grid.setVerticalSpacing(5)
         for row, (label, value) in enumerate(rows):
             key_label = QLabel(str(label))
             key_label.setObjectName("configKey")
@@ -267,6 +285,7 @@ class TaskConfigWidget(QWidget):
             row_grid.addWidget(value_label, row, 1, Qt.AlignmentFlag.AlignTop)
         row_grid.setColumnStretch(0, 0)
         row_grid.setColumnStretch(1, 1)
+        row_grid.setColumnMinimumWidth(0, 92)
         layout.addLayout(row_grid)
         return card
 
@@ -343,6 +362,7 @@ class TaskConfigWidget(QWidget):
             widget = item.widget()
             child_layout = item.layout()
             if widget is not None:
+                widget.setParent(None)
                 widget.deleteLater()
             elif child_layout is not None:
                 TaskConfigWidget._clear_nested_layout(child_layout)
@@ -354,6 +374,7 @@ class TaskConfigWidget(QWidget):
             widget = item.widget()
             child_layout = item.layout()
             if widget is not None:
+                widget.setParent(None)
                 widget.deleteLater()
             elif child_layout is not None:
                 TaskConfigWidget._clear_nested_layout(child_layout)

@@ -169,8 +169,8 @@ class ChatWidget(QWidget):
         viewport_width = max(self.scroll_area.viewport().width(), self.width())
         if viewport_width <= 0:
             viewport_width = self.width()
-        available = max(260, viewport_width - 136)
-        conversational_cap = max(320, int(viewport_width * 0.78))
+        available = max(260, viewport_width - 112)
+        conversational_cap = max(320, int(viewport_width * 0.84))
         available = min(available, conversational_cap)
         target_max = min(max_width, available)
         target_min = min(max(min_width, 180), target_max)

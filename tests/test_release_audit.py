@@ -35,6 +35,7 @@ def test_release_audit_passes_without_network() -> None:
     assert "[PASS] 多智能体运行契约" in result.stdout
     assert "[PASS] 知识库状态契约" in result.stdout
     assert "[PASS] 知识流水线契约" in result.stdout
+    assert "[PASS] 知识库文件类型契约" in result.stdout
     assert "[PASS] GUI 工作台契约" in result.stdout
     assert "[PASS] 案例库编号" in result.stdout
     assert "[PASS] UI 展示资产" in result.stdout

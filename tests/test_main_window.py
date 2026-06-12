@@ -403,7 +403,7 @@ def test_main_window_shell_layout_keeps_reference_workbench_structure(monkeypatc
         assert chat_height >= 520
         chat_bubbles = [item for item in window.chat_widget.findChildren(QFrame) if item.objectName() == "chatBubble"]
         widths = [bubble.width() for bubble in chat_bubbles]
-        assert max(widths) <= int(window.chat_widget.width() * 0.82)
+        assert max(widths) <= int(window.chat_widget.width() * 0.84)
         assert len(set(widths)) > 1
 
         for index, button in enumerate(window.nav_buttons):
@@ -539,7 +539,7 @@ def test_chat_empty_state_uses_adaptive_engineering_message_cards() -> None:
         bubbles = [item for item in widget.findChildren(QFrame) if item.objectName() == "chatBubble"]
         assert len(bubbles) >= 3
         widths = [bubble.width() for bubble in bubbles]
-        assert max(widths) <= int(widget.width() * 0.78)
+        assert max(widths) <= int(widget.width() * 0.84)
         assert min(widths) >= 220
         assert len(set(widths)) > 1
         assert any(label.text() == "U" for label in widget.findChildren(QLabel))

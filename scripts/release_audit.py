@@ -117,6 +117,7 @@ class ReleaseAudit:
         self.check_runtime_knowledge_paths()
         self.check_runtime_knowledge_status_contract()
         self.check_knowledge_pipeline_contract()
+        self.check_knowledge_file_type_contract()
         self.check_gui_workbench_contract()
         self.check_ui_assets()
         self.check_cases()
@@ -331,6 +332,51 @@ class ReleaseAudit:
             not missing,
             "入库流水线包含解析、分块、向量、KG 和检索验证五阶段" if not missing else ", ".join(missing),
         )
+
+    def check_knowledge_file_type_contract(self) -> None:
+        from core.knowledge_ingestion import SUPPORTED_INGEST_SUFFIXES, SUPPORTED_QT_FILE_FILTER
+
+        required_suffixes = {
+            ".pdf",
+            ".docx",
+            ".pptx",
+            ".md",
+            ".txt",
+            ".csv",
+            ".tsv",
+            ".xlsx",
+            ".png",
+            ".jpg",
+            ".webp",
+            ".inp",
+            ".for",
+            ".sta",
+            ".odb",
+            ".sim",
+            ".cae",
+        }
+        missing_suffixes = sorted(required_suffixes - set(SUPPORTED_INGEST_SUFFIXES))
+        missing_filter = sorted(suffix for suffix in required_suffixes if f"*{suffix}" not in SUPPORTED_QT_FILE_FILTER)
+        ingestion_text = (ROOT / "core/knowledge_ingestion.py").read_text(encoding="utf-8")
+        parser_tokens = [
+            "_parse_with_mineru",
+            "_parse_with_docling",
+            "_parse_pdf_text",
+            "_parse_docx_text",
+            "_parse_pptx_text",
+            "_parse_image_metadata",
+            "_parse_engineering_binary_metadata",
+            "_parse_csv_table",
+            "_parse_xlsx_table",
+        ]
+        missing_parser_tokens = [token for token in parser_tokens if token not in ingestion_text]
+        errors = [
+            *(f"suffix:{suffix}" for suffix in missing_suffixes),
+            *(f"filter:{suffix}" for suffix in missing_filter),
+            *(f"parser:{token}" for token in missing_parser_tokens),
+        ]
+        detail = "上传入口覆盖文档、表格、图片、Abaqus 文本和工程二进制元数据解析契约" if not errors else "; ".join(errors[:12])
+        self.add("知识库文件类型契约", not errors, detail)
 
     def check_gui_workbench_contract(self) -> None:
         files = {

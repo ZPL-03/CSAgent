@@ -487,8 +487,8 @@ class MainWindow(QMainWindow):
 
         workflow_panel = QWidget()
         workflow_panel.setObjectName("centerWorkbench")
-        workflow_panel.setMinimumHeight(210)
-        workflow_panel.setMaximumHeight(236)
+        workflow_panel.setMinimumHeight(190)
+        workflow_panel.setMaximumHeight(218)
         workflow_layout = QVBoxLayout(workflow_panel)
         workflow_layout.setContentsMargins(0, 0, 0, 0)
         workflow_layout.setSpacing(0)
@@ -513,7 +513,7 @@ class MainWindow(QMainWindow):
         workbench_splitter = QSplitter(Qt.Orientation.Vertical)
         workbench_splitter.addWidget(workflow_panel)
         workbench_splitter.addWidget(chat_panel)
-        workbench_splitter.setSizes([236, 780])
+        workbench_splitter.setSizes([210, 806])
         self.workbench_splitter = workbench_splitter
 
         workbench_page = QWidget()
@@ -524,7 +524,7 @@ class MainWindow(QMainWindow):
 
         right_layout = QVBoxLayout()
         right_layout.setContentsMargins(14, 14, 14, 14)
-        right_layout.setSpacing(10)
+        right_layout.setSpacing(8)
         live_header_layout = QHBoxLayout()
         live_header_layout.setContentsMargins(0, 0, 0, 0)
         live_header_layout.setSpacing(8)
@@ -588,7 +588,8 @@ class MainWindow(QMainWindow):
         project_page.setObjectName("centerWorkbench")
         project_page.addWidget(self.task_config_widget)
         project_page.addWidget(self.tabs)
-        project_page.setSizes([230, 650])
+        project_page.setChildrenCollapsible(False)
+        project_page.setSizes([250, 650])
         self.stack.addWidget(project_page)
         self.stack.addWidget(self.knowledge_widget)
         self.monitor_page = self._build_monitor_page()
@@ -620,7 +621,7 @@ class MainWindow(QMainWindow):
         main_splitter.addWidget(self.stack)
         main_splitter.addWidget(self.right_stack)
         main_splitter.setChildrenCollapsible(False)
-        main_splitter.setSizes([270, 960, 360])
+        main_splitter.setSizes([270, 980, 370])
         self.main_splitter = main_splitter
         self.setCentralWidget(main_splitter)
 
@@ -628,8 +629,8 @@ class MainWindow(QMainWindow):
         page = QWidget()
         page.setObjectName("agentRail")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(14, 16, 14, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(9)
         header = QLabel(title)
         header.setObjectName("sectionTitle")
         layout.addWidget(header)
@@ -651,8 +652,8 @@ class MainWindow(QMainWindow):
         page = QWidget()
         page.setObjectName("resultRail")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(14, 16, 14, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(9)
         header = QLabel(title)
         header.setObjectName("sectionTitle")
         layout.addWidget(header)
@@ -661,9 +662,13 @@ class MainWindow(QMainWindow):
             card.setObjectName("statusLabel")
             card.setWordWrap(True)
             layout.addWidget(card)
-        layout.addStretch(1)
-        for button in footer_buttons or []:
-            layout.addWidget(button)
+        if footer_buttons:
+            layout.addSpacing(8)
+            for button in footer_buttons:
+                layout.addWidget(button)
+            layout.addStretch(1)
+        else:
+            layout.addStretch(1)
         return page
 
     def _build_project_left_page(self) -> QWidget:
@@ -742,8 +747,8 @@ class MainWindow(QMainWindow):
         page = QWidget()
         page.setObjectName("resultRail")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(14, 16, 14, 16)
-        layout.setSpacing(12)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(9)
         header = QLabel("运行审计 · CHECKS")
         header.setObjectName("sectionTitle")
         layout.addWidget(header)
@@ -824,10 +829,30 @@ class MainWindow(QMainWindow):
         knowledge = app_config.get("project_knowledge") if isinstance(app_config.get("project_knowledge"), dict) else {}
         conversation = app_config.get("conversation") if isinstance(app_config.get("conversation"), dict) else {}
 
+        settings_overview = QGridLayout()
+        settings_overview.setContentsMargins(0, 0, 0, 0)
+        settings_overview.setHorizontalSpacing(10)
+        settings_overview.setVerticalSpacing(10)
+        overview_cards = [
+            self._settings_summary_card("主模型", str(primary.get("model") or "-"), str(primary.get("base_url_env") or "-")),
+            self._settings_summary_card("回退模型", str(fallback.get("model_env") or "-"), str(fallback.get("base_url_env") or "-")),
+            self._settings_summary_card("ABAQUS", str(abaqus.get("command") or "abaqus"), f"timeout {abaqus.get('job_timeout_seconds', 3600)} s"),
+            self._settings_summary_card(
+                "RAG / KG",
+                f"top_k {knowledge.get('top_k', 5)} / KG {knowledge.get('kg_top_k', 8)}",
+                f"chunk {knowledge.get('chunk_token_size', 512)} / overlap {knowledge.get('chunk_overlap_tokens', 64)}",
+            ),
+        ]
+        for index, card in enumerate(overview_cards):
+            settings_overview.addWidget(card, 0, index)
+        for column in range(len(overview_cards)):
+            settings_overview.setColumnStretch(column, 1)
+        content_layout.addLayout(settings_overview)
+
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(14)
-        grid.setVerticalSpacing(14)
+        grid.setHorizontalSpacing(12)
+        grid.setVerticalSpacing(12)
         cards = [
             self._settings_form_card(
                 "模型与 API",
@@ -909,6 +934,27 @@ class MainWindow(QMainWindow):
         self.settings_reload_button.clicked.connect(self._reload_settings_page)
         return page
 
+    def _settings_summary_card(self, title: str, value: str, detail: str) -> QFrame:
+        card = QFrame()
+        card.setObjectName("configCard")
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        card.setMinimumHeight(76)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 9, 12, 9)
+        layout.setSpacing(3)
+        title_label = QLabel(title)
+        title_label.setObjectName("configKey")
+        value_label = QLabel(value)
+        value_label.setObjectName("configCardTitle")
+        value_label.setWordWrap(True)
+        detail_label = QLabel(detail)
+        detail_label.setObjectName("configSubtitle")
+        detail_label.setWordWrap(True)
+        layout.addWidget(title_label)
+        layout.addWidget(value_label)
+        layout.addWidget(detail_label)
+        return card
+
     def _settings_line(self, key: str, value: object) -> QLineEdit:
         field = QLineEdit(str(value if value is not None else ""))
         field.setObjectName("settingsInput")
@@ -930,17 +976,17 @@ class MainWindow(QMainWindow):
     def _settings_form_card(self, title: str, rows: list[tuple[str, QWidget]]) -> QFrame:
         card = QFrame()
         card.setObjectName("configCard")
-        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(14, 12, 14, 12)
-        layout.setSpacing(10)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
         title_label = QLabel(title)
         title_label.setObjectName("configCardTitle")
         layout.addWidget(title_label)
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
-        form.setHorizontalSpacing(12)
-        form.setVerticalSpacing(8)
+        form.setHorizontalSpacing(10)
+        form.setVerticalSpacing(6)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         for label, widget in rows:
             key_label = QLabel(label)
