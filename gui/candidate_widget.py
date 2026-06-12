@@ -6,11 +6,13 @@ from html import escape
 from typing import Iterable
 
 from PyQt6.QtWidgets import (
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QSplitter,
     QTableWidget,
     QTableWidgetItem,
+    QTabWidget,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
@@ -22,16 +24,15 @@ from core.pressure_hull_profile import GEOMETRY_LABELS, TYPE_DISPLAY_NAMES
 from core.task_contract import describe_boundary_conditions, describe_load_conditions
 
 
-SOURCE_LABELS = {
-    "LLM": "LLM 外部知识库/知识图谱增强",
-    "CASE_TRANSFER": "历史案例迁移",
-    "DOE": "DOE 参数采样",
-}
-
-
-def _format_generation_label(source: object) -> str:
+def _format_generation_label(source: object, language: str = DEFAULT_LANGUAGE) -> str:
     key = str(source or "UNKNOWN")
-    return SOURCE_LABELS.get(key, key)
+    source_keys = {
+        "LLM": "candidate.source.llm",
+        "CASE_TRANSFER": "candidate.source.case",
+        "DOE": "candidate.source.doe",
+        "UNKNOWN": "candidate.source.unknown",
+    }
+    return tr(source_keys.get(key, "candidate.source.unknown"), language=language) if key in source_keys else key
 
 
 def _format_number(value: object, digits: int = 3) -> str:
@@ -77,27 +78,61 @@ class CandidateWidget(QWidget):
         self.summary_label = QLabel(tr("candidate.empty", language=self.language))
         self.summary_label.setWordWrap(True)
 
+        self.total_metric = self._metric_label()
+        self.llm_metric = self._metric_label()
+        self.case_metric = self._metric_label()
+        self.doe_metric = self._metric_label()
+        self.evaluated_metric = self._metric_label()
+        metric_layout = QGridLayout()
+        metric_layout.setHorizontalSpacing(8)
+        metric_layout.setVerticalSpacing(8)
+        metric_cards = [self.total_metric, self.llm_metric, self.case_metric, self.doe_metric, self.evaluated_metric]
+        for index, card in enumerate(metric_cards):
+            metric_layout.addWidget(card, index // 3, index % 3)
+
         self.detail_browser = QTextBrowser()
+        self.audit_browser = QTextBrowser()
         self.preview_widget = InteractivePlotWidget(
             tr("candidate.preview_empty", language=self.language),
             language=self.language,
         )
+        self.detail_tabs = QTabWidget()
+        self.detail_tabs.addTab(self.detail_browser, tr("candidate.tab.detail", language=self.language))
+        self.detail_tabs.addTab(self.audit_browser, tr("candidate.tab.audit", language=self.language))
+        self.detail_tabs.addTab(self.preview_widget, tr("candidate.tab.preview", language=self.language))
+
+        left_layout = QVBoxLayout()
+        left_layout.setContentsMargins(0, 0, 0, 0)
+        left_layout.setSpacing(8)
+        left_layout.addLayout(metric_layout)
+        left_layout.addWidget(self.table, 1)
+        left_widget = QWidget()
+        left_widget.setLayout(left_layout)
 
         right_layout = QVBoxLayout()
+        right_layout.setContentsMargins(0, 0, 0, 0)
+        right_layout.setSpacing(8)
         right_layout.addWidget(self.summary_label)
-        right_layout.addWidget(self.detail_browser, 2)
-        right_layout.addWidget(self.preview_widget, 3)
+        right_layout.addWidget(self.detail_tabs, 1)
 
         right_widget = QWidget()
         right_widget.setLayout(right_layout)
 
         splitter = QSplitter()
-        splitter.addWidget(self.table)
+        splitter.addWidget(left_widget)
         splitter.addWidget(right_widget)
         splitter.setSizes([720, 620])
 
         layout = QHBoxLayout(self)
         layout.addWidget(splitter)
+        self._update_metric_cards()
+
+    def _metric_label(self) -> QLabel:
+        label = QLabel()
+        label.setWordWrap(False)
+        label.setMinimumWidth(92)
+        label.setProperty("role", "metricCard")
+        return label
 
     def _headers(self) -> list[str]:
         return tr("candidate.headers", language=self.language).split("|")
@@ -105,14 +140,38 @@ class CandidateWidget(QWidget):
     def set_language(self, language: str) -> None:
         self.language = language
         self.table.setHorizontalHeaderLabels(self._headers())
+        self.detail_tabs.setTabText(0, tr("candidate.tab.detail", language=self.language))
+        self.detail_tabs.setTabText(1, tr("candidate.tab.audit", language=self.language))
+        self.detail_tabs.setTabText(2, tr("candidate.tab.preview", language=self.language))
         self.preview_widget.set_language(
             language,
             tr("candidate.preview_empty", language=self.language),
         )
+        self._update_metric_cards()
         if not self.candidates:
             self.summary_label.setText(tr("candidate.empty", language=self.language))
             self.detail_browser.setHtml(f"<p>{tr('candidate.empty', language=self.language)}</p>")
+            self.audit_browser.setHtml(self._generation_audit_html({}))
             self.preview_widget.clear_scene(tr("candidate.no_geometry", language=self.language))
+
+    def _source_counter(self) -> dict[str, int]:
+        counter = {"LLM": 0, "CASE_TRANSFER": 0, "DOE": 0}
+        for candidate in self.candidates:
+            source = str(candidate.get("source", "UNKNOWN"))
+            if source in counter:
+                counter[source] += 1
+        return counter
+
+    def _update_metric_cards(self) -> None:
+        counter = self._source_counter()
+        evaluated_count = sum(1 for candidate in self.candidates if self._result_for_candidate(candidate))
+        self.total_metric.setText(tr("candidate.metric.total", language=self.language, count=len(self.candidates)))
+        self.llm_metric.setText(tr("candidate.metric.llm", language=self.language, count=counter.get("LLM", 0)))
+        self.case_metric.setText(
+            tr("candidate.metric.case", language=self.language, count=counter.get("CASE_TRANSFER", 0))
+        )
+        self.doe_metric.setText(tr("candidate.metric.doe", language=self.language, count=counter.get("DOE", 0)))
+        self.evaluated_metric.setText(tr("candidate.metric.evaluated", language=self.language, count=evaluated_count))
 
     def _result_for_candidate(self, candidate: dict) -> dict | None:
         return self.results_by_session_id.get(candidate.get("candidate_id", ""))
@@ -182,7 +241,7 @@ class CandidateWidget(QWidget):
 
         for row, candidate in enumerate(self.candidates):
             source = str(candidate.get("source", "UNKNOWN"))
-            generation_label = _format_generation_label(source)
+            generation_label = _format_generation_label(source, self.language)
             source_counter[generation_label] = source_counter.get(generation_label, 0) + 1
             result = self._result_for_candidate(candidate)
             archive_id = candidate.get("persistent_candidate_id") or (result or {}).get("candidate_id", "-")
@@ -202,8 +261,11 @@ class CandidateWidget(QWidget):
                     item.setToolTip(f"会话编号: {candidate.get('candidate_id')} | 正式编号: {archive_id}")
                 self.table.setItem(row, col, item)
 
+        self._update_metric_cards()
         summary = " / ".join(f"{key}: {value}" for key, value in sorted(source_counter.items()))
-        audit_summary = self._generation_audit_summary(self._generation_audit_for_pool())
+        pool_audit = self._generation_audit_for_pool()
+        audit_summary = self._generation_audit_summary(pool_audit)
+        self.audit_browser.setHtml(self._generation_audit_html(pool_audit))
         self.summary_label.setText(
             f"当前候选方案数：{len(self.candidates)} | 来源构成：{summary or '-'} | "
             f"来源审计：{audit_summary} | "
@@ -214,6 +276,7 @@ class CandidateWidget(QWidget):
             self.table.selectRow(0)
         else:
             self.detail_browser.setHtml(f"<p>{tr('candidate.empty', language=self.language)}</p>")
+            self.audit_browser.setHtml(self._generation_audit_html({}))
             self.preview_widget.clear_scene(tr("candidate.no_geometry", language=self.language))
 
     def reset_view(self) -> None:
@@ -283,7 +346,7 @@ class CandidateWidget(QWidget):
         stype_display = TYPE_DISPLAY_NAMES.get(htype, htype)
 
         html = (
-            f"<h3>{candidate.get('display_name', candidate.get('candidate_id'))} | {_format_generation_label(candidate.get('source'))} | {stype_display}</h3>"
+            f"<h3>{candidate.get('display_name', candidate.get('candidate_id'))} | {_format_generation_label(candidate.get('source'), self.language)} | {stype_display}</h3>"
             f"<p><b>会话编号：</b>{candidate.get('candidate_id', '-')}<br>"
             f"<b>正式编号：</b>{archive_id}</p>"
             f"<p><b>生成说明：</b>{candidate.get('rationale', '-')}</p>"

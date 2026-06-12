@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from core.llm_backend import LLMBackend
 from core.llm_status import configured_llm_backends, probe_llm_backends
 
@@ -116,3 +118,54 @@ def test_probe_llm_backends_reports_live_status_without_secrets(monkeypatch) -> 
     assert "primary.local" not in text
     assert "fallback.local" not in text
     assert "sk-" + "1234567890abcdef" not in text
+
+
+def test_llm_backend_records_reasoning_budget_empty_content(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "0")
+    backend = LLMBackend(
+        {
+            "backends": [
+                {
+                    "name": "reasoning",
+                    "base_url": "http://reasoning.local/v1",
+                    "api_key": "reasoning-key",
+                    "model": "reasoning-model",
+                    "temperature": 0.1,
+                    "max_tokens": 16,
+                    "timeout_seconds": 30,
+                    "json_output_tokens": 16,
+                }
+            ]
+        }
+    )
+
+    class FakeCompletions:
+        def create(self, **payload):
+            class Message:
+                content = ""
+                reasoning_content = "先进行推理但预算耗尽"
+
+            class Choice:
+                message = Message()
+                finish_reason = "length"
+
+            class Response:
+                choices = [Choice()]
+
+            return Response()
+
+    class FakeChat:
+        completions = FakeCompletions()
+
+    class FakeOpenAI:
+        def __init__(self, base_url, api_key, timeout, default_headers):
+            self.chat = FakeChat()
+
+    backend._openai_cls = FakeOpenAI
+
+    with pytest.raises(ValueError, match="推理 token 预算耗尽"):
+        backend.chat("system", "user", max_tokens_override=16)
+
+    assert backend.last_call_trace[0]["reasoning_chars"] > 0
+    assert backend.last_call_trace[0]["finish_reason"] == "length"
+    assert "reasoning-key" not in str(backend.last_call_trace)

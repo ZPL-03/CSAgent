@@ -57,7 +57,7 @@ def build_candidate_scene(candidate: Dict) -> Tuple[list[tuple[object, Dict]], s
     htype = str(candidate.get("hull_type", "CYLINDRICAL"))
     meshes = build_pressure_hull_meshes(htype, geometry)
 
-    display_name = candidate.get("display_name") or candidate.get("candidate_id") or "候选方案"
+    display_name = candidate.get("display_name") or candidate.get("candidate_id") or "Candidate"
     title = (
         f"{display_name} | "
         f"L={float(geometry.get('length_mm', 0.0)):.1f} mm, "
@@ -139,7 +139,7 @@ def render_candidate_png_bytes(
     height: int = 520,
     language: str = DEFAULT_LANGUAGE,
 ) -> bytes | None:
-    """生成候选几何的静态工程剖面图，作为交互三维视图不可用时的兜底。"""
+    """生成候选几何的离线工程剖面图，供无 OpenGL 或离线审计环境使用。"""
 
     geometry = dict(candidate.get("geometry") or {})
     if not geometry:
@@ -247,7 +247,7 @@ def render_mode_shape_png_bytes(
     max_faces: int = 1800,
     language: str = DEFAULT_LANGUAGE,
 ) -> bytes | None:
-    """生成一阶模态云图静态 PNG，作为 OpenGL 交互视图不可用时的兜底。"""
+    """生成一阶模态云图离线 PNG，供无 OpenGL 或离线审计环境使用。"""
 
     payload = load_mode_shape_payload(result)
     if not payload:

@@ -64,6 +64,12 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
             agent="RequirementAgent",
             message="工具 parse_task 调用完成",
             stage="parse_task",
+            payload={
+                "tool": "parse_task",
+                "duration_ms": 12.5,
+                "input_summary": {"instruction": "生成 2 个候选，初筛保留 1 个候选"},
+                "output_summary": {"task": {"task_id": "TASK_1"}},
+            },
         )
     )
     store.append_event(
@@ -82,6 +88,12 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
             agent="KnowledgeMemoryAgent",
             message="工具 persist_knowledge 调用完成",
             stage="persist_knowledge",
+            payload={
+                "tool": "persist_knowledge",
+                "duration_ms": 4.2,
+                "input_summary": {"fem_designs": {"count": 1}},
+                "output_summary": {"knowledge_updates": {"count": 1}},
+            },
         )
     )
     store.append_event(
@@ -147,18 +159,26 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
         assert "primary-model" in html
         assert "fallback-model" in html
         assert "工具 persist_knowledge 调用完成" in html
+        assert "工具调用审计" in html
+        assert "parse_task" in html
+        assert "12.5" in html
+        assert "input_summary" not in html
+        assert "knowledge_updates" in html
 
         widget._export_run_audit()
         audit_path = tmp_path / "run_audit_RUN_TEST.md"
         assert audit_path.exists()
         audit_text = audit_path.read_text(encoding="utf-8")
-        assert "CSDM_cph 运行审计报告" in audit_text
+        assert "CSAgent 运行审计报告" in audit_text
         assert "RUN_TEST" in audit_text
         assert "TMP_1" in audit_text
         assert "C1" in audit_text
         assert "CASE_100" in audit_text
         assert "fallback-model" in audit_text
         assert "Abaqus 输入文件缺少厚度字段" in audit_text
+        assert "工具调用审计" in audit_text
+        assert "parse_task" in audit_text
+        assert "12.5" in audit_text
         assert "运行审计已导出" in widget.audit_status_label.text()
     finally:
         widget.close()

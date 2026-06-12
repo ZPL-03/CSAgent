@@ -1,6 +1,6 @@
-# CSDM_cph
+# CSAgent 多智能体智能设计平台
 
-CSDM_cph 是复合材料外压圆柱耐压壳智能设计系统。主流程为：
+CSAgent 多智能体智能设计平台面向复合材料外压圆柱耐压壳智能设计。主流程为：
 
 自然语言需求 -> 用户事实抽取 -> LLM 候选提案 -> 案例迁移 -> DOE 采样 -> PBIPF 公式初筛 -> ABAQUS 校核 -> 案例回流 -> 设计报告输出。
 
@@ -21,9 +21,12 @@ CSDM_cph 是复合材料外压圆柱耐压壳智能设计系统。主流程为�
 
 ## GUI 工作台
 
-PyQt6 桌面端默认为简体中文界面，顶部语言选择器支持切换为 English。界面语言设置写入 `data/runtime/ui_settings.json`，属于本地运行偏好，不进入 Git。桌面端启动时主动加载 Windows 中文字体，避免中文标签、状态栏和可视化图注显示为方块。
+PyQt6 桌面端默认为简体中文界面，顶部语言选择器支持切换为 English，主题选择器支持跟随系统、深色工程和亮色工程。界面语言和主题写入 `data/runtime/ui_settings.json`，属于本地运行偏好，不进入 Git。桌面端启动时优先加载 `HarmonyOS Sans SC`、`Noto Sans SC` 和 Windows 中文字体，避免中文标签、状态栏和可视化图注显示为方块。
 
-主界面采用工程工作台布局：顶部为系统身份栏和语言切换，左侧为自然语言输入、对话状态、运行快照、人工确认和手动工具入口，右侧为任务配置、智能体流程、候选方案、ABAQUS 结果、结果追踪、报告预览、知识库和日志页。界面层只显示和触发流程，不改变任务解析、候选生成、代理初筛、有限元校核、知识回流和报告生成的业务契约。
+主界面采用 `QMainWindow + QSplitter + QStackedWidget` 工程工作台布局。顶部为系统身份栏、工作台/项目/知识库/监控/设置导航和当前模型标识；语言和主题配置位于“设置”页。工作台左栏展示 `ORCHESTRATOR`、`CANDIDATE_GEN`、`SCREENER`、`FEM_AGENT`、`KNOWLEDGE_AGENT`、`REPORT_GEN` 的状态点、实时状态和任务队列；中部上方为自绘 LangGraph DAG，下方为对话优先的多智能体协作区；右栏展示实时三维视口、会话指标、运行日志、阶段报告和报告打开入口。项目页承载任务契约、候选、FEM、追踪和报告详情；知识库页承载检索与证据预览；监控页承载工作流审计面板、运行日志和状态恢复入口。界面层只显示和触发流程，不改变任务解析、候选生成、代理初筛、有限元校核、知识回流和报告生成的业务契约。
+
+![深色工程工作台](docs/assets/ui_workbench_dark.png)
+![亮色工程工作台](docs/assets/ui_workbench_light.png)
 
 ## PBIPF 公式
 
@@ -56,31 +59,31 @@ P_PBIPF = d1 * lg(Q) * t / R
 | `workflow/runtime.py` | LangGraph 状态图运行时，支持启动、人工确认后继续、从快照恢复 |
 | `workflow/agent_contracts.py` | 智能体职责契约，定义节点、工具、输入、输出、LLM 边界和失败策略 |
 | `workflow/event_store.py` | SQLite 运行库，记录 `workflow_runs`、`workflow_events` 和 `workflow_snapshots` |
-| `workflow/tool_registry.py` | 工具注册层，统一审计任务解析、候选生成、初筛、有限元、知识回流和报告工具调用 |
+| `workflow/tool_registry.py` | 工具注册层，统一审计任务解析、候选生成、初筛、有限元、知识回流和报告工具调用，记录输入摘要、输出摘要、耗时和失败原因 |
 | `workflow/simulation_queue.py` | 有限元作业队列，记录候选入队、运行、成功、失败和结果摘要 |
 | `workflow/state.py` | 工作流状态契约，保存任务、候选、初筛、正式有限元输入、有限元结果、知识回流结果、报告和人工确认状态 |
 
-运行时数据写入 `data/runtime/`，该目录属于本地运行产物，不进入 Git。PyQt6 主界面包含“任务配置”页，展示结构化任务契约、用户已给事实、普通几何参考、固定几何约束、候选生成控制参数、初筛控制参数和事实边界；该页只读取当前会话任务，不修改候选或流程状态。“智能体流程”页可读取运行时事件库、状态快照和有限元作业队列，展示运行摘要、状态图、智能体职责契约、诊断信息、LLM 后端配置状态、LLM 调用轨迹、有限元作业队列和工具调用审计；该页提供“检测 LLM 后端”和“导出运行审计”按钮，运行审计报告落盘到 `data/results/run_audit_<RUN_ID>.md`，内容包含运行摘要、智能体职责、候选-结果-案例追踪、有限元队列、LLM 调用轨迹、诊断和事件审计。LLM 后端检测结果只显示后端名称、模型、状态、耗时和脱敏错误摘要，不显示 URL、密钥或提示词正文。“候选方案”页展示候选来源构成、三路初始配额、规则过滤、结构去重和 DOE 补足审计；“结果追踪”页展示 TMP 会话候选、正式 C 编号、代理预测、FEM 结果、代理误差、CASE 回流状态和报告纳入状态之间的对应关系；“报告预览”页读取当前会话报告或 `data/results/latest_report.md`，展示 Markdown/PDF 路径、LLM 工程解释使用状态和 Markdown 正文预览。LLM 调用轨迹只记录后端名称、模型名称、调用状态、耗时和错误摘要，不记录 URL、密钥、系统提示词或用户提示词。重大阶段仍以源码、配置、测试和文档入库。
+运行时数据写入 `data/runtime/`，该目录属于本地运行产物，不进入 Git。中央“项目”页展示结构化任务契约、用户已给事实、普通几何参考、固定几何约束、候选生成控制参数、初筛控制参数和事实边界；该页只读取当前会话任务，不修改候选或流程状态。核心工作台中的“智能体流程”面板读取运行时事件库、状态快照和有限元作业队列，展示运行摘要、LangGraph DAG、状态图、智能体职责契约、诊断信息、LLM 后端配置状态、LLM 调用轨迹、有限元作业队列和工具调用审计；工具调用审计包含工具名、运行智能体、状态、耗时、输入摘要、输出摘要和失败原因。该面板提供“检测 LLM 后端”和“导出运行审计”按钮，运行审计报告落盘到 `data/results/run_audit_<RUN_ID>.md`，内容包含运行摘要、智能体职责、候选-结果-案例追踪、有限元队列、LLM 调用轨迹、诊断和事件审计。LLM 后端检测结果只显示后端名称、模型、状态、耗时和脱敏错误摘要，不显示 URL、密钥或提示词正文。右侧“候选”页展示候选来源构成、三路初始配额、规则过滤、结构去重和 DOE 补足审计；“追踪”页展示 TMP 会话候选、正式 C 编号、代理预测、FEM 结果、代理误差、CASE 回流状态和报告纳入状态之间的对应关系；“报告”页读取当前会话报告或 `data/results/latest_report.md`，展示 Markdown/PDF 路径、LLM 工程解释使用状态和 Markdown 正文预览。LLM 调用轨迹只记录后端名称、模型名称、调用状态、耗时和错误摘要，不记录 URL、密钥、系统提示词或用户提示词。重大阶段仍以源码、配置、测试和文档入库。
 
-## 外部知识
+## 知识库
 
-运行时读取本项目 `knowledge/external` 中的外部知识库和知识图谱数据，路径配置在 `config/app_config.yaml`。该目录与 `CSDM_panel` 使用同一版外部知识资产结构：
+运行时读取本项目 `knowledge/runtime` 中的可更新知识库和知识图谱数据，路径配置在 `config/app_config.yaml`。该目录属于本地运行产物，不进入 Git：
 
-- `knowledge/external/rag/rag_chunks.jsonl`：51788 条 RAG 文本块
-- `knowledge/external/kg/`：2214 个实体、480899 条关系
-- `knowledge/external/provenance/source_registry/`：1931 条源登记和 1931 条源元数据
-- `knowledge/external/provenance/structured_text/documents.jsonl`：1931 条结构化文档
-- `knowledge/external/provenance/structured_text/blocks.jsonl`：400762 条结构化文本块
-- `knowledge/external/provenance/structured_text/table_records.jsonl`：22800 条表格记录
-- `knowledge/external/provenance/structured_text/figure_records.jsonl`：44135 条图片记录
-- `knowledge/external/provenance/structured_text/formula_records.jsonl`：108500 条公式记录
-- `knowledge/external/provenance/structured_text/markdown_documents/`：1931 份 Markdown 全文
+- `knowledge/runtime/uploads/`：用户上传并归档的原始资料
+- `knowledge/runtime/structured_text/documents.jsonl`：资料级解析记录
+- `knowledge/runtime/structured_text/blocks.jsonl`：结构化文本块
+- `knowledge/runtime/structured_text/markdown_documents/`：规范化 Markdown 全文
+- `knowledge/runtime/rag/rag_chunks.jsonl`：RAG 文本块
+- `knowledge/chroma_db`：项目知识向量 collection 和案例记忆向量 collection
+- `knowledge/runtime/kg/entities.jsonl`：知识图谱实体
+- `knowledge/runtime/kg/relations.jsonl`：知识图谱关系
+- `knowledge/runtime/manifest.json`：文档数、chunk 数、向量索引数、实体关系数、分块参数、去重键和最近一次入库流水线状态
 
-候选生成 LLM 使用 RAG 片段和知识图谱关系作为工程提案依据；RAG 检索结果按同一篇文献或同一来源去重，图谱证据在输出中合并为统一来源标签。结构化候选参数仍由系统解析、归一化、规则检查和 Schema 校验确定。
+资料入库流程为“MinerU / Docling 文档解析 -> 语义分块 -> BGE-M3 向量化索引 -> Neo4j 实体/关系抽取”。PDF、DOCX、PPTX 和图片优先调用 MinerU，失败后尝试 Docling；文本、Markdown、CSV、TSV、Excel 和工程文本使用本项目解析器。RAG 分块使用 `chunk_token_size`、`chunk_overlap_tokens` 和 `min_chunk_tokens` 控制 token 窗口、重叠上下文和小块合并；完全相同的 chunk 按 `content_hash` 去重。去重后的 chunk 同步写入 `knowledge/runtime/rag/rag_chunks.jsonl` 和 `knowledge/chroma_db` 中的 `csdm_cph_project_knowledge` collection。向量后端按 `rag.embedding_model=BAAI/bge-m3` 读取本地缓存；本地模型不可用且配置允许时使用哈希嵌入回退并在流水线状态中记录。KG 当前写出实体、关系和统计文件，后续可接入在线 Neo4j 上传或 LLM 抽取。
 
-GUI 的“知识库”页展示案例库、外部知识资产状态、代理模型指标、RAG 命中文本块和知识图谱关系。该页面支持按当前任务自动检索，也支持人工输入工程检索词进行证据预览；证据用于审计候选生成 LLM 的工程上下文和人工核查来源，不作为确定性数值来源。
+候选生成 LLM 使用关键词/BM25、向量 collection 和知识图谱关系融合后的证据作为工程提案依据；结构化候选参数仍由系统解析、归一化、规则检查和 Schema 校验确定。GUI 的“知识库”页支持上传资料、后台入库、状态灯、流水线卡片、文档表、人工检索和证据预览，并单独显示 RAG、Vector 和 KG 状态。证据用于审计候选生成 LLM 的工程上下文和人工核查来源，不作为确定性数值来源。
 
-GUI 左侧“辅助入口”提供最近运行记录下拉框、刷新运行记录和载入运行快照按钮。载入快照只读取 `data/runtime/workflow_runtime.sqlite3` 中的最近状态，不重新调用 LLM、代理模型或 Abaqus；载入后会恢复任务、候选、筛选结果、有限元结果、报告和待确认节点。
+GUI 的“监控”页提供最近运行记录下拉框、刷新运行记录和“恢复运行状态”按钮。恢复运行状态只读取 `data/runtime/workflow_runtime.sqlite3` 中的最近快照，不重新调用 LLM、代理模型或 Abaqus；恢复后会还原任务、候选、筛选结果、有限元结果、报告和待确认节点。
 
 ## 启动
 
@@ -104,6 +107,6 @@ D:\anaconda3\envs\GPT\python.exe scripts\build_initial_cases.py --reset --count 
 
 ## 有限元说明
 
-自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出。流程先执行单位外压线性屈曲分析并提取一阶模态云图，再以一阶模态缺陷进入 Static Riks 后屈曲分析，极限压力取最大 LPF 与基准外压的乘积。GUI 的“候选方案”和“ABAQUS结果”页优先使用 `pyvistaqt` 显示可旋转三维几何模型和模态云图；交互式 OpenGL 视图不可用、`QT_QPA_PLATFORM=offscreen` 或 `CSDM_cph_DISABLE_INTERACTIVE_3D=1` 时，自动使用 Matplotlib 静态 PNG 显示候选剖面或一阶模态云图。静态图注跟随界面语言，并在详情中展示模态数据路径、点面数量和可用性状态。
+自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出。流程先执行单位外压线性屈曲分析并提取一阶模态云图，再以一阶模态缺陷进入 Static Riks 后屈曲分析，极限压力取最大 LPF 与基准外压的乘积。GUI 的右侧实时视口、“候选”页和“FEM”页优先使用 `pyvistaqt` 显示可旋转、缩放、平移的三维几何模型和模态云图；没有候选或结果时，真实交互环境显示参考耐压壳模型，离线环境只显示状态文字，不生成初始化静态占位图。交互式 OpenGL 视图不可用、`QT_QPA_PLATFORM=offscreen`、`CSDM_cph_DISABLE_INTERACTIVE_3D=1` 或离线审计环境中，只有候选几何或 FEM 模态数据存在时才使用 Matplotlib 离线 PNG 显示候选剖面或一阶模态云图。离线图注跟随界面语言，并在详情中展示模态数据路径、点面数量和可用性状态。
 
 `reference/wangge.py` 与 `reference/zhangusdfld.for` 只作为人工建模和用户子程序参考，不属于主流程必需资产。`reference/zhangusdfld.for` 通过 `config/app_config.yaml` 的 `abaqus.use_user_subroutine` 显式启用，默认关闭以避免本机用户子程序编译环境阻断主流程。未找到 ABAQUS 命令时返回带诊断信息的失败结果，不伪造有限元通过。

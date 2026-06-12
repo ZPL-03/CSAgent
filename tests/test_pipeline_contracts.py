@@ -94,7 +94,7 @@ def test_candidate_prompt_separates_user_facts_from_system_constraints(monkeypat
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = TaskParser().parse_instruction("生成 12 个候选，初筛保留 5 个候选")
     agent = CandidateGenAgent()
-    knowledge_guidance = ["[外部知识库 1] pressure hull buckling guidance"]
+    knowledge_guidance = ["[项目知识库 1] pressure hull buckling guidance"]
 
     system_prompt, user_prompt = agent._build_prompt(task, desired_count=6, knowledge_guidance=knowledge_guidance)
 
@@ -113,6 +113,20 @@ def test_candidate_prompt_separates_user_facts_from_system_constraints(monkeypat
     assert "结构性能依据和制造/缺陷风险依据" in user_prompt
 
     assert "pressure hull buckling guidance" in user_prompt
+
+
+def test_llm_candidate_generation_token_budget_handles_reasoning_models(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    agent = CandidateGenAgent()
+
+    class ControlledBackend:
+        max_tokens = 1800
+        json_output_tokens = 4096
+
+    agent.llm_backend = ControlledBackend()
+
+    assert agent._llm_generation_token_budget(2) >= 3000
+    assert agent._llm_generation_token_budget(2) <= 4096
 
 
 def test_llm_backend_uses_fallback_backend_after_primary_unusable_response(monkeypatch):
@@ -409,7 +423,7 @@ def test_llm_candidates_are_extracted_from_engineering_natural_answer(monkeypatc
                 + "END_MARKER"
             )
 
-    agent.knowledge_base = _FakeKnowledge(["[外部知识库 1] pressure hull buckling guidance"])
+    agent.knowledge_base = _FakeKnowledge(["[项目知识库 1] pressure hull buckling guidance"])
     agent.llm_backend = ControlledBackend()
     candidates = agent._llm_candidates(task, start_index=1, desired_count=2)
 
@@ -691,6 +705,23 @@ def test_report_uses_llm_only_for_grounded_engineering_explanation(monkeypatch):
     assert "缠绕和铺放可制造性评审" in markdown
     assert "PBIPF 公式初筛通过" in markdown
     assert agent._last_llm_explanation_used is True
+
+
+def test_report_postprocess_removes_duplicate_heading_and_mixed_verdict_text(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    agent = ReportGenAgent()
+    malformed_verdict = "Ver" + "\uff44" + "Dict"
+
+    cleaned = agent._postprocess_engineering_explanation(
+        "### 工程解释与制造建议\n"
+        "### 有限元结果解读\n"
+        f"- {malformed_verdict}为通过，说明结论由结构化结果给出。"
+    )
+
+    assert "工程解释与制造建议" not in cleaned
+    assert "Verdict" not in cleaned
+    assert malformed_verdict not in cleaned
+    assert "结论为通过" in cleaned
 
 
 def test_report_emits_llm_trace_when_engineering_explanation_fails(monkeypatch):

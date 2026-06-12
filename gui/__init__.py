@@ -1,1 +1,1 @@
-"""CSDM_cph GUI 包。"""
+"""CSAgent GUI 包。"""

@@ -1,4 +1,4 @@
-"""外部知识库/知识图谱检索。"""
+"""项目知识库/知识图谱检索。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,8 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from core.config_loader import load_app_config
-from core.paths import ROOT_DIR
+from core.paths import CHROMA_DIR, ROOT_DIR
+from core.rag_engine import RAGEngine
 from core.task_contract import describe_boundary_conditions, describe_load_conditions, task_payload_from_request
 
 
@@ -382,6 +383,65 @@ class RagChunkRetriever:
         return unique_results
 
 
+class VectorChunkRetriever:
+    """基于项目知识向量 collection 的检索器。"""
+
+    def __init__(
+        self,
+        chroma_dir: Path,
+        collection_name: str,
+        *,
+        enabled: bool = True,
+        max_snippet_chars: int = 1200,
+    ) -> None:
+        self.enabled = enabled
+        self.max_snippet_chars = max_snippet_chars
+        self.engine = RAGEngine(chroma_dir=chroma_dir, collection_name=collection_name) if enabled else None
+
+    @property
+    def is_ready(self) -> bool:
+        if not self.enabled or self.engine is None:
+            return False
+        return self.engine.count() > 0
+
+    def search(self, query: str, top_k: int = 5) -> list[dict[str, Any]]:
+        if not self.is_ready or not str(query or "").strip():
+            return []
+        rows = self.engine.query_text(query, top_k=top_k, where={"source": "PROJECT_KNOWLEDGE"}) if self.engine else []
+        results: list[dict[str, Any]] = []
+        for row in rows:
+            metadata = dict(row.get("metadata") or {})
+            document = str(row.get("document") or "")
+            distance = row.get("distance")
+            try:
+                score = 1.0 / (1.0 + float(distance or 0.0))
+            except (TypeError, ValueError):
+                score = 0.0
+            item = {
+                "chunk_id": metadata.get("chunk_id") or row.get("id"),
+                "record_id": metadata.get("record_id"),
+                "source_id": metadata.get("source_id"),
+                "title": metadata.get("title") or metadata.get("document_title"),
+                "document_title": metadata.get("document_title") or metadata.get("title"),
+                "section_title": metadata.get("section_title"),
+                "doi": metadata.get("doi"),
+                "source_url": metadata.get("source_url"),
+                "chunk_type": "vector",
+                "source_type": metadata.get("source_type"),
+                "page_start": metadata.get("page_start"),
+                "page_end": metadata.get("page_end"),
+                "load_case_tag": metadata.get("load_case_tag"),
+                "design_platform_scope": metadata.get("design_platform_scope"),
+                "score": round(score, 4),
+                "vector_distance": distance,
+                "text": trim_text(document, self.max_snippet_chars),
+                "source": "VECTOR_INDEX",
+                "retrieval_sources": ["VECTOR_INDEX"],
+            }
+            results.append(item)
+        return results
+
+
 class KnowledgeGraphRetriever:
     """基于知识图谱 JSONL 的文件型关系检索器。"""
 
@@ -478,24 +538,81 @@ class KnowledgeGraphRetriever:
 
 
 class DomainKnowledgeBase:
-    """面向 CSDM_cph 的外部知识库/知识图谱运行时入口。"""
+    """面向 CSAgent 的项目知识库/知识图谱运行时入口。"""
 
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
         app_config = config or load_app_config()
-        knowledge_config = dict(app_config.get("external_knowledge", {}))
+        knowledge_config = dict(app_config.get("project_knowledge", {}))
         self.enabled = bool(knowledge_config.get("enabled", True))
         self.top_k = int(knowledge_config.get("top_k", 5) or 5)
         self.kg_top_k = int(knowledge_config.get("kg_top_k", 8) or 8)
-        self.manifest_path = _as_path(str(knowledge_config.get("manifest_path", "knowledge/external/manifest.json")))
-        rag_path = _as_path(str(knowledge_config.get("rag_chunks_path", "knowledge/external/rag/rag_chunks.jsonl")))
-        kg_dir = _as_path(str(knowledge_config.get("kg_dir", "knowledge/external/kg")))
+        self.base_dir = _as_path(str(knowledge_config.get("base_dir", "knowledge/runtime")))
+        self.upload_dir = _as_path(str(knowledge_config.get("upload_dir", "knowledge/runtime/uploads")))
+        self.structured_dir = _as_path(str(knowledge_config.get("structured_dir", "knowledge/runtime/structured_text")))
+        self.manifest_path = _as_path(str(knowledge_config.get("manifest_path", "knowledge/runtime/manifest.json")))
+        rag_path = _as_path(str(knowledge_config.get("rag_chunks_path", "knowledge/runtime/rag/rag_chunks.jsonl")))
+        kg_dir = _as_path(str(knowledge_config.get("kg_dir", "knowledge/runtime/kg")))
         max_snippet_chars = int(knowledge_config.get("max_snippet_chars", 1200) or 1200)
+        vector_chroma_dir = _as_path(str(knowledge_config.get("vector_chroma_dir", CHROMA_DIR)))
+        vector_collection_name = str(knowledge_config.get("vector_collection_name", "csdm_cph_project_knowledge"))
+        vector_enabled = bool(knowledge_config.get("vector_enabled", False))
+        vector_top_k_multiplier = int(knowledge_config.get("vector_top_k_multiplier", 2) or 2)
         self.rag = RagChunkRetriever(rag_path, max_snippet_chars=max_snippet_chars)
+        self.vector = VectorChunkRetriever(
+            vector_chroma_dir,
+            vector_collection_name,
+            enabled=vector_enabled,
+            max_snippet_chars=max_snippet_chars,
+        )
+        self.vector_top_k_multiplier = max(1, vector_top_k_multiplier)
         self.kg = KnowledgeGraphRetriever(kg_dir)
 
     @property
     def is_ready(self) -> bool:
-        return self.enabled and self.rag.is_ready
+        return self.enabled and (self.rag.is_ready or self.vector.is_ready)
+
+    def _retrieve_chunks(self, query: str, top_k: int) -> list[dict[str, Any]]:
+        keyword_chunks = self.rag.search(query, top_k=top_k) if self.rag.is_ready else []
+        vector_chunks = (
+            self.vector.search(query, top_k=top_k * self.vector_top_k_multiplier)
+            if self.vector.is_ready
+            else []
+        )
+        merged: dict[str, dict[str, Any]] = {}
+        for chunk in [*keyword_chunks, *vector_chunks]:
+            source_key = _normalize_source_key(
+                chunk.get("source_url"),
+                chunk.get("doi"),
+                chunk.get("document_title") or chunk.get("title"),
+                chunk.get("source_id"),
+                chunk.get("record_id"),
+                chunk.get("chunk_id"),
+            )
+            if not source_key:
+                continue
+            current = merged.get(source_key)
+            incoming_score = float(chunk.get("score") or 0.0)
+            if current is None:
+                item = dict(chunk)
+                sources = item.get("retrieval_sources")
+                if not isinstance(sources, list):
+                    base_source = str(item.get("source") or "KNOWLEDGE_BASE")
+                    sources = [base_source]
+                item["retrieval_sources"] = sorted({str(source) for source in sources if str(source)})
+                merged[source_key] = item
+                continue
+            current_score = float(current.get("score") or 0.0)
+            current["score"] = round(max(current_score, incoming_score) + min(current_score, incoming_score) * 0.15, 4)
+            sources = set(str(source) for source in current.get("retrieval_sources", []) if str(source))
+            incoming_sources = chunk.get("retrieval_sources")
+            if isinstance(incoming_sources, list):
+                sources.update(str(source) for source in incoming_sources if str(source))
+            else:
+                sources.add(str(chunk.get("source") or "KNOWLEDGE_BASE"))
+            current["retrieval_sources"] = sorted(sources)
+            if not current.get("text") and chunk.get("text"):
+                current["text"] = chunk.get("text")
+        return sorted(merged.values(), key=lambda item: float(item.get("score") or 0.0), reverse=True)[:top_k]
 
     def task_query_text(self, task: Dict[str, Any]) -> str:
         task_payload = task_payload_from_request(task)
@@ -519,7 +636,7 @@ class DomainKnowledgeBase:
         if not self.is_ready:
             return {"query": "", "chunks": [], "relations": []}
         query = self.task_query_text(task)
-        chunks = self.rag.search(query, top_k=top_k or self.top_k)
+        chunks = self._retrieve_chunks(query, top_k or self.top_k)
         record_ids = [str(item.get("record_id") or "") for item in chunks]
         relations = self.kg.search(query, record_ids, top_k=kg_top_k or self.kg_top_k) if self.kg.is_ready else []
         return {"query": query, "chunks": chunks, "relations": relations}
@@ -529,7 +646,7 @@ class DomainKnowledgeBase:
         query_text = str(query or "").strip()
         if not self.is_ready or not query_text:
             return {"query": query_text, "chunks": [], "relations": []}
-        chunks = self.rag.search(query_text, top_k=top_k or self.top_k)
+        chunks = self._retrieve_chunks(query_text, top_k or self.top_k)
         record_ids = [str(item.get("record_id") or "") for item in chunks]
         relations = self.kg.search(query_text, record_ids, top_k=kg_top_k or self.kg_top_k) if self.kg.is_ready else []
         return {"query": query_text, "chunks": chunks, "relations": relations}
@@ -565,7 +682,7 @@ class DomainKnowledgeBase:
         for index, item in enumerate(payload.get("chunks", []), start=1):
             title = item.get("title") or item.get("record_id") or f"资料片段{index}"
             source_label = register_source(item)
-            meta_lines = [f"[外部知识库 {index}{f' | 来源 {source_label}' if source_label else ''}] {title}"]
+            meta_lines = [f"[项目知识库 {index}{f' | 来源 {source_label}' if source_label else ''}] {title}"]
             if item.get("page_start") not in (None, ""):
                 page_end = item.get("page_end")
                 page_text = str(item.get("page_start")) if page_end in (None, "", item.get("page_start")) else f"{item.get('page_start')}-{page_end}"
@@ -611,9 +728,16 @@ class DomainKnowledgeBase:
         return {
             "enabled": self.enabled,
             "ready": self.is_ready,
+            "base_dir": str(self.base_dir),
+            "upload_dir": str(self.upload_dir),
+            "structured_dir": str(self.structured_dir),
             "manifest_path": str(self.manifest_path),
             "rag_chunks_path": str(self.rag.chunks_path),
             "kg_dir": str(self.kg.kg_dir),
+            "vector_ready": self.vector.is_ready,
+            "vector_chunk_count": self.vector.engine.count() if self.vector.engine is not None else 0,
+            "store_type": manifest.get("store_type", "project_runtime_knowledge"),
+            "document_count": int(manifest.get("document_count", 0) or 0),
             "rag_chunk_count": int(manifest.get("rag_chunk_count", 0) or 0),
             "kg_entity_count": int(
                 manifest.get("kg_entity_count", 0)
@@ -625,18 +749,10 @@ class DomainKnowledgeBase:
                 or kg_stats.get("total_relations", 0)
                 or 0
             ),
-            "provenance_dir": manifest.get("provenance_dir"),
-            "source_registry_path": manifest.get("source_registry_path"),
-            "source_metadata_path": manifest.get("source_metadata_path"),
-            "structured_documents_path": manifest.get("structured_documents_path"),
-            "markdown_documents_dir": manifest.get("markdown_documents_dir"),
-            "source_registry_count": int(manifest.get("source_registry_count", 0) or 0),
-            "source_metadata_count": int(manifest.get("source_metadata_count", 0) or 0),
             "structured_document_count": int(manifest.get("structured_document_count", 0) or 0),
             "structured_block_count": int(manifest.get("structured_block_count", 0) or 0),
-            "table_record_count": int(manifest.get("table_record_count", 0) or 0),
-            "figure_record_count": int(manifest.get("figure_record_count", 0) or 0),
-            "formula_record_count": int(manifest.get("formula_record_count", 0) or 0),
             "markdown_document_count": int(manifest.get("markdown_document_count", 0) or 0),
+            "pipeline": manifest.get("pipeline") if isinstance(manifest.get("pipeline"), list) else [],
+            "last_ingestion": manifest.get("last_ingestion") if isinstance(manifest.get("last_ingestion"), dict) else {},
             "updated_at": manifest.get("updated_at"),
         }

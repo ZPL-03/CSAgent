@@ -105,11 +105,7 @@ def test_domain_knowledge_retrieves_knowledge_base_and_graph(tmp_path: Path) -> 
                 "rag_chunk_count": 2,
                 "kg_entity_count": 2,
                 "kg_relation_count": 2,
-                "source_metadata_count": 1,
                 "structured_block_count": 10,
-                "table_record_count": 3,
-                "figure_record_count": 4,
-                "formula_record_count": 5,
             },
             ensure_ascii=False,
         ),
@@ -118,7 +114,7 @@ def test_domain_knowledge_retrieves_knowledge_base_and_graph(tmp_path: Path) -> 
 
     knowledge = DomainKnowledgeBase(
         {
-            "external_knowledge": {
+            "project_knowledge": {
                 "enabled": True,
                 "rag_chunks_path": str(rag_path),
                 "kg_dir": str(kg_dir),
@@ -144,8 +140,4 @@ def test_domain_knowledge_retrieves_knowledge_base_and_graph(tmp_path: Path) -> 
     assert snippet_text.count("https://example.com/hull") == 1
     assert snippet_text.count("Pressure Hull(Structure) -[EXPERIENCES]-> Buckling(FailureMode)") == 1
     assert status["rag_chunk_count"] == 2
-    assert status["source_metadata_count"] == 1
     assert status["structured_block_count"] == 10
-    assert status["table_record_count"] == 3
-    assert status["figure_record_count"] == 4
-    assert status["formula_record_count"] == 5

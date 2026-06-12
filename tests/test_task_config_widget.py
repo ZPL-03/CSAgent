@@ -85,8 +85,8 @@ def test_main_window_syncs_task_config_page(monkeypatch) -> None:
     )
     window = MainWindow()
     try:
-        labels = [window.tabs.tabText(index) for index in range(window.tabs.count())]
-        assert labels[0] == "任务配置"
+        assert window.task_config_widget.parentWidget() is window.stack.widget(1)
+        assert window.nav_buttons[1].text() == "项目"
 
         window.session.task = task
         window._refresh_design_views()

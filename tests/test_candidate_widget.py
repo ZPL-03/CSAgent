@@ -62,7 +62,7 @@ def test_candidate_widget_renders_generation_audit() -> None:
     try:
         widget.preview_widget.show_candidate = lambda _candidate: None
         widget.update_candidates([_candidate()])
-        html = widget.detail_browser.toHtml()
+        html = widget.audit_browser.toHtml()
 
         assert "来源审计" in widget.summary_label.text()
         assert "候选来源与去重审计" in html
@@ -70,6 +70,8 @@ def test_candidate_widget_renders_generation_audit() -> None:
         assert "规则过滤原因" in html
         assert "radius_mm 超出范围" in html
         assert "DOE 补足" in html
+        assert widget.total_metric.text().endswith("1")
+        assert widget.llm_metric.text().endswith("1")
     finally:
         widget.close()
         app.processEvents()

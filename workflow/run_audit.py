@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -80,6 +81,17 @@ def _pressure_error(predicted: Any, actual: Any) -> str:
     return f"{abs(predicted_value - actual_value) / abs(actual_value) * 100.0:.2f}"
 
 
+def _compact_json(value: Any, limit: int = 360) -> str:
+    if value in (None, ""):
+        return "-"
+    try:
+        text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+    except Exception:
+        text = str(value)
+    text = text.replace("\n", " ")
+    return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
 def build_run_audit_markdown(
     run_id: str,
     snapshot: dict[str, Any],
@@ -102,9 +114,14 @@ def build_run_audit_markdown(
     failed_events = [event for event in events if event.get("event_type") in {"node_failed", "tool_failed", "simulation_job_failed"}]
     failed_jobs = [job for job in jobs if str(job.get("status") or "") == "failed"]
     llm_events = [event for event in events if event.get("event_type") == "llm_call_trace"]
+    tool_events = [
+        event
+        for event in events
+        if event.get("event_type") in {"tool_started", "tool_completed", "tool_failed"}
+    ]
 
     lines = [
-        f"# CSDM_cph 运行审计报告",
+        f"# CSAgent 运行审计报告",
         "",
         "## 运行摘要",
         "",
@@ -213,6 +230,25 @@ def build_run_audit_markdown(
     lines.extend(
         [
             _table(["时间", "用途", "选用后端", "选用模型", "使用回退", "尝试链路"], llm_rows),
+            "",
+            "## 工具调用审计",
+            "",
+            _table(
+                ["时间", "工具", "智能体", "状态", "耗时ms", "输入摘要", "输出摘要", "错误"],
+                [
+                    [
+                        event.get("created_at"),
+                        (event.get("payload") or {}).get("tool"),
+                        event.get("agent"),
+                        event.get("event_type"),
+                        (event.get("payload") or {}).get("duration_ms"),
+                        _compact_json((event.get("payload") or {}).get("input_summary")),
+                        _compact_json((event.get("payload") or {}).get("output_summary")),
+                        (event.get("payload") or {}).get("error"),
+                    ]
+                    for event in tool_events
+                ],
+            ),
             "",
             "## 诊断",
             "",

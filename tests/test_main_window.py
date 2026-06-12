@@ -113,6 +113,22 @@ def test_loaded_example_keeps_geometry_as_candidate_variables(monkeypatch) -> No
         app.processEvents()
 
 
+def test_monitor_page_contains_workflow_audit_widget(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window._switch_workspace_page(3)
+        assert window.stack.currentWidget() is window.monitor_page
+        assert window.workflow_widget.parent() is not None
+        assert window.workflow_widget.isHidden() is False
+        assert window.workflow_widget.health_button.isHidden() is False
+        assert window.workflow_widget.audit_button.isHidden() is False
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_main_window_restores_workflow_snapshot(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     monkeypatch.setattr("gui.knowledge_widget.DomainKnowledgeBase", FakeKnowledge)
@@ -157,7 +173,7 @@ def test_main_window_restores_workflow_snapshot(monkeypatch, tmp_path) -> None:
         assert window.session.knowledge_updates[0]["case_id"] == "CASE_1"
         assert window.tabs.indexOf(window.result_trace_widget) >= 0
         assert "CASE_1" in window.result_trace_widget.table.item(0, 7).text()
-        assert window.tabs.currentWidget() is window.workflow_widget
+        assert window.tabs.currentWidget() is window.result_trace_widget
         assert "RUN_RESTORE" in window.status_label.text()
         assert window.confirm_yes_button.isEnabled() is True
     finally:

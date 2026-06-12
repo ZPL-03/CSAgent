@@ -122,6 +122,11 @@ def test_workflow_runtime_persists_and_resumes_without_repeating_completed_nodes
     assert "tool_started" in event_types
     assert "tool_completed" in event_types
     assert "human_confirmation" in event_types
+    tool_started = next(event for event in store.list_events(state["run_id"]) if event["event_type"] == "tool_started")
+    assert tool_started["payload"]["input_summary"]["instruction"] == "生成 2 个候选，初筛保留 1 个候选"
+    tool_completed = next(event for event in store.list_events(state["run_id"]) if event["event_type"] == "tool_completed")
+    assert "duration_ms" in tool_completed["payload"]
+    assert "output_summary" in tool_completed["payload"]
 
     runs = store.list_runs(limit=5)
     assert runs[0]["run_id"] == state["run_id"]
@@ -164,3 +169,6 @@ def test_workflow_runtime_completes_full_approved_path(tmp_path):
     assert "knowledge_update_completed" in event_types
     tool_events = [event for event in store.list_events(state["run_id"]) if event["event_type"] == "tool_completed"]
     assert any(event["agent"] == "KnowledgeMemoryAgent" for event in tool_events)
+    evaluate_event = next(event for event in tool_events if event["payload"].get("tool") == "evaluate_candidates")
+    assert evaluate_event["payload"]["input_summary"]["candidates"]["count"] == 1
+    assert evaluate_event["payload"]["output_summary"]["results"]["count"] == 1

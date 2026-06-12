@@ -127,7 +127,7 @@ def probe_llm_backends(
             llm_backend.chat(
                 "你是 LLM 后端健康检查助手。请只回复 OK。",
                 "请回复 OK。",
-                max_tokens_override=8,
+                max_tokens_override=256,
                 excluded_backend_names=excluded,
             )
             trace = list(llm_backend.last_call_trace or [])

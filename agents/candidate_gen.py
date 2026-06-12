@@ -473,7 +473,7 @@ class CandidateGenAgent(BaseAgent):
             int(getattr(self.llm_backend, "max_tokens", 0) or 0),
             900,
         )
-        estimated_budget = max(900, 700 + max(int(desired_count), 1) * 300)
+        estimated_budget = max(3000, 1400 + max(int(desired_count), 1) * 500)
         return min(configured_budget, estimated_budget)
 
     def _repair_geometry_by_task(

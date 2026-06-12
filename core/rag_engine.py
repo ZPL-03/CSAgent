@@ -27,6 +27,21 @@ class _InMemoryCollection:
             if not replaced:
                 self._rows.append({"id": row_id, "document": document, "embedding": embedding, "metadata": metadata})
 
+    def delete(self, ids: List[str] | None = None, where: Dict | None = None) -> None:
+        if not ids and not where:
+            self._rows = []
+            return
+        id_set = {str(row_id) for row_id in ids or []}
+        retained: List[Dict[str, Any]] = []
+        for row in self._rows:
+            metadata = row.get("metadata", {})
+            id_matched = bool(id_set) and str(row.get("id")) in id_set
+            where_matched = bool(where) and all(metadata.get(key) == value for key, value in where.items())
+            if id_matched or where_matched:
+                continue
+            retained.append(row)
+        self._rows = retained
+
     def query(self, query_embeddings: List[List[float]], n_results: int, where: Dict | None = None) -> Dict[str, List[List[Any]]]:
         rows = self._rows
         if where:
@@ -178,12 +193,36 @@ class RAGEngine:
         metadata_list = list(metadatas) if metadatas is not None else [{} for _ in docs]
         if len(metadata_list) != len(docs):
             raise ValueError("metadatas 和 documents 数量不一致")
+        metadata_list = [self._sanitize_metadata(item) for item in metadata_list]
         embeddings = [self._embedding(doc) for doc in docs]
         try:
             self.collection.upsert(ids=doc_ids, documents=docs, embeddings=embeddings, metadatas=metadata_list)
         except Exception:
             self._reset_collection()
             self.collection.upsert(ids=doc_ids, documents=docs, embeddings=embeddings, metadatas=metadata_list)
+
+    def delete_where(self, where: Dict[str, Any]) -> None:
+        """删除当前 collection 中满足 metadata 条件的记录。"""
+        if not where:
+            return
+        sanitized_where = self._sanitize_metadata(where)
+        try:
+            self.collection.delete(where=sanitized_where)
+        except Exception:
+            rows = getattr(self.collection, "_rows", None)
+            if isinstance(rows, list):
+                self.collection.delete(where=sanitized_where)
+
+    def _sanitize_metadata(self, metadata: Dict[str, Any]) -> Dict[str, Any]:
+        sanitized: Dict[str, Any] = {}
+        for key, value in dict(metadata or {}).items():
+            if value is None:
+                sanitized[str(key)] = ""
+            elif isinstance(value, (str, int, float, bool)):
+                sanitized[str(key)] = value
+            else:
+                sanitized[str(key)] = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        return sanitized
 
     def upsert_records(self, records: Iterable[Dict], id_key: str) -> None:
         records = list(records)

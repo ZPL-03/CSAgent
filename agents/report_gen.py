@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from pathlib import Path
 from typing import Any, Dict, List
 from xml.sax.saxutils import escape
@@ -392,16 +393,17 @@ class ReportGenAgent(BaseAgent):
         """清理报告解释段的标题层级和数值占位语，避免与模板标题重复。"""
         cleaned_lines: List[str] = []
         for raw_line in str(text or "").splitlines():
-            line = raw_line.rstrip()
+            line = unicodedata.normalize("NFKC", raw_line.rstrip())
             stripped = line.strip()
             if not stripped:
                 cleaned_lines.append("")
                 continue
-            if re.fullmatch(r"#{1,2}\s*工程解释与制造建议", stripped):
+            if re.fullmatch(r"#{1,6}\s*工程解释与制造建议", stripped) or stripped == "工程解释与制造建议":
                 continue
             if stripped.startswith("# ") or stripped.startswith("## "):
                 stripped = re.sub(r"^#+\s*", "", stripped)
                 line = f"### {stripped}"
+            line = re.sub(r"[Vv]erd[Dd]?ict", "结论", line)
             line = line.replace("为对应工程量", "由结构化有限元结果给出")
             line = line.replace("为结构化结果中的对应工程量", "由结构化有限元结果给出")
             line = line.replace("对应工程量", "结构化结果")
@@ -440,7 +442,7 @@ class ReportGenAgent(BaseAgent):
             if str(result.get("candidate_id") or "").strip()
         }
         lines = [
-            "# CSDM_cph 耐压壳设计报告",
+            "# CSAgent 耐压壳设计报告",
             "",
             f"- 会话任务编号：`{task.get('task_id') or '-'}`",
             f"- 应用场景：{task_payload['application']}",
@@ -535,9 +537,9 @@ class ReportGenAgent(BaseAgent):
     def _register_font(self) -> str:
         rl = self._reportlab()
         preferred_fonts = [
-            ("CSDM_cph_SimSun", Path("C:/Windows/Fonts/simsun.ttc")),
-            ("CSDM_cph_MSYH", Path("C:/Windows/Fonts/msyh.ttc")),
-            ("CSDM_cph_SimHei", Path("C:/Windows/Fonts/simhei.ttf")),
+            ("CSAgent_SimSun", Path("C:/Windows/Fonts/simsun.ttc")),
+            ("CSAgent_MSYH", Path("C:/Windows/Fonts/msyh.ttc")),
+            ("CSAgent_SimHei", Path("C:/Windows/Fonts/simhei.ttf")),
         ]
         for font_name, font_path in preferred_fonts:
             try:
@@ -555,7 +557,7 @@ class ReportGenAgent(BaseAgent):
         rl = self._reportlab()
         stylesheet = rl["getSampleStyleSheet"]()
         body = rl["ParagraphStyle"](
-            name="CSDM_cphBody",
+            name="CSAgentBody",
             parent=stylesheet["BodyText"],
             fontName=font_name,
             fontSize=10.5,
@@ -566,7 +568,7 @@ class ReportGenAgent(BaseAgent):
         )
         return {
             "title": rl["ParagraphStyle"](
-                name="CSDM_cphTitle",
+                name="CSAgentTitle",
                 parent=stylesheet["Title"],
                 fontName=font_name,
                 fontSize=18,
@@ -576,7 +578,7 @@ class ReportGenAgent(BaseAgent):
                 spaceAfter=12,
             ),
             "heading2": rl["ParagraphStyle"](
-                name="CSDM_cphHeading2",
+                name="CSAgentHeading2",
                 parent=stylesheet["Heading2"],
                 fontName=font_name,
                 fontSize=14,
@@ -587,7 +589,7 @@ class ReportGenAgent(BaseAgent):
                 spaceAfter=6,
             ),
             "heading3": rl["ParagraphStyle"](
-                name="CSDM_cphHeading3",
+                name="CSAgentHeading3",
                 parent=stylesheet["Heading3"],
                 fontName=font_name,
                 fontSize=12,
@@ -599,7 +601,7 @@ class ReportGenAgent(BaseAgent):
             ),
             "body": body,
             "bullet": rl["ParagraphStyle"](
-                name="CSDM_cphBullet",
+                name="CSAgentBullet",
                 parent=body,
                 leftIndent=14,
                 firstLineIndent=0,
@@ -646,7 +648,7 @@ class ReportGenAgent(BaseAgent):
             story.append(rl["Paragraph"](self._paragraph_text_for_pdf(stripped), styles["body"]))
 
         if not story:
-            story.append(rl["Paragraph"]("CSDM_cph 耐压壳设计报告内容为空。", styles["body"]))
+            story.append(rl["Paragraph"]("CSAgent 耐压壳设计报告内容为空。", styles["body"]))
         return story
 
     def _write_pdf(self, markdown_text: str, pdf_path: Path) -> None:
@@ -660,8 +662,8 @@ class ReportGenAgent(BaseAgent):
             rightMargin=40,
             topMargin=48,
             bottomMargin=48,
-            title="CSDM_cph 耐压壳设计报告",
-            author="CSDM_cph",
+            title="CSAgent 耐压壳设计报告",
+            author="CSAgent",
         )
         document.build(self._build_pdf_story(markdown_text, font_name))
 

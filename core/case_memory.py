@@ -144,7 +144,7 @@ def task_to_case_query_text(task: Dict[str, Any]) -> str:
 
 
 class CaseMemoryIndex:
-    """案例记忆向量索引，独立于外部知识库/知识图谱。"""
+    """案例记忆向量索引，独立于项目知识库/知识图谱。"""
 
     def __init__(self, collection_name: str | None = None) -> None:
         config = load_app_config()

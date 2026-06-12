@@ -22,13 +22,16 @@ def test_locale_manager_persists_language(tmp_path) -> None:
     locale = LocaleManager(settings_path)
 
     assert locale.language == "zh"
-    assert locale.text("app.title") == "复合材料结构多智能体智能设计系统"
+    assert locale.theme == "dark"
+    assert locale.text("app.title") == "CSAgent"
 
     locale.set_language("en")
+    locale.set_theme("light")
     reloaded = LocaleManager(settings_path)
 
     assert reloaded.language == "en"
-    assert reloaded.text("app.title") == "Composite Structure Multi-Agent Intelligent Design System"
+    assert reloaded.theme == "light"
+    assert reloaded.text("app.title") == "CSAgent"
 
 
 def test_main_window_switches_primary_shell_language(monkeypatch, tmp_path) -> None:
@@ -42,10 +45,20 @@ def test_main_window_switches_primary_shell_language(monkeypatch, tmp_path) -> N
         app.processEvents()
 
         assert window.locale.language == "en"
-        assert "Composite Structure Multi-Agent" in window.app_title_label.text()
-        assert window.generate_button.text() == "Start Design"
+        assert window.app_title_label.text() == "CSAgent"
+        assert window.app_subtitle_label.text() == "Multi-Agent Intelligent Design Platform"
+        assert window.generate_button.text() == "Send"
+        assert window.restore_run_button.text() == "Restore Run State"
+        assert "without re-running LLM or ABAQUS" in window.restore_run_button.toolTip()
         assert window.tabs.tabText(window.tabs.indexOf(window.candidate_widget)) == "Candidates"
         assert "Sample" in window.candidate_widget.table.horizontalHeaderItem(0).text()
+
+        light_index = window.theme_selector.findData("light")
+        window.theme_selector.setCurrentIndex(light_index)
+        app.processEvents()
+
+        assert window.locale.theme == "light"
+        assert window.theme_selector.currentText() == "Light Engineering"
     finally:
         window.close()
         app.processEvents()

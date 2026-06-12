@@ -205,14 +205,21 @@ class LLMBackend:
                 self.active_backend = runtime
                 self._sync_public_attrs(runtime)
                 choice = response.choices[0]
-                content = choice.message.content or ""
+                message = choice.message
+                content = message.content or ""
+                reasoning_content = getattr(message, "reasoning_content", "") or ""
                 attempt["finish_reason"] = getattr(choice, "finish_reason", None)
                 attempt["content_chars"] = len(content)
+                if reasoning_content:
+                    attempt["reasoning_chars"] = len(reasoning_content)
                 if not content.strip():
                     attempt["status"] = "failed"
                     attempt["error_type"] = "ValueError"
-                    attempt["error"] = f"LLM 后端 {runtime.name} 返回空文本"
-                    raise ValueError(f"LLM 后端 {runtime.name} 返回空文本")
+                    if reasoning_content and attempt.get("finish_reason") == "length":
+                        attempt["error"] = f"LLM 后端 {runtime.name} 推理 token 预算耗尽，content 为空"
+                    else:
+                        attempt["error"] = f"LLM 后端 {runtime.name} 返回空文本"
+                    raise ValueError(attempt["error"])
                 attempt["status"] = "success"
                 attempt["latency_ms"] = round((time.perf_counter() - started_at) * 1000.0, 3)
                 trace.append(attempt)

@@ -5,56 +5,86 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from core.paths import RUNTIME_DIR
 
 
 LanguageCode = Literal["zh", "en"]
+ThemeCode = Literal["auto", "dark", "light"]
 
 DEFAULT_LANGUAGE: LanguageCode = "zh"
+DEFAULT_THEME: ThemeCode = "dark"
 LANGUAGE_OPTIONS: dict[str, str] = {
     "zh": "简体中文",
     "en": "English",
 }
+THEME_OPTIONS: dict[str, dict[str, str]] = {
+    "zh": {
+        "auto": "跟随系统",
+        "dark": "深色工程",
+        "light": "亮色工程",
+    },
+    "en": {
+        "auto": "Auto",
+        "dark": "Dark Engineering",
+        "light": "Light Engineering",
+    },
+}
 
 TEXT: dict[str, dict[str, str]] = {
     "zh": {
-        "app.title": "复合材料结构多智能体智能设计系统",
-        "app.subtitle": "多智能体任务编排 / 候选生成 / 代理初筛 / ABAQUS 校核 / 案例回流 / 报告输出",
+        "app.title": "CSAgent",
+        "app.subtitle": "多智能体智能设计平台",
         "section.primary": "主流程",
         "section.utility": "辅助入口",
         "section.session": "当前会话",
         "section.manual": "人工操作",
+        "section.runtime_log": "运行日志 · LOG",
+        "section.agents": "智能体运行面板",
+        "section.queue": "任务队列",
+        "section.knowledge_status": "知识连接",
+        "section.workbench": "工作流 · LangGraph DAG",
+        "section.dialog": "对话 · 多智能体协作",
+        "section.details": "实时结果 · LIVE",
         "section.language": "界面语言",
+        "section.theme": "界面主题",
+        "nav.workbench": "工作台",
+        "nav.project": "项目",
+        "nav.knowledge": "知识库",
+        "nav.monitor": "监控",
+        "nav.settings": "设置",
+        "model.current": "领域主模型",
         "status.waiting": "状态：等待输入设计需求",
         "status.busy": "状态：{status}",
         "status.ready_next": "等待下一步操作",
-        "status.no_snapshot": "状态：没有可载入的运行快照",
-        "status.snapshot_failed": "状态：运行快照载入失败：{error}",
-        "status.snapshot_loaded": "状态：已载入运行快照 {run_id}",
+        "status.no_snapshot": "状态：没有可恢复的运行状态",
+        "status.snapshot_failed": "状态：运行状态恢复失败：{error}",
+        "status.snapshot_loaded": "状态：已恢复运行状态 {run_id}",
         "status.knowledge_refreshed": "状态：知识库视图已刷新",
         "input.placeholder": "例如：请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 12 个候选，初筛保留 5 个候选",
-        "button.start": "开始对话设计",
+        "chat.empty": "在下方输入设计需求，系统会实时显示任务解析、候选生成、代理初筛、有限元校核、知识回流和报告输出过程。",
+        "button.start": "发送",
         "button.confirm": "确认继续",
         "button.pause": "跳过/暂停",
         "button.example": "载入示例需求",
         "button.refresh_knowledge": "刷新知识库",
         "button.open_report": "打开最新报告",
         "button.refresh_runs": "刷新运行记录",
-        "button.restore_run": "载入运行快照",
+        "button.restore_run": "恢复运行状态",
+        "tooltip.restore_run": "从本地运行库恢复上一次流程状态；只读取任务、候选、筛选结果、有限元结果、报告和待确认节点，不重新调用 LLM 或 ABAQUS。",
         "button.screen": "手动：代理初筛",
         "button.evaluate_selected": "手动：校核所选样本",
         "button.evaluate_all": "手动：校核当前候选",
-        "button.report": "手动：导出报告",
+        "button.report": "生成阶段报告",
         "button.reset": "重置会话",
-        "tab.task": "任务配置",
+        "tab.task": "任务",
         "tab.workflow": "智能体流程",
-        "tab.candidates": "候选方案",
-        "tab.abaqus": "ABAQUS 结果",
-        "tab.trace": "结果追踪",
-        "tab.report": "报告预览",
-        "tab.knowledge": "知识库",
+        "tab.candidates": "候选",
+        "tab.abaqus": "FEM",
+        "tab.trace": "追踪",
+        "tab.report": "报告",
+        "tab.knowledge": "知识",
         "tab.log": "日志",
         "metric.stage": "阶段：{value}",
         "metric.candidate_zero": "候选池：0",
@@ -62,6 +92,19 @@ TEXT: dict[str, dict[str, str]] = {
         "metric.pending_zero": "待校核：0",
         "metric.pending": "待校核：{count} / 初筛目标 {target}",
         "metric.pass": "通过：{count}",
+        "agent.waiting": "等待",
+        "agent.active": "运行中",
+        "agent.done": "完成",
+        "agent.orchestrator": "任务编排与人工确认",
+        "agent.candidate_gen": "LLM / 案例迁移 / DOE 候选生成",
+        "agent.screener": "ASME RD-1172 与 PBIPF 代理初筛",
+        "agent.fem": "ABAQUS 两阶段有限元校核",
+        "agent.knowledge": "案例记忆与项目知识库/知识图谱",
+        "agent.report": "报告生成与工程解释",
+        "queue.idle": "等待设计需求",
+        "queue.progress": "流程进度：{percent}%",
+        "queue.stage": "当前阶段：{stage}",
+        "knowledge.status": "项目知识库/知识图谱：{status}；案例库：{cases} 条；运行记录：{runs} 条",
         "snapshot.none": "暂无可恢复运行",
         "user.continue": "继续",
         "user.pause": "跳过/暂停",
@@ -74,12 +117,15 @@ TEXT: dict[str, dict[str, str]] = {
         "workflow.initial.title": "流程提示",
         "workflow.initial.body": "1. 输入一句自然语言需求，系统解析候选池总数和初筛保留数并生成初始候选<br>2. 确认代理初筛后，系统按 PBIPF 公式和面密度排序<br>3. 确认有限元校核后，系统执行 ABAQUS 两阶段校核并回流案例<br>4. 确认报告输出后，系统生成 Markdown/PDF 报告",
         "plot.hint": "鼠标左键旋转，滚轮缩放，Shift+拖拽平移，双击重置视角。",
-        "plot.no_pyvista": "当前环境未安装 pyvistaqt，无法提供交互式三维视图。",
-        "plot.opengl_failed": "当前环境无法初始化交互式 OpenGL 视图，可在本地图形界面中重试。",
+        "plot.offline_preview": "离线预览：当前未使用交互式 OpenGL 视图。",
+        "plot.no_pyvista": "当前环境未安装 pyvistaqt，无法打开交互式三维视图。",
+        "plot.opengl_failed": "当前环境无法初始化交互式 OpenGL 视图，已切换为离线预览。",
         "plot.no_candidate_geometry": "当前候选方案缺少几何参数，无法显示三维模型。",
-        "plot.static_candidate_failed": "当前环境无法初始化交互式 OpenGL 视图，且静态几何图生成失败。",
+        "plot.static_candidate_failed": "交互式 OpenGL 视图不可用，离线几何预览生成失败。",
         "plot.no_mode": "当前结果还没有可显示的模态云图数据。",
-        "plot.static_mode_failed": "当前环境无法初始化交互式 OpenGL 视图，且静态模态云图生成失败。",
+        "plot.static_mode_failed": "交互式 OpenGL 视图不可用，离线模态云图预览生成失败。",
+        "plot.reference_hull": "参考耐压壳模型",
+        "live_view.empty": "实时视口：生成候选后显示耐压壳几何；完成 ABAQUS 后显示一阶屈曲模态云图。",
         "render.candidate_fallback": "候选方案",
         "render.candidate_section": "{name} 几何剖面 | L={length:.1f} mm，R={radius:.1f} mm，t={thickness:.2f} mm",
         "render.material_layup": "材料：{material} | 铺层角：±{alpha:.1f}/±{beta:.1f}",
@@ -94,6 +140,18 @@ TEXT: dict[str, dict[str, str]] = {
         "candidate.no_preview": "请选择候选方案查看三维几何视图。",
         "candidate.no_geometry": "暂无几何预览。",
         "candidate.headers": "样本|来源|预测极限压力|预测面密度|排序分数|FEM极限压力|状态|结论",
+        "candidate.tab.detail": "设计详情",
+        "candidate.tab.audit": "来源审计",
+        "candidate.tab.preview": "几何预览",
+        "candidate.metric.total": "候选总数\n{count}",
+        "candidate.metric.llm": "LLM\n{count}",
+        "candidate.metric.case": "案例迁移\n{count}",
+        "candidate.metric.doe": "DOE\n{count}",
+        "candidate.metric.evaluated": "已校核\n{count}",
+        "candidate.source.llm": "LLM 项目知识库/知识图谱增强",
+        "candidate.source.case": "历史案例迁移",
+        "candidate.source.doe": "DOE 参数采样",
+        "candidate.source.unknown": "未知来源",
         "abaqus.preview_empty": "完成 ABAQUS 校核后，这里会显示可旋转的模态云图。",
         "abaqus.no_results": "暂无 ABAQUS 结果。",
         "abaqus.no_preview": "暂无结果预览。",
@@ -102,33 +160,49 @@ TEXT: dict[str, dict[str, str]] = {
         "abaqus.headers": "候选样本|正式编号|状态|极限压力|屈曲压力|面密度|结论|失效模式",
     },
     "en": {
-        "app.title": "Composite Structure Multi-Agent Intelligent Design System",
-        "app.subtitle": "Multi-agent orchestration / candidate generation / surrogate screening / ABAQUS verification / case memory / reports",
+        "app.title": "CSAgent",
+        "app.subtitle": "Multi-Agent Intelligent Design Platform",
         "section.primary": "Primary Flow",
         "section.utility": "Utilities",
         "section.session": "Session",
         "section.manual": "Manual Actions",
+        "section.runtime_log": "Runtime Log",
+        "section.agents": "Agent Console",
+        "section.queue": "Task Queue",
+        "section.knowledge_status": "Knowledge Link",
+        "section.workbench": "Workflow · LangGraph DAG",
+        "section.dialog": "Conversation · Multi-Agent Collaboration",
+        "section.details": "Live Results",
         "section.language": "Language",
+        "section.theme": "Theme",
+        "nav.workbench": "Workbench",
+        "nav.project": "Project",
+        "nav.knowledge": "Knowledge",
+        "nav.monitor": "Monitor",
+        "nav.settings": "Settings",
+        "model.current": "Domain Model",
         "status.waiting": "Status: waiting for design requirements",
         "status.busy": "Status: {status}",
         "status.ready_next": "waiting for the next action",
-        "status.no_snapshot": "Status: no run snapshot available",
-        "status.snapshot_failed": "Status: failed to load run snapshot: {error}",
-        "status.snapshot_loaded": "Status: loaded run snapshot {run_id}",
+        "status.no_snapshot": "Status: no restorable run state is available",
+        "status.snapshot_failed": "Status: failed to restore run state: {error}",
+        "status.snapshot_loaded": "Status: restored run state {run_id}",
         "status.knowledge_refreshed": "Status: knowledge view refreshed",
         "input.placeholder": "Example: Design a composite external-pressure cylindrical pressure hull, external pressure 30 MPa, ultimate pressure at least 35 MPa, generate 12 candidates, keep 5 after screening",
-        "button.start": "Start Design",
+        "chat.empty": "Enter a design request below. Task parsing, candidate generation, surrogate screening, FEM verification, knowledge persistence, and reporting will appear here in real time.",
+        "button.start": "Send",
         "button.confirm": "Confirm",
         "button.pause": "Skip / Pause",
         "button.example": "Load Example",
         "button.refresh_knowledge": "Refresh Knowledge",
         "button.open_report": "Open Latest Report",
         "button.refresh_runs": "Refresh Runs",
-        "button.restore_run": "Load Snapshot",
+        "button.restore_run": "Restore Run State",
+        "tooltip.restore_run": "Restore the previous workflow state from the local runtime store without re-running LLM or ABAQUS.",
         "button.screen": "Manual: Screen",
         "button.evaluate_selected": "Manual: Verify Selected",
         "button.evaluate_all": "Manual: Verify Current",
-        "button.report": "Manual: Export Report",
+        "button.report": "Generate Stage Report",
         "button.reset": "Reset Session",
         "tab.task": "Task",
         "tab.workflow": "Agents",
@@ -144,6 +218,19 @@ TEXT: dict[str, dict[str, str]] = {
         "metric.pending_zero": "Pending FEM: 0",
         "metric.pending": "Pending FEM: {count} / screen target {target}",
         "metric.pass": "Passed: {count}",
+        "agent.waiting": "Waiting",
+        "agent.active": "Running",
+        "agent.done": "Done",
+        "agent.orchestrator": "Task orchestration and human gates",
+        "agent.candidate_gen": "LLM / case transfer / DOE generation",
+        "agent.screener": "ASME RD-1172 and PBIPF screening",
+        "agent.fem": "ABAQUS two-stage FEM verification",
+        "agent.knowledge": "Case memory and project RAG/KG",
+        "agent.report": "Report generation and engineering explanation",
+        "queue.idle": "Waiting for design requirements",
+        "queue.progress": "Workflow progress: {percent}%",
+        "queue.stage": "Current stage: {stage}",
+        "knowledge.status": "Project RAG/KG: {status}; cases: {cases}; runs: {runs}",
         "snapshot.none": "No restorable run",
         "user.continue": "Continue",
         "user.pause": "Skip / Pause",
@@ -156,12 +243,15 @@ TEXT: dict[str, dict[str, str]] = {
         "workflow.initial.title": "Workflow",
         "workflow.initial.body": "1. Enter one natural-language request; the system parses candidate count and screening count, then generates candidates<br>2. After screening confirmation, PBIPF and areal density rank the candidates<br>3. After FEM confirmation, ABAQUS runs two-stage verification and writes case memory<br>4. After report confirmation, Markdown/PDF reports are generated",
         "plot.hint": "Left-drag to rotate, wheel to zoom, Shift+drag to pan, double-click to reset view.",
-        "plot.no_pyvista": "pyvistaqt is not available, so interactive 3D view cannot be provided.",
-        "plot.opengl_failed": "Interactive OpenGL view cannot be initialized in the current environment.",
+        "plot.offline_preview": "Offline preview: interactive OpenGL view is not active.",
+        "plot.no_pyvista": "pyvistaqt is not available, so interactive 3D view cannot be opened.",
+        "plot.opengl_failed": "Interactive OpenGL view cannot be initialized; offline preview is shown.",
         "plot.no_candidate_geometry": "This candidate lacks geometry parameters and cannot be rendered.",
-        "plot.static_candidate_failed": "Interactive OpenGL failed and the static geometry preview could not be generated.",
+        "plot.static_candidate_failed": "Interactive OpenGL is unavailable and the offline geometry preview could not be generated.",
         "plot.no_mode": "No mode-shape cloud-map data is available for this result yet.",
-        "plot.static_mode_failed": "Interactive OpenGL failed and the static mode-shape preview could not be generated.",
+        "plot.static_mode_failed": "Interactive OpenGL is unavailable and the offline mode-shape preview could not be generated.",
+        "plot.reference_hull": "Reference pressure hull",
+        "live_view.empty": "Live viewport: candidate geometry is shown after generation; first buckling mode is shown after ABAQUS verification.",
         "render.candidate_fallback": "Candidate",
         "render.candidate_section": "{name} section | L={length:.1f} mm, R={radius:.1f} mm, t={thickness:.2f} mm",
         "render.material_layup": "Material: {material} | Layup angles: +/-{alpha:.1f}/+/-{beta:.1f}",
@@ -176,6 +266,18 @@ TEXT: dict[str, dict[str, str]] = {
         "candidate.no_preview": "Select a candidate to view the 3D geometry.",
         "candidate.no_geometry": "No geometry preview is available.",
         "candidate.headers": "Sample|Source|Predicted ultimate pressure|Predicted areal density|Rank score|FEM ultimate pressure|Status|Verdict",
+        "candidate.tab.detail": "Design Detail",
+        "candidate.tab.audit": "Source Audit",
+        "candidate.tab.preview": "Geometry Preview",
+        "candidate.metric.total": "Total\n{count}",
+        "candidate.metric.llm": "LLM\n{count}",
+        "candidate.metric.case": "Case Transfer\n{count}",
+        "candidate.metric.doe": "DOE\n{count}",
+        "candidate.metric.evaluated": "Verified\n{count}",
+        "candidate.source.llm": "LLM with project RAG/KG evidence",
+        "candidate.source.case": "Historical case transfer",
+        "candidate.source.doe": "DOE sampling",
+        "candidate.source.unknown": "Unknown source",
         "abaqus.preview_empty": "After ABAQUS verification, the rotatable mode-shape cloud map is shown here.",
         "abaqus.no_results": "No ABAQUS results yet.",
         "abaqus.no_preview": "No result preview is available.",
@@ -187,30 +289,44 @@ TEXT: dict[str, dict[str, str]] = {
 
 
 class LocaleManager:
-    """管理界面语言和本地持久化设置。"""
+    """管理界面语言、主题和本地持久化设置。"""
 
     def __init__(self, settings_path: Path | None = None) -> None:
         env_path = os.getenv("CSDM_cph_UI_SETTINGS")
         self.settings_path = settings_path or (Path(env_path) if env_path else RUNTIME_DIR / "ui_settings.json")
-        self.language: LanguageCode = self._load_language()
+        settings = self._load_settings()
+        self.language: LanguageCode = self._normalize_language(settings.get("language"))
+        self.theme: ThemeCode = self._normalize_theme(settings.get("theme"))
 
-    def _load_language(self) -> LanguageCode:
+    def _load_settings(self) -> dict[str, Any]:
         try:
             payload = json.loads(self.settings_path.read_text(encoding="utf-8"))
         except Exception:
-            return DEFAULT_LANGUAGE
-        language = str(payload.get("language") or DEFAULT_LANGUAGE)
-        return language if language in LANGUAGE_OPTIONS else DEFAULT_LANGUAGE  # type: ignore[return-value]
+            return {}
+        return payload if isinstance(payload, dict) else {}
 
-    def set_language(self, language: str) -> None:
-        if language not in LANGUAGE_OPTIONS:
-            language = DEFAULT_LANGUAGE
-        self.language = language  # type: ignore[assignment]
+    def _normalize_language(self, language: object) -> LanguageCode:
+        value = str(language or DEFAULT_LANGUAGE)
+        return value if value in LANGUAGE_OPTIONS else DEFAULT_LANGUAGE  # type: ignore[return-value]
+
+    def _normalize_theme(self, theme: object) -> ThemeCode:
+        value = str(theme or DEFAULT_THEME)
+        return value if value in THEME_OPTIONS[DEFAULT_LANGUAGE] else DEFAULT_THEME  # type: ignore[return-value]
+
+    def _save_settings(self) -> None:
         self.settings_path.parent.mkdir(parents=True, exist_ok=True)
         self.settings_path.write_text(
-            json.dumps({"language": self.language}, ensure_ascii=False, indent=2),
+            json.dumps({"language": self.language, "theme": self.theme}, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
+
+    def set_language(self, language: str) -> None:
+        self.language = self._normalize_language(language)
+        self._save_settings()
+
+    def set_theme(self, theme: str) -> None:
+        self.theme = self._normalize_theme(theme)
+        self._save_settings()
 
     def text(self, key: str, **kwargs: object) -> str:
         template = TEXT.get(self.language, {}).get(key) or TEXT[DEFAULT_LANGUAGE].get(key) or key

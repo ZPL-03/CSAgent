@@ -136,6 +136,8 @@ class KnowledgeAgent(BaseAgent):
         actual = self._result_pressure(clean_results)
         record = {
             "case_id": case_id,
+            "candidate_id": clean_design.get("candidate_id"),
+            "display_name": clean_design.get("display_name") or clean_design.get("candidate_id"),
             "created_at": datetime.utcnow().isoformat(),
             "source": "abaqus_auto",
             "task": clean_task,
@@ -150,6 +152,9 @@ class KnowledgeAgent(BaseAgent):
         task_id = str(task.get("task_id") or "").strip()
         if task_id:
             record["task_id"] = task_id
+        session_candidate_id = str(clean_design.get("session_candidate_id") or clean_results.get("session_candidate_id") or "").strip()
+        if session_candidate_id:
+            record["session_candidate_id"] = session_candidate_id
         validate_or_raise("case_record.schema.json", record)
         return record
 

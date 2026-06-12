@@ -265,5 +265,8 @@
   "verdict": "通过",
   "surrogate_pressure_error_pct": 37.905,
   "fem_agent_retry_count": 0,
-  "task_id": "TASK_1"
+  "task_id": "TASK_1",
+  "candidate_id": "C11",
+  "display_name": "C11",
+  "session_candidate_id": "TMP_6"
 }

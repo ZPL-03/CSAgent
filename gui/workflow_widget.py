@@ -10,6 +10,7 @@ from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTextBrowser, QVBo
 
 from core.llm_status import configured_llm_backends, probe_llm_backends
 from core.paths import RESULTS_DIR
+from gui.theme import resolve_theme
 from workflow.agent_contracts import list_agent_contracts
 from workflow.event_store import WorkflowEventStore
 from workflow.run_audit import write_run_audit
@@ -53,6 +54,7 @@ class WorkflowWidget(QWidget):
         self.event_store = event_store or WorkflowEventStore()
         self.simulation_queue = simulation_queue or SimulationJobQueue(self.event_store.db_path)
         self.audit_output_dir = audit_output_dir or RESULTS_DIR
+        self.theme = "dark"
         self.llm_health_results: list[dict[str, Any]] = []
         self._last_refresh_args: tuple[str | None, str, str | None] = (None, "", None)
         self.health_button = QPushButton("检测 LLM 后端")
@@ -65,23 +67,38 @@ class WorkflowWidget(QWidget):
         button_layout = QHBoxLayout()
         button_layout.addWidget(self.health_button)
         button_layout.addWidget(self.audit_button)
-        layout.addLayout(button_layout)
-        layout.addWidget(self.audit_status_label)
         layout.addWidget(self.browser)
+        layout.addWidget(self.audit_status_label)
+        layout.addLayout(button_layout)
         self.setLayout(layout)
         self.health_button.clicked.connect(self._run_llm_health_check)
         self.audit_button.clicked.connect(self._export_run_audit)
         self.reset_view()
+
+    def set_controls_visible(self, visible: bool) -> None:
+        self.health_button.setVisible(visible)
+        self.audit_button.setVisible(visible)
+
+    def set_theme(self, theme: str) -> None:
+        """刷新工作流 HTML 视图主题。"""
+
+        self.theme = theme
+        workflow_run_id, stage, pending = self._last_refresh_args
+        if workflow_run_id:
+            self.refresh(workflow_run_id, stage, pending)
+        else:
+            self.reset_view()
 
     def reset_view(self) -> None:
         self._last_refresh_args = (None, "", None)
         self.audit_button.setEnabled(False)
         self.audit_status_label.setText("")
         self.browser.setHtml(
-            "<h3>智能体流程</h3>"
-            "<p>启动对话式设计后，这里会显示 LangGraph 工作流节点、人工确认点和工具调用事件。</p>"
-            + self._llm_status_html()
-            + self._agent_contracts_html()
+            self._page_html(
+                self._initial_dag_html()
+                + self._llm_status_html()
+                + self._agent_contracts_html()
+            )
         )
 
     def _run_llm_health_check(self) -> None:
@@ -94,10 +111,11 @@ class WorkflowWidget(QWidget):
                 self.refresh(workflow_run_id, stage, pending)
             else:
                 self.browser.setHtml(
-                    "<h3>智能体流程</h3>"
-                    "<p>当前还没有运行快照；以下为 LLM 后端实时检测结果。</p>"
-                    + self._llm_status_html()
-                    + self._agent_contracts_html()
+                    self._page_html(
+                        self._initial_dag_html()
+                        + self._llm_status_html()
+                        + self._agent_contracts_html()
+                    )
                 )
         finally:
             self.health_button.setText("检测 LLM 后端")
@@ -156,6 +174,76 @@ class WorkflowWidget(QWidget):
         if value is None or value == "":
             return "-"
         return escape(str(value))
+
+    def _html_palette(self) -> dict[str, str]:
+        if resolve_theme(self.theme) == "light":
+            return {
+                "text": "#172033",
+                "muted": "#64748b",
+                "surface": "#ffffff",
+                "surface_alt": "#f8fafc",
+                "border": "#c8d2df",
+                "head": "#e8eef7",
+                "done": "#0f766e",
+                "active": "#2563eb",
+                "failed": "#dc2626",
+                "wait": "#94a3b8",
+                "active_bg": "#eff6ff",
+                "failed_bg": "#fff1f2",
+            }
+        return {
+            "text": "#dbe4ef",
+            "muted": "#94a3b8",
+            "surface": "#111c2e",
+            "surface_alt": "#0f172a",
+            "border": "#334155",
+            "head": "#182337",
+            "done": "#14b8a6",
+            "active": "#38bdf8",
+            "failed": "#fb7185",
+            "wait": "#64748b",
+            "active_bg": "#102a43",
+            "failed_bg": "#3c1822",
+        }
+
+    def _page_html(self, body: str) -> str:
+        color = self._html_palette()
+        return (
+            "<style>"
+            f"body{{font-size:13px;color:{color['text']};}}"
+            "h3{margin:0 0 8px 0;font-size:17px;}"
+            f"h4{{margin:4px 0 8px 0;font-size:14px;color:{color['text']};}}"
+            "table{border-collapse:collapse;width:100%;}"
+            f"th{{background:{color['head']};text-align:left;}}"
+            f"th,td{{border:1px solid {color['border']};padding:6px 8px;vertical-align:top;}}"
+            ".cards{display:flex;gap:8px;margin:8px 0 14px 0;}"
+            f".card{{border:1px solid {color['border']};border-left:4px solid {color['active']};background:{color['surface_alt']};padding:8px 10px;min-width:118px;}}"
+            f".card .label{{color:{color['muted']};font-size:12px;}}"
+            f".card .value{{font-size:17px;font-weight:700;color:{color['text']};margin-top:4px;}}"
+            f".dot{{display:inline-block;width:8px;height:8px;border-radius:4px;margin:0 5px 0 14px;}}"
+            f".dot.done{{background:{color['done']};border:0;}}"
+            f".dot.active{{background:{color['active']};border:0;}}"
+            f".dot.wait{{background:{color['wait']};border:0;}}"
+            f".status-done{{color:{color['done']};font-weight:700;}}"
+            f".status-active{{color:{color['active']};font-weight:700;}}"
+            f".status-failed{{color:{color['failed']};font-weight:700;}}"
+            f".status-wait{{color:{color['wait']};font-weight:700;}}"
+            "</style>"
+            + body
+        )
+
+    def _initial_dag_html(self) -> str:
+        return (
+            "<h3>运行审计</h3>"
+            "<p>等待任务输入后，这里显示运行摘要、智能体状态、工具调用、有限元队列、LLM 调用链路和失败诊断。</p>"
+            "<table border='1' cellspacing='0' cellpadding='6'>"
+            "<tr><th>审计对象</th><th>当前状态</th><th>说明</th></tr>"
+            "<tr><td>LangGraph 运行</td><td><span class='status-wait'>等待</span></td><td>未创建运行编号</td></tr>"
+            "<tr><td>LLM 后端</td><td><span class='status-wait'>未检测</span></td><td>点击下方按钮执行实时健康检查</td></tr>"
+            "<tr><td>有限元队列</td><td><span class='status-wait'>空闲</span></td><td>等待候选进入 FEM 校核阶段</td></tr>"
+            "<tr><td>运行恢复</td><td><span class='status-wait'>待选择</span></td><td>从右侧运行记录选择可恢复状态</td></tr>"
+            "</table>"
+        )
 
     def _load_snapshot(self, workflow_run_id: str) -> tuple[dict[str, Any], str]:
         try:
@@ -235,6 +323,15 @@ class WorkflowWidget(QWidget):
                 latest_message_by_node[agent] = str(event.get("message") or "")
         return status_by_node, latest_message_by_node
 
+    def _status_class(self, status: str) -> str:
+        if status in {"完成"}:
+            return "done"
+        if status in {"运行中", "当前"}:
+            return "active"
+        if status in {"失败"}:
+            return "failed"
+        return "wait"
+
     def _node_artifact(self, node_name: str, snapshot: dict[str, Any], jobs: list[dict[str, Any]]) -> str:
         if node_name == "parse_task":
             task = snapshot.get("task") or {}
@@ -274,11 +371,12 @@ class WorkflowWidget(QWidget):
             status = status_by_node.get(node_name, "等待")
             if status == "等待" and (active_stage == node_name or active_stage.startswith(node_name)):
                 status = "当前"
+            state_class = self._status_class(status)
             rows.append(
                 "<tr>"
                 f"<td>{index}</td>"
                 f"<td>{self._safe(label)}<br><code>{self._safe(node_name)}</code></td>"
-                f"<td>{self._safe(status)}</td>"
+                f"<td><span class='status-{state_class}'>{self._safe(status)}</span></td>"
                 f"<td>{self._safe(self.NODE_ARTIFACT_LABELS.get(node_name, '-'))}</td>"
                 f"<td>{self._safe(self._node_artifact(node_name, snapshot, jobs))}</td>"
                 f"<td>{self._safe(latest_message_by_node.get(node_name))}</td>"
@@ -292,6 +390,33 @@ class WorkflowWidget(QWidget):
             + "</table>"
         )
 
+    def _dashboard_cards_html(
+        self,
+        snapshot: dict[str, Any],
+        events: list[dict[str, Any]],
+        jobs: list[dict[str, Any]],
+        active_stage: str,
+        pending_text: str,
+    ) -> str:
+        llm_calls = sum(1 for event in events if event.get("event_type") == "llm_call_trace")
+        failed_jobs = sum(1 for job in jobs if str(job.get("status") or "") == "failed")
+        cards = [
+            ("当前阶段", active_stage or "-"),
+            ("候选池", len(snapshot.get("candidates") or [])),
+            ("有限元作业", f"{len(jobs)} / 失败 {failed_jobs}"),
+            ("LLM 调用", llm_calls),
+            ("等待确认", pending_text or "-"),
+        ]
+        return (
+            "<div class='cards'>"
+            + "".join(
+                f"<div class='card'><div class='label'>{self._safe(label)}</div>"
+                f"<div class='value'>{self._safe(value)}</div></div>"
+                for label, value in cards
+            )
+            + "</div>"
+        )
+
     def _agent_contracts_html(self) -> str:
         rows = []
         for contract in list_agent_contracts():
@@ -300,19 +425,54 @@ class WorkflowWidget(QWidget):
                 f"<td>{self._safe(contract.label)}<br><code>{self._safe(contract.node_name)}</code></td>"
                 f"<td>{self._safe(contract.runtime_agent)}<br><code>{self._safe(contract.tool_name)}</code></td>"
                 f"<td>{self._safe(contract.responsibility)}</td>"
-                f"<td>{self._safe(contract.input_contract)}</td>"
-                f"<td>{self._safe(contract.output_contract)}</td>"
-                f"<td>{self._safe(contract.llm_policy)}</td>"
-                f"<td>{self._safe(contract.failure_policy)}</td>"
+                f"<td><b>LLM</b>：{self._safe(contract.llm_policy)}<br>"
+                f"<b>失败</b>：{self._safe(contract.failure_policy)}</td>"
                 "</tr>"
             )
         return (
             "<h4>智能体职责契约</h4>"
             "<table border='1' cellspacing='0' cellpadding='6'>"
-            "<tr><th>节点</th><th>运行时智能体/工具</th><th>职责</th><th>输入</th><th>输出</th><th>LLM 边界</th><th>失败策略</th></tr>"
+            "<tr><th>节点</th><th>运行时智能体/工具</th><th>职责</th><th>边界策略</th></tr>"
             + "".join(rows)
             + "</table>"
         )
+
+    def _tool_calls_html(self, events: list[dict[str, Any]]) -> str:
+        rows = []
+        for event in events:
+            if event.get("event_type") not in {"tool_started", "tool_completed", "tool_failed"}:
+                continue
+            payload = event.get("payload") or {}
+            rows.append(
+                "<tr>"
+                f"<td><code>{self._safe(payload.get('tool'))}</code><br>{self._safe(event.get('agent'))}</td>"
+                f"<td>{self._safe(event.get('event_type'))}</td>"
+                f"<td>{self._safe(payload.get('duration_ms'))}</td>"
+                f"<td><pre>{self._safe(self._compact_json(payload.get('input_summary')))}</pre></td>"
+                f"<td><pre>{self._safe(self._compact_json(payload.get('output_summary')))}</pre></td>"
+                f"<td>{self._safe(payload.get('error'))}</td>"
+                "</tr>"
+            )
+        if not rows:
+            return "<h4>工具调用审计</h4><p>当前运行还没有工具调用事件。</p>"
+        return (
+            "<h4>工具调用审计</h4>"
+            "<table border='1' cellspacing='0' cellpadding='6'>"
+            "<tr><th>工具/智能体</th><th>状态</th><th>耗时 ms</th><th>输入摘要</th><th>输出摘要</th><th>错误</th></tr>"
+            + "".join(rows[-80:])
+            + "</table>"
+        )
+
+    def _compact_json(self, value: Any) -> str:
+        if value in (None, ""):
+            return "-"
+        try:
+            import json
+
+            text = json.dumps(value, ensure_ascii=False, sort_keys=True)
+        except Exception:
+            text = str(value)
+        return text if len(text) <= 900 else text[:897] + "..."
 
     def _diagnostics_html(
         self,
@@ -363,7 +523,7 @@ class WorkflowWidget(QWidget):
             events = self.event_store.list_events(workflow_run_id)
             jobs = self.simulation_queue.list_jobs(workflow_run_id)
         except Exception as exc:
-            self.browser.setHtml(f"<h3>智能体流程</h3><p>读取工作流事件失败：{self._safe(exc)}</p>")
+            self.browser.setHtml(self._page_html(f"<h3>智能体流程</h3><p>读取工作流事件失败：{self._safe(exc)}</p>"))
             return
 
         snapshot, snapshot_error = self._load_snapshot(workflow_run_id)
@@ -441,12 +601,15 @@ class WorkflowWidget(QWidget):
         )
 
         self.browser.setHtml(
+            self._page_html(
             "<h3>智能体流程</h3>"
+            + self._dashboard_cards_html(snapshot, events, jobs, active_stage, pending_text)
             + self._snapshot_summary_html(workflow_run_id, snapshot, active_stage, pending_text, snapshot_error)
             + self._llm_status_html()
             + self._workflow_graph_html(events, jobs, snapshot, active_stage)
             + self._agent_contracts_html()
             + self._diagnostics_html(events, jobs, snapshot, snapshot_error)
+            + self._tool_calls_html(events)
             + "<h4>有限元队列</h4>"
             + jobs_html
             + "<h4>LLM 调用轨迹</h4>"
@@ -455,4 +618,5 @@ class WorkflowWidget(QWidget):
             + "<ol>"
             + "".join(event_items)
             + "</ol>"
+            )
         )

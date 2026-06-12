@@ -53,16 +53,24 @@ case_memory:
   vector_top_k_multiplier: 4
   vector_rank_weight: 0.1
 
-external_knowledge:
+project_knowledge:
   enabled: true
-  base_dir: knowledge/external
-  rag_chunks_path: knowledge/external/rag/rag_chunks.jsonl
-  kg_dir: knowledge/external/kg
-  manifest_path: knowledge/external/manifest.json
-  provenance_dir: knowledge/external/provenance
+  base_dir: knowledge/runtime
+  upload_dir: knowledge/runtime/uploads
+  rag_chunks_path: knowledge/runtime/rag/rag_chunks.jsonl
+  kg_dir: knowledge/runtime/kg
+  manifest_path: knowledge/runtime/manifest.json
+  structured_dir: knowledge/runtime/structured_text
   top_k: 5
   kg_top_k: 8
   max_snippet_chars: 1200
+  chunk_token_size: 512
+  chunk_overlap_tokens: 64
+  min_chunk_tokens: 80
+  vector_enabled: true
+  vector_chroma_dir: knowledge/chroma_db
+  vector_collection_name: csdm_cph_project_knowledge
+  vector_top_k_multiplier: 2
 
 conversation:
   confirmation_steps:

@@ -9,6 +9,7 @@ from PyQt6.QtCore import QEvent, Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QLabel, QStackedLayout, QVBoxLayout, QWidget
 
+from core.pressure_hull_profile import default_geometry
 from gui.i18n import DEFAULT_LANGUAGE, text as tr
 from gui.render_utils import (
     build_candidate_scene,
@@ -16,6 +17,7 @@ from gui.render_utils import (
     render_candidate_png_bytes,
     render_mode_shape_png_bytes,
 )
+from gui.theme import resolve_theme
 
 try:
     from pyvistaqt import QtInteractor
@@ -28,9 +30,10 @@ class InteractivePlotWidget(QWidget):
         super().__init__()
         self.empty_message = empty_message
         self.language = language
-        platform = os.getenv("QT_QPA_PLATFORM", "").lower()
-        disable_interactive = os.getenv("CSDM_cph_DISABLE_INTERACTIVE_3D", "").strip() == "1"
-        self._interactive = QtInteractor is not None and platform != "offscreen" and not disable_interactive
+        self.theme = "dark"
+        self._platform = os.getenv("QT_QPA_PLATFORM", "").lower()
+        self._disable_interactive = os.getenv("CSDM_cph_DISABLE_INTERACTIVE_3D", "").strip() == "1"
+        self._interactive = QtInteractor is not None and self._platform != "offscreen" and not self._disable_interactive
         self.plotter = None
         self._initial_camera_position = None
         self._static_pixmap: QPixmap | None = None
@@ -74,11 +77,28 @@ class InteractivePlotWidget(QWidget):
         if self.stack.currentWidget() is self.message_label:
             self.message_label.setText(self.empty_message)
 
+    def set_theme(self, theme: str) -> None:
+        self.theme = resolve_theme(theme)
+        if self.plotter is not None:
+            try:
+                self.plotter.set_background(self._plot_background())
+                self.plotter.render()
+            except Exception:
+                pass
+
+    def _plot_background(self) -> str:
+        return "#f8fbff" if self.theme == "light" else "#080d15"
+
     def _ensure_plotter(self) -> bool:
         if self.plotter is not None:
             return True
         if not self._interactive:
-            self.clear_scene(tr("plot.no_pyvista", language=self.language))
+            message = (
+                tr("plot.no_pyvista", language=self.language)
+                if QtInteractor is None
+                else tr("plot.offline_preview", language=self.language)
+            )
+            self.clear_scene(message)
             return False
         try:
             self.plotter = QtInteractor(self.plot_container)
@@ -91,7 +111,7 @@ class InteractivePlotWidget(QWidget):
         self.plotter.interactor.installEventFilter(self)
         if self.plot_layout.indexOf(self.hint_label) == -1:
             self.plot_layout.addWidget(self.hint_label)
-        self.plotter.set_background("#f5f7fb")
+        self.plotter.set_background(self._plot_background())
         self.plotter.enable_trackball_style()
         return True
 
@@ -130,13 +150,13 @@ class InteractivePlotWidget(QWidget):
         if self.plotter is not None:
             try:
                 self.plotter.clear()
-                self.plotter.set_background("#f5f7fb")
+                self.plotter.set_background(self._plot_background())
             except Exception:
                 self._dispose_plotter()
         self._initial_camera_position = None
-        self.stack.setCurrentWidget(self.message_label)
         self._static_pixmap = None
         self.static_label.clear()
+        self.stack.setCurrentWidget(self.message_label)
 
     def _show_static_png(self, png_bytes: bytes | None, fallback_message: str) -> bool:
         if not png_bytes:
@@ -147,6 +167,7 @@ class InteractivePlotWidget(QWidget):
             self.clear_scene(fallback_message)
             return False
         self._static_pixmap = pixmap
+        self.static_label.setToolTip(tr("plot.offline_preview", language=self.language))
         self._update_static_pixmap()
         self.stack.setCurrentWidget(self.static_label)
         return True
@@ -196,10 +217,38 @@ class InteractivePlotWidget(QWidget):
             return False
         assert self.plotter is not None
         self.plotter.clear()
-        self.plotter.set_background("#f5f7fb")
-        self.plotter.add_text(title, position="upper_left", font_size=11, color="#1f2937")
+        self.plotter.set_background(self._plot_background())
+        text_color = "#172033" if self.theme == "light" else "#dbe4ef"
+        self.plotter.add_text(title, position="upper_left", font_size=11, color=text_color)
         self.plotter.add_axes(line_width=2)
         self.stack.setCurrentWidget(self.plot_container)
+        return True
+
+    def show_reference_hull(self) -> bool:
+        """在真实交互视口中显示参考耐压壳，不生成初始化静态占位图。"""
+
+        if not self._interactive:
+            self.clear_scene(self.empty_message)
+            return False
+        candidate = {
+            "candidate_id": "REFERENCE",
+            "display_name": tr("plot.reference_hull", language=self.language),
+            "hull_type": "CYLINDRICAL",
+            "geometry": default_geometry("CYLINDRICAL"),
+            "material_system": {"name": "T700/Epoxy"},
+        }
+        scene = build_candidate_scene(candidate)
+        if scene is None:
+            self.clear_scene(self.empty_message)
+            return False
+        meshes, title = scene
+        if not self._activate_plotter(title):
+            self.clear_scene(self.empty_message)
+            return False
+        assert self.plotter is not None
+        for mesh, kwargs in meshes:
+            self.plotter.add_mesh(mesh, **kwargs)
+        self._apply_default_camera(0.94)
         return True
 
     def closeEvent(self, event) -> None:

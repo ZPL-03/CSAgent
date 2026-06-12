@@ -267,5 +267,6 @@
   "verdict": "不通过",
   "surrogate_pressure_error_pct": null,
   "fem_agent_retry_count": 0,
-  "candidate_id": "C10"
+  "candidate_id": "C10",
+  "display_name": "C10"
 }

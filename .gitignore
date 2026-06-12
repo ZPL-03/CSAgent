@@ -31,10 +31,7 @@ data/results/latest_report.pdf
 data/results/batch_summary_*.json
 data/runtime/
 knowledge/chroma_db/
-knowledge/external/rag/
-knowledge/external/kg/
-knowledge/external/provenance/
-knowledge/external/manifest.json
+knowledge/runtime/
 models/embedding_cache/
 
 # Abaqus session / generated files
