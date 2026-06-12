@@ -335,6 +335,7 @@ def render_mode_shape_png_bytes(
     height: int = 560,
     max_faces: int = 1800,
     language: str = DEFAULT_LANGUAGE,
+    theme: str = "dark",
 ) -> bytes | None:
     """生成一阶模态云图离线 PNG，供无 OpenGL 或离线审计环境使用。"""
 
@@ -380,15 +381,19 @@ def render_mode_shape_png_bytes(
     cmap = colormaps.get_cmap("viridis")
 
     dpi = 100
-    figure = Figure(figsize=(width / dpi, height / dpi), dpi=dpi, facecolor="white")
+    dark = theme != "light"
+    bg = "#101821" if dark else "#f8fbff"
+    text_color = "#dbe4ef" if dark else "#172033"
+    edge_color = (0.22, 0.74, 0.97, 0.16) if dark else (0.15, 0.30, 0.55, 0.18)
+    figure = Figure(figsize=(width / dpi, height / dpi), dpi=dpi, facecolor=bg)
     canvas = FigureCanvasAgg(figure)
-    axis = figure.add_subplot(111, projection="3d")
+    axis = figure.add_subplot(111, projection="3d", facecolor=bg)
     text_props = _text_props(language)
     collection = Poly3DCollection(
         polygons,
         facecolors=cmap(norm(face_values)),
         linewidths=0.08,
-        edgecolors=(0.15, 0.23, 0.36, 0.18),
+        edgecolors=edge_color,
         alpha=0.96,
     )
     axis.add_collection3d(collection)
@@ -411,26 +416,18 @@ def render_mode_shape_png_bytes(
     except TypeError:
         axis.set_box_aspect((1, 1, 1))
     axis.view_init(elev=20, azim=-58)
-    axis.set_xlabel("X / mm", **text_props)
-    axis.set_ylabel("Y / mm", **text_props)
-    axis.set_zlabel("Z / mm", **text_props)
-    title_id = result.get("candidate_id") or payload.get("candidate_id") or tr(
-        "render.candidate_fallback", language=language
-    )
-    axis.set_title(
-        tr("render.mode_title", language=language, name=title_id),
-        fontsize=11,
-        color="#111827",
-        **text_props,
-    )
+    axis.set_axis_off()
+    axis.set_position([0.02, 0.03, 0.83, 0.94])
     scalar_name = tr("render.mode_scalar", language=language)
     from matplotlib.cm import ScalarMappable
 
     mappable = ScalarMappable(norm=norm, cmap=cmap)
     mappable.set_array(face_values)
-    colorbar = figure.colorbar(mappable, ax=axis, shrink=0.72, pad=0.08)
-    colorbar.set_label(str(scalar_name), **text_props)
-    figure.subplots_adjust(left=0.02, right=0.92, bottom=0.02, top=0.96)
+    colorbar = figure.colorbar(mappable, ax=axis, shrink=0.72, pad=0.02, fraction=0.048)
+    colorbar.set_label(str(scalar_name), color=text_color, **text_props)
+    colorbar.ax.tick_params(colors=text_color, labelsize=8, length=2)
+    colorbar.outline.set_edgecolor(text_color)
+    figure.subplots_adjust(left=0.0, right=0.97, bottom=0.0, top=1.0)
 
     buffer = io.BytesIO()
     canvas.print_png(buffer)

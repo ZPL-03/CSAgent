@@ -208,7 +208,7 @@ class InteractivePlotWidget(QWidget):
         width, height = self._target_static_size()
         self._static_render_size = (width, height)
         return self._show_static_png(
-            render_mode_shape_png_bytes(result, width=width, height=height, language=self.language),
+            render_mode_shape_png_bytes(result, width=width, height=height, language=self.language, theme=self.theme),
             fallback_message,
         )
 
