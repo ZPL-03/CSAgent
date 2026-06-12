@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import asdict
 from html import escape
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QObject, QThread, Qt, pyqtSignal
+from PyQt6.QtCore import QObject, QPointF, QRectF, QSize, QThread, Qt, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPen
 from PyQt6.QtWidgets import (
     QFileDialog,
     QHeaderView,
@@ -35,6 +37,182 @@ from gui.workbench_widgets import PipelineStatusWidget, StatusPill
 
 
 DEFAULT_EVIDENCE_QUERY = "复合材料外压圆柱耐压壳 外部静水压力 线性屈曲 极限压力 初始缺陷 制造质量控制"
+
+
+class KnowledgeGraphView(QWidget):
+    """运行时知识图谱可视化画布。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.theme = "dark"
+        self.entities: list[dict[str, Any]] = []
+        self.relations: list[dict[str, Any]] = []
+        self.highlight_relations: list[dict[str, Any]] = []
+        self.setMinimumHeight(228)
+        self.setSizePolicy(self.sizePolicy().horizontalPolicy(), self.sizePolicy().verticalPolicy())
+
+    def sizeHint(self) -> QSize:
+        return QSize(380, 248)
+
+    def set_theme(self, theme: str) -> None:
+        self.theme = resolve_theme(theme)
+        self.update()
+
+    def set_graph(
+        self,
+        entities: list[dict[str, Any]],
+        relations: list[dict[str, Any]],
+        highlight_relations: list[dict[str, Any]] | None = None,
+    ) -> None:
+        self.entities = list(entities)
+        self.relations = list(relations)
+        self.highlight_relations = list(highlight_relations or [])
+        self.update()
+
+    def _colors(self) -> dict[str, QColor]:
+        if self.theme == "light":
+            return {
+                "bg": QColor("#ffffff"),
+                "panel": QColor("#f8fbff"),
+                "border": QColor("#c3cedd"),
+                "text": QColor("#172033"),
+                "muted": QColor("#64748b"),
+                "edge": QColor("#94a3b8"),
+                "highlight": QColor("#8b5cf6"),
+            }
+        return {
+            "bg": QColor("#101821"),
+            "panel": QColor("#111a28"),
+            "border": QColor("#2b3a52"),
+            "text": QColor("#dbe4ef"),
+            "muted": QColor("#94a3b8"),
+            "edge": QColor("#475569"),
+            "highlight": QColor("#a78bfa"),
+        }
+
+    def _type_color(self, entity_type: str) -> QColor:
+        palette = {
+            "Material": "#38bdf8",
+            "Structure": "#34d399",
+            "FailureMode": "#f59e0b",
+            "DesignFormula": "#a78bfa",
+            "VerificationMethod": "#60a5fa",
+            "ManufacturingProcess": "#fb7185",
+        }
+        return QColor(palette.get(entity_type, "#64748b"))
+
+    def _node_payload(self) -> tuple[list[tuple[str, str]], list[dict[str, Any]], int, int]:
+        node_types: dict[str, str] = {}
+        for entity in self.entities:
+            name = str(entity.get("name") or "").strip()
+            if name:
+                node_types[name] = str(entity.get("type") or "Entity")
+        for relation in self.relations:
+            source = str(relation.get("source") or "").strip()
+            target = str(relation.get("target") or "").strip()
+            if source:
+                node_types.setdefault(source, str(relation.get("source_type") or "Entity"))
+            if target:
+                node_types.setdefault(target, str(relation.get("target_type") or "Entity"))
+        degree: dict[str, int] = {name: 0 for name in node_types}
+        for relation in self.relations:
+            source = str(relation.get("source") or "").strip()
+            target = str(relation.get("target") or "").strip()
+            if source in degree:
+                degree[source] += 1
+            if target in degree:
+                degree[target] += 1
+        sorted_nodes = sorted(node_types.items(), key=lambda item: (-degree.get(item[0], 0), item[1], item[0]))
+        max_nodes = 26
+        visible_nodes = sorted_nodes[:max_nodes]
+        visible_names = {name for name, _ in visible_nodes}
+        visible_relations = [
+            relation
+            for relation in self.relations
+            if str(relation.get("source") or "") in visible_names and str(relation.get("target") or "") in visible_names
+        ][:42]
+        return visible_nodes, visible_relations, len(node_types), len(self.relations)
+
+    def paintEvent(self, event) -> None:
+        colors = self._colors()
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.fillRect(self.rect(), colors["bg"])
+
+        panel = QRectF(1, 1, self.width() - 2, self.height() - 2)
+        painter.setBrush(QBrush(colors["panel"]))
+        painter.setPen(QPen(colors["border"], 1.0))
+        painter.drawRoundedRect(panel, 12, 12)
+
+        title_font = QFont(self.font())
+        title_font.setPointSize(10)
+        title_font.setBold(True)
+        painter.setFont(title_font)
+        painter.setPen(colors["text"])
+        painter.drawText(QRectF(16, 12, self.width() - 32, 22), Qt.AlignmentFlag.AlignLeft, "知识图谱 · GRAPH")
+
+        visible_nodes, visible_relations, total_nodes, total_relations = self._node_payload()
+        subtitle = f"实体 {total_nodes} · 关系 {total_relations}"
+        if total_nodes > len(visible_nodes) or total_relations > len(visible_relations):
+            subtitle += f" · 显示核心子图 {len(visible_nodes)} / {len(visible_relations)}"
+        small_font = QFont(self.font())
+        small_font.setPointSize(8)
+        painter.setFont(small_font)
+        painter.setPen(colors["muted"])
+        painter.drawText(QRectF(16, 35, self.width() - 32, 18), Qt.AlignmentFlag.AlignLeft, subtitle)
+
+        if not visible_nodes:
+            painter.drawText(
+                QRectF(16, 58, self.width() - 32, self.height() - 80),
+                Qt.AlignmentFlag.AlignCenter,
+                "知识图谱等待资料入库或检索命中。",
+            )
+            return
+
+        center = QPointF(self.width() / 2.0, self.height() / 2.0 + 18)
+        radius_x = max(80.0, (self.width() - 88) / 2.0)
+        radius_y = max(54.0, (self.height() - 120) / 2.0)
+        positions: dict[str, QPointF] = {}
+        count = len(visible_nodes)
+        for index, (name, _entity_type) in enumerate(visible_nodes):
+            angle = -math.pi / 2.0 + 2.0 * math.pi * index / max(1, count)
+            positions[name] = QPointF(center.x() + radius_x * math.cos(angle), center.y() + radius_y * math.sin(angle))
+
+        highlighted = {
+            (
+                str(relation.get("source") or ""),
+                str(relation.get("relation") or ""),
+                str(relation.get("target") or ""),
+            )
+            for relation in self.highlight_relations
+        }
+        for relation in visible_relations:
+            source = str(relation.get("source") or "")
+            target = str(relation.get("target") or "")
+            if source not in positions or target not in positions:
+                continue
+            key = (source, str(relation.get("relation") or ""), target)
+            edge_color = colors["highlight"] if key in highlighted else colors["edge"]
+            pen = QPen(edge_color, 1.8 if key in highlighted else 1.0)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            painter.setPen(pen)
+            painter.drawLine(positions[source], positions[target])
+
+        label_font = QFont(self.font())
+        label_font.setPointSize(8)
+        label_font.setBold(True)
+        label_metrics = QFontMetrics(label_font)
+        for name, entity_type in visible_nodes:
+            point = positions[name]
+            color = self._type_color(entity_type)
+            painter.setBrush(QBrush(color))
+            painter.setPen(QPen(colors["panel"], 1.5))
+            painter.drawEllipse(point, 8, 8)
+            label = label_metrics.elidedText(name, Qt.TextElideMode.ElideRight, 92)
+            label_rect = QRectF(point.x() - 48, point.y() + 11, 96, 18)
+            painter.setFont(label_font)
+            painter.setPen(colors["text"])
+            painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
 
 
 class KnowledgeIngestWorker(QObject):
@@ -172,6 +350,7 @@ class KnowledgeWidget(QWidget):
         self.document_stack.addWidget(self.document_table)
 
         self.pipeline_widget = PipelineStatusWidget()
+        self.graph_view = KnowledgeGraphView()
         self.evidence_browser = QTextBrowser()
         self.evidence_browser.setOpenExternalLinks(True)
         self.summary_browser = QTextBrowser()
@@ -189,6 +368,7 @@ class KnowledgeWidget(QWidget):
         for pill in [self.store_pill, self.rag_pill, self.vector_pill, self.kg_pill, self.parser_pill]:
             pill.set_theme(self.theme)
         self.pipeline_widget.set_theme(self.theme)
+        self.graph_view.set_theme(self.theme)
         self.refresh(query_text=self.search_input.text().strip(), load_evidence=bool(self.search_input.text().strip()))
 
     def _build_layout(self) -> None:
@@ -225,6 +405,8 @@ class KnowledgeWidget(QWidget):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(12)
         right_layout.addWidget(self.pipeline_widget)
+        right_layout.addWidget(QLabel("知识图谱 · GRAPH"))
+        right_layout.addWidget(self.graph_view)
         right_layout.addWidget(QLabel("检索证据 · EVIDENCE"))
         right_layout.addWidget(self.evidence_browser, 1)
 
@@ -267,6 +449,7 @@ class KnowledgeWidget(QWidget):
         self._update_document_table()
         self._update_pipeline(merged_status)
         evidence_payload = self._retrieve_evidence(task, query_text) if load_evidence else {"query": "", "chunks": [], "relations": []}
+        self._update_graph_view(evidence_payload)
         self.evidence_browser.setHtml(self._evidence_html(evidence_payload))
 
     def toHtml(self) -> str:
@@ -454,6 +637,45 @@ class KnowledgeWidget(QWidget):
         query = self.search_input.text().strip() or DEFAULT_EVIDENCE_QUERY
         self.search_input.setText(query)
         return self.knowledge_base.retrieve_by_query(query, top_k=5, kg_top_k=8)
+
+    def _load_jsonl_rows(self, path: Path | str | None) -> list[dict[str, Any]]:
+        if path is None:
+            return []
+        target = Path(path)
+        if not target.exists():
+            return []
+        rows: list[dict[str, Any]] = []
+        with target.open("r", encoding="utf-8") as handle:
+            for line in handle:
+                if not line.strip():
+                    continue
+                try:
+                    payload = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if isinstance(payload, dict):
+                    rows.append(payload)
+        return rows
+
+    def _update_graph_view(self, evidence_payload: dict[str, Any]) -> None:
+        entities_path = getattr(self.ingestion_service, "entities_path", None)
+        relations_path = getattr(self.ingestion_service, "relations_path", None)
+        entities = self._load_jsonl_rows(entities_path)
+        relations = self._load_jsonl_rows(relations_path)
+        evidence_relations = evidence_payload.get("relations") if isinstance(evidence_payload.get("relations"), list) else []
+        if not relations and evidence_relations:
+            relations = list(evidence_relations)
+            entity_seen: set[tuple[str, str]] = set()
+            entities = []
+            for relation in relations:
+                for name_key, type_key in [("source", "source_type"), ("target", "target_type")]:
+                    name = str(relation.get(name_key) or "").strip()
+                    entity_type = str(relation.get(type_key) or "Entity")
+                    if not name or (entity_type, name) in entity_seen:
+                        continue
+                    entity_seen.add((entity_type, name))
+                    entities.append({"type": entity_type, "name": name})
+        self.graph_view.set_graph(entities, relations, evidence_relations)
 
     def _update_status_pills(self, status: dict[str, Any]) -> None:
         ready = bool(status.get("ready"))

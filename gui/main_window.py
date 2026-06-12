@@ -859,7 +859,7 @@ class MainWindow(QMainWindow):
 
     def _set_button_variant(self, button: QPushButton, variant: str = "default") -> None:
         if variant == "icon":
-            button.setFixedSize(34, 30)
+            button.setFixedSize(30, 28)
         else:
             button.setMinimumHeight(38)
         button.setProperty("variant", variant)
@@ -899,10 +899,10 @@ class MainWindow(QMainWindow):
     def _sync_view_button_icons(self) -> None:
         self.reset_view_button.setText("")
         self.reset_view_button.setIcon(self._make_view_icon("reset"))
-        self.reset_view_button.setIconSize(QSize(15, 15))
+        self.reset_view_button.setIconSize(QSize(14, 14))
         self.fit_view_button.setText("")
         self.fit_view_button.setIcon(self._make_view_icon("fit"))
-        self.fit_view_button.setIconSize(QSize(15, 15))
+        self.fit_view_button.setIconSize(QSize(14, 14))
 
     def _make_view_icon(self, icon_type: str) -> QIcon:
         pixmap = QPixmap(20, 20)

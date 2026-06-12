@@ -468,7 +468,7 @@ class KnowledgeIngestionService:
             STEP_KG,
             "success" if write_stats["relation_count"] else "warning",
             f"抽取 {write_stats['entity_count']} 个实体、{write_stats['relation_count']} 条关系",
-            "规则词典抽取；后续可接入 LLM/Neo4j 在线抽取",
+            "规则词典抽取；写入本地实体和关系 JSONL",
         )
         retrieval_verification = dict(write_stats.get("retrieval_verification") or {})
         steps[4] = PipelineStep(

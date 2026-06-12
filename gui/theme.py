@@ -501,13 +501,13 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         background: {color["button_bg"]};
         border-color: {color["border_soft"]};
         color: {color["text"]};
-        min-width: 34px;
-        max-width: 34px;
-        min-height: 30px;
-        max-height: 30px;
+        min-width: 30px;
+        max-width: 30px;
+        min-height: 28px;
+        max-height: 28px;
         border-radius: 8px;
         padding: 0;
-        font-size: 15px;
+        font-size: 14px;
         font-weight: 700;
     }}
     QPushButton[variant="icon"]:hover {{

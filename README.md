@@ -4,11 +4,11 @@ CSAgent 多智能体智能设计平台面向复合材料外压圆柱耐压壳智
 
 自然语言需求 -> 用户事实抽取 -> LLM 候选提案 -> 案例迁移 -> DOE 采样 -> PBIPF 公式初筛 -> ABAQUS 校核 -> 案例回流 -> 设计报告输出。
 
-`config/app_config.yaml` 中的产品显示名为 `CSAgent 多智能体智能设计平台`，`CSDM_cph` 仅作为本地目录、包名、环境变量前缀和历史仓库命名空间使用，不作为界面、报告或运行审计的用户可见产品名。
+`config/app_config.yaml` 中的产品显示名为 `CSAgent 多智能体智能设计平台`，`CSDM_cph` 仅作为本地目录、包名和环境变量前缀使用，不作为界面、报告或运行记录中的用户可见产品名。
 
-当前主对话流程接入 `workflow/` 多智能体运行时。该运行时使用 LangGraph 状态图组织任务解析、候选生成、代理初筛、有限元校核、知识回流和报告导出，并通过 SQLite 记录运行事件、工具调用和状态快照。PyQt6 入口保留手动调试能力，同时通过运行时支持流程恢复、智能体审计和可视化状态追踪。
+主对话流程接入 `workflow/` 多智能体运行时。该运行时使用 LangGraph 状态图组织任务解析、候选生成、代理初筛、有限元校核、知识回流和报告导出，并通过 SQLite 记录运行事件、工具调用和状态快照。PyQt6 工作台支持流程恢复、智能体运行追踪和可视化状态展示。
 
-## 当前设计对象
+## 设计对象
 
 - 壳体类型：外压圆柱耐压壳 `CYLINDRICAL`
 - 几何变量：`length_mm`、`radius_mm`、`thickness_mm`
@@ -25,7 +25,7 @@ CSAgent 多智能体智能设计平台面向复合材料外压圆柱耐压壳智
 
 PyQt6 桌面端默认为简体中文界面，顶部语言选择器支持切换为 English，主题选择器支持跟随系统、深色工程和亮色工程。界面语言和主题写入 `data/runtime/ui_settings.json`，属于本地运行偏好，不进入 Git。桌面端启动时优先加载 `HarmonyOS Sans SC`、`Noto Sans SC` 和 Windows 中文字体，避免中文标签、状态栏和可视化图注显示为方块。
 
-主界面采用 `QMainWindow + QSplitter + QStackedWidget` 工程工作台布局。顶部为系统身份栏、工作台/项目/知识库/监控/设置导航和当前模型标识；语言和主题配置位于“设置”页。当前模型标识读取 `llm_call_trace` 事件，显示本次调用实际使用的领域主模型、回退模型或失败状态，并同步写入运行日志。工作台左栏展示 `ORCHESTRATOR`、`CANDIDATE_GEN`、`SCREENER`、`FEM_AGENT`、`KNOWLEDGE_AGENT`、`REPORT_GEN` 的状态点、实时状态和任务队列；中部上方为自绘 LangGraph DAG，下方为对话优先的多智能体协作区；右栏展示实时三维视口、会话指标、运行日志、阶段报告、会话数据导出和报告打开入口。实时三维视口在本机 OpenGL 可用时使用 PyVista 交互视图，支持旋转、缩放、平移、双击重置、按钮重置视角和适配窗口。项目页承载任务契约、候选、FEM、追踪和报告详情；知识库页承载检索与证据预览；监控页承载工作流审计面板、运行日志和状态恢复入口。界面层只显示和触发流程，不改变任务解析、候选生成、代理初筛、有限元校核、知识回流和报告生成的业务契约。会话数据导出写入 `data/results/session_export_<RUN_ID>.json` 和 `data/results/session_trace_<RUN_ID>.csv`，分别保存当前任务快照与 TMP-C-CASE 追踪表。
+主界面采用 `QMainWindow + QSplitter + QStackedWidget` 工程工作台布局。顶部为系统身份栏、工作台/项目/知识库/监控/设置导航和当前模型标识；语言和主题配置位于“设置”页。当前模型标识读取 `llm_call_trace` 事件，显示本次调用实际使用的领域主模型、回退模型或失败状态，并同步写入运行日志。工作台左栏展示 `ORCHESTRATOR`、`CANDIDATE_GEN`、`SCREENER`、`FEM_AGENT`、`KNOWLEDGE_AGENT`、`REPORT_GEN` 的状态点、实时状态和任务队列；中部上方为自绘 LangGraph DAG，下方为对话优先的多智能体协作区；右栏展示实时三维视口、会话指标、运行日志、阶段报告、会话数据导出和报告打开入口。实时三维视口在本机 OpenGL 可用时使用 PyVista 交互视图，支持旋转、缩放、平移、双击重置、按钮重置视角和适配窗口。项目页承载任务契约、候选、FEM、追踪和报告详情；知识库页承载资料入库、RAG/KG 检索、知识图谱可视化和证据预览；监控页承载工作流记录面板、运行日志和状态恢复入口。界面层只显示和触发流程，不改变任务解析、候选生成、代理初筛、有限元校核、知识回流和报告生成的业务契约。会话数据导出写入 `data/results/session_export_<RUN_ID>.json` 和 `data/results/session_trace_<RUN_ID>.csv`，分别保存当前任务快照与 TMP-C-CASE 追踪表。
 
 ![深色工程工作台](docs/assets/ui_workbench_dark.png)
 
@@ -64,7 +64,7 @@ P_PBIPF = d1 * lg(Q) * t / R
 | `workflow/simulation_queue.py` | 有限元作业队列，记录候选入队、运行、成功、失败和结果摘要 |
 | `workflow/state.py` | 工作流状态契约，保存任务、候选、初筛、正式有限元输入、有限元结果、知识回流结果、报告和人工确认状态 |
 
-运行时数据写入 `data/runtime/`，该目录属于本地运行产物，不进入 Git。中央“项目”页展示结构化任务契约、用户已给事实、普通几何参考、固定几何约束、候选生成控制参数、初筛控制参数和事实边界；该页只读取当前会话任务，不修改候选或流程状态。核心工作台中的“智能体流程”面板读取运行时事件库、状态快照和有限元作业队列，展示运行摘要、LangGraph DAG、状态图、智能体职责契约、诊断信息、LLM 后端配置状态、LLM 调用轨迹、有限元作业队列和工具调用审计；DAG 和智能体卡片使用完成、运行中、失败、等待四类状态灯。工具调用审计包含工具名、运行智能体、状态、耗时、输入摘要、输出摘要和失败原因。该面板提供“检测 LLM 后端”和“导出运行审计”按钮，运行审计报告落盘到 `data/results/run_audit_<RUN_ID>.md`，内容包含运行摘要、智能体职责、候选-结果-案例追踪、有限元队列、LLM 调用轨迹、诊断和事件审计。LLM 后端检测结果只显示后端名称、模型、状态、耗时和脱敏错误摘要，不显示 URL、密钥或提示词正文。右侧“候选”页展示候选来源构成、三路初始配额、规则过滤、结构去重和 DOE 补足审计；“追踪”页展示 TMP 会话候选、正式 C 编号、代理预测、FEM 结果、代理误差、CASE 回流状态和报告纳入状态之间的对应关系；“报告”页读取当前会话报告或 `data/results/latest_report.md`，展示 Markdown/PDF 路径、LLM 工程解释使用状态和 Markdown 正文预览。LLM 调用轨迹只记录后端名称、模型名称、调用状态、耗时和错误摘要，不记录 URL、密钥、系统提示词或用户提示词。重大阶段仍以源码、配置、测试和文档入库。
+运行时数据写入 `data/runtime/`，该目录属于本地运行产物，不进入 Git。中央“项目”页展示结构化任务契约、用户已给事实、普通几何参考、固定几何约束、候选生成控制参数、初筛控制参数和事实边界；该页只读取当前会话任务，不修改候选或流程状态。核心工作台中的“智能体流程”面板读取运行时事件库、状态快照和有限元作业队列，展示运行摘要、LangGraph DAG、状态图、智能体职责契约、诊断信息、LLM 后端配置状态、LLM 调用轨迹、有限元作业队列和工具调用记录；DAG 和智能体卡片使用完成、运行中、失败、等待四类状态灯。工具调用记录包含工具名、运行智能体、状态、耗时、输入摘要、输出摘要和失败原因。该面板提供“检测 LLM 后端”和“导出运行记录”按钮，运行记录报告落盘到 `data/results/run_audit_<RUN_ID>.md`，内容包含运行摘要、智能体职责、候选-结果-案例追踪、有限元队列、LLM 调用轨迹、诊断和事件记录。LLM 后端检测结果只显示后端名称、模型、状态、耗时和脱敏错误摘要，不显示 URL、密钥或提示词正文。右侧“候选”页展示候选来源构成、三路初始配额、规则过滤、结构去重和 DOE 补足记录；“追踪”页展示 TMP 会话候选、正式 C 编号、代理预测、FEM 结果、代理误差、CASE 回流状态和报告纳入状态之间的对应关系；“报告”页读取当前会话报告或 `data/results/latest_report.md`，展示 Markdown/PDF 路径、LLM 工程解释使用状态和 Markdown 正文预览。LLM 调用轨迹只记录后端名称、模型名称、调用状态、耗时和错误摘要，不记录 URL、密钥、系统提示词或用户提示词。
 
 工作流运行状态由最新快照推导并写入 `workflow_runs.status`：等待人工确认为 `waiting`，用户暂停为 `paused`，节点异常为 `failed`，流程完成为 `completed`，其余执行中阶段为 `running`。GUI、运行审计和恢复入口读取同一状态字段，不把暂停或失败误显示为运行中。
 
@@ -82,9 +82,9 @@ P_PBIPF = d1 * lg(Q) * t / R
 - `knowledge/runtime/kg/relations.jsonl`：知识图谱关系
 - `knowledge/runtime/manifest.json`：文档数、chunk 数、向量索引数、实体关系数、检索验证结果、分块参数、去重键和最近一次入库流水线状态
 
-资料入库流程为“MinerU / Docling 文档解析 -> 语义分块 -> BGE-M3 向量化索引 -> Neo4j 实体/关系抽取 -> 检索验证 / 证据引用”。PDF、DOCX、PPTX 和图片优先调用 MinerU，失败后尝试 Docling；文本、Markdown、CSV、TSV、Excel 和工程文本使用本项目解析器。RAG 分块使用 `chunk_token_size`、`chunk_overlap_tokens` 和 `min_chunk_tokens` 控制 token 窗口、重叠上下文和小块合并；完全相同的 chunk 按 `content_hash` 去重。去重后的 chunk 同步写入 `knowledge/runtime/rag/rag_chunks.jsonl` 和 `knowledge/chroma_db` 中的 `csdm_cph_project_knowledge` collection。向量后端按 `rag.embedding_model=BAAI/bge-m3` 读取本地缓存；本地模型不可用且配置允许时使用哈希嵌入回退并在流水线状态中记录。KG 当前写出实体、关系和统计文件；检索验证会确认当前资料的文本块可命中、图谱关系引用有效 chunk，并把证据样本写入 manifest。后续可接入在线 Neo4j 上传或 LLM 抽取。
+资料入库流程为“MinerU / Docling 文档解析 -> 语义分块 -> BGE-M3 向量化索引 -> Neo4j 实体/关系抽取 -> 检索验证 / 证据引用”。PDF、DOCX、PPTX 和图片优先调用 MinerU，失败后尝试 Docling；文本、Markdown、CSV、TSV、Excel 和工程文本使用本项目解析器。RAG 分块使用 `chunk_token_size`、`chunk_overlap_tokens` 和 `min_chunk_tokens` 控制 token 窗口、重叠上下文和小块合并；完全相同的 chunk 按 `content_hash` 去重。去重后的 chunk 同步写入 `knowledge/runtime/rag/rag_chunks.jsonl` 和 `knowledge/chroma_db` 中的 `csdm_cph_project_knowledge` collection。向量后端按 `rag.embedding_model=BAAI/bge-m3` 读取本地缓存；本地模型不可用且配置允许时使用哈希嵌入回退并在流水线状态中记录。KG 写出实体、关系和统计文件；新资料入库时保留其他资料的 RAG chunk、实体和关系，并按文档编号替换同一资料的旧记录。检索验证会确认当前资料的文本块可命中、图谱关系引用有效 chunk，并把证据样本写入 manifest。
 
-候选生成 LLM 使用关键词/BM25、向量 collection 和知识图谱关系融合后的证据作为工程提案依据；结构化候选参数仍由系统解析、归一化、规则检查和 Schema 校验确定。GUI 的“知识库”页支持上传资料、批量解析、后台入库、索引重建、知识库快照导出、状态灯、流水线卡片、文档表、人工检索和证据预览，并单独显示 RAG、Vector 和 KG 状态。后台入库由 `KnowledgeIngestionService` 发出阶段进度事件，GUI 按文档解析、语义分块、向量化索引、实体/关系抽取、检索验证五个真实阶段实时刷新流水线状态和错误信息；索引重建会复用已解析文档和去重文本块，重建向量 collection、实体关系、统计清单和检索验证状态；快照导出写入当前 manifest、文档、文本块、实体、关系和统计数据。证据用于审计候选生成 LLM 的工程上下文和人工核查来源，不作为确定性数值来源。
+候选生成 LLM 使用关键词/BM25、向量 collection 和知识图谱关系融合后的证据作为工程提案依据；结构化候选参数仍由系统解析、归一化、规则检查和 Schema 校验确定。GUI 的“知识库”页支持上传资料、批量解析、后台入库、索引重建、知识库快照导出、状态灯、流水线卡片、文档表、人工检索、知识图谱可视化和证据预览，并单独显示 RAG、Vector 和 KG 状态。后台入库由 `KnowledgeIngestionService` 发出阶段进度事件，GUI 按文档解析、语义分块、向量化索引、实体/关系抽取、检索验证五个真实阶段实时刷新流水线状态和错误信息；索引重建会复用已解析文档和去重文本块，重建向量 collection、实体关系、统计清单和检索验证状态；快照导出写入当前 manifest、文档、文本块、实体、关系和统计数据。证据用于候选生成 LLM 的工程上下文和人工核查来源，不作为确定性数值来源。
 
 GUI 的“监控”页提供最近运行记录下拉框、刷新运行记录和“恢复运行状态”按钮。恢复运行状态只读取 `data/runtime/workflow_runtime.sqlite3` 中的最近快照，不重新调用 LLM、代理模型或 Abaqus；恢复后会还原任务、候选、筛选结果、有限元结果、报告和待确认节点。
 
@@ -99,15 +99,6 @@ D:\anaconda3\envs\GPT\python.exe main.py
 ```powershell
 D:\anaconda3\envs\GPT\python.exe scripts\check_env.py
 ```
-
-发布审计：
-
-```powershell
-D:\anaconda3\envs\GPT\python.exe scripts\release_audit.py
-D:\anaconda3\envs\GPT\python.exe scripts\release_audit.py --with-llm-health
-```
-
-默认发布审计不访问网络，检查品牌残留、缓存残留、案例编号、知识库运行时路径、UI 展示资产、报告标题和 `.env` 忽略规则；`--with-llm-health` 会额外探测主模型和回退模型连通性。
 
 批量生成初始案例：
 

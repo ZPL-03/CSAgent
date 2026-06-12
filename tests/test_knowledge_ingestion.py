@@ -136,6 +136,57 @@ def test_runtime_knowledge_rebuild_and_snapshot_export(tmp_path, monkeypatch) ->
     assert len(payload["relations"]) == rebuilt["kg_relation_count"]
 
 
+def test_runtime_knowledge_ingestion_merges_new_document_with_existing_rag_and_kg(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_USE_HASH_EMBEDDING", "1")
+    first = tmp_path / "asme_pressure_hull.md"
+    first.write_text(
+        "\n\n".join(
+            [
+                "# ASME pressure hull",
+                "T700 composite pressure hull under external pressure uses ASME RD-1172 for buckling checks.",
+                "PBIPF and Abaqus Riks provide ultimate pressure verification.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    second = tmp_path / "manufacturing_pressure_hull.md"
+    second.write_text(
+        "\n\n".join(
+            [
+                "# manufacturing pressure hull",
+                "Filament winding, curing and fiber placement quality control reduce imperfection and delamination risk.",
+                "Abaqus finite element verification links manufacturing defects with buckling and postbuckling behavior.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    service = KnowledgeIngestionService(base_dir=tmp_path / "knowledge", chunk_token_size=42, chunk_overlap_tokens=6)
+    first_result = service.ingest_file(first)
+    second_result = service.ingest_file(second)
+
+    assert first_result.success
+    assert second_result.success
+    assert first_result.document_id != second_result.document_id
+
+    documents = [json.loads(line) for line in service.documents_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    chunks = [json.loads(line) for line in service.chunks_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    entities = [json.loads(line) for line in service.entities_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    relations = [json.loads(line) for line in service.relations_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    manifest = json.loads(service.manifest_path.read_text(encoding="utf-8"))
+
+    assert {item["document_id"] for item in documents} == {first_result.document_id, second_result.document_id}
+    assert {item["source_id"] for item in chunks} == {first_result.document_id, second_result.document_id}
+    assert any(first_result.document_id in item.get("sources", []) for item in entities)
+    assert any(second_result.document_id in item.get("sources", []) for item in entities)
+    assert any(item.get("record_id") == first_result.document_id for item in relations)
+    assert any(item.get("record_id") == second_result.document_id for item in relations)
+    assert manifest["document_count"] == 2
+    assert manifest["rag_chunk_count"] == len(chunks)
+    assert manifest["kg_entity_count"] == len(entities)
+    assert manifest["kg_relation_count"] == len(relations)
+
+
 def test_runtime_knowledge_ingestion_accepts_engineering_text_and_binary_metadata(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_USE_HASH_EMBEDDING", "1")
     service = KnowledgeIngestionService(base_dir=tmp_path / "knowledge", chunk_token_size=48, chunk_overlap_tokens=8)

@@ -1,8 +1,8 @@
-"""CSAgent 发布审计门禁。
+"""CSAgent 交付一致性检查。
 
-该脚本检查项目是否满足可发布快照的基础契约，包括品牌残留、缓存残留、
-案例编号、知识库运行时路径、UI 展示资产、报告标题和本地密钥忽略规则。
-默认不访问网络；需要检查 LLM 连通性时使用 ``--with-llm-health``。
+该脚本检查项目交付状态，包括产品命名一致性、本地运行产物隔离、
+案例编号连续性、知识库运行时路径、UI 展示资产、报告标题和本地密钥忽略规则。
+默认只读取本地文件；需要检测 LLM 连通性时使用 ``--with-llm-health``。
 """
 
 from __future__ import annotations
@@ -130,14 +130,14 @@ class ReleaseAudit:
             for pattern in FORBIDDEN_TEXT:
                 if pattern in text:
                     hits.append(f"{path.relative_to(ROOT)}:{pattern}")
-        self.add("旧残留关键词", not hits, "未发现旧品牌、旧模型、旧路径和异常文本残留" if not hits else "; ".join(hits[:12]))
+        self.add("产品关键词", not hits, "产品命名、模型名称、运行路径和报告标题一致" if not hits else "; ".join(hits[:12]))
 
     def check_cache_absent(self) -> None:
         caches = [path.relative_to(ROOT).as_posix() for path in ROOT.rglob("__pycache__")]
         pytest_cache = ROOT / ".pytest_cache"
         if pytest_cache.exists():
             caches.append(".pytest_cache")
-        self.add("缓存目录", not caches, "无 __pycache__ / .pytest_cache" if not caches else ", ".join(caches[:12]))
+        self.add("本地运行产物", not caches, "无 Python 测试缓存目录" if not caches else ", ".join(caches[:12]))
 
     def _git_output(self, args: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -271,7 +271,7 @@ class ReleaseAudit:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="CSAgent 发布审计门禁")
+    parser = argparse.ArgumentParser(description="CSAgent 交付一致性检查")
     parser.add_argument("--with-llm-health", action="store_true", help="同时检查 LLM 主/回退模型连通性")
     args = parser.parse_args()
     return ReleaseAudit(with_llm_health=args.with_llm_health).run()

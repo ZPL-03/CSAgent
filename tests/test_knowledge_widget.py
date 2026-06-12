@@ -137,6 +137,8 @@ def test_knowledge_widget_renders_runtime_pipeline_and_evidence(monkeypatch, tmp
         assert widget.vector_pill.text == "Vector 9 chunks"
         assert widget.kg_pill.text == "KG 12 relations"
         assert widget.document_table.rowCount() == 1
+        assert len(widget.graph_view.relations) == 1
+        assert widget.graph_view.relations[0]["source"] == "Initial Imperfection"
     finally:
         widget.close()
         app.processEvents()
@@ -314,6 +316,8 @@ def test_knowledge_widget_runs_real_ingestion_pipeline(monkeypatch, tmp_path) ->
         assert widget.pipeline_widget.steps[1].status == "success"
         assert widget.pipeline_widget.steps[2].status in {"success", "warning"}
         assert widget.pipeline_widget.steps[4].status in {"success", "warning"}
+        assert len(widget.graph_view.entities) >= 1
+        assert len(widget.graph_view.relations) >= 1
 
         manifest = json.loads((base_dir / "manifest.json").read_text(encoding="utf-8"))
         assert manifest["document_count"] == 1
