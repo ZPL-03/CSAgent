@@ -166,18 +166,45 @@ class ChatWidget(QWidget):
         target_min = min(max(min_width, 180), target_max)
         return target_max, target_min
 
+    @staticmethod
+    def _is_cjk(char: str) -> bool:
+        return "\u3400" <= char <= "\u9fff"
+
+    def _display_units(self, text: str) -> float:
+        units = 0.0
+        for char in text:
+            if char.isspace():
+                units += 0.25
+            elif self._is_cjk(char):
+                units += 1.0
+            elif char.isascii():
+                units += 0.58
+            else:
+                units += 0.85
+        return units
+
+    def _token_width(self, token: str) -> int:
+        metrics = self.fontMetrics()
+        if any(self._is_cjk(char) for char in token):
+            cjk_unit = max(metrics.horizontalAdvance("汉"), metrics.averageCharWidth())
+            return min(metrics.horizontalAdvance(token), int(cjk_unit * 10))
+        return metrics.horizontalAdvance(token)
+
     def _content_width(self, text: str, target_max: int, target_min: int) -> int:
         metrics = self.fontMetrics()
         value = str(text)
-        lines = value.splitlines() or [value]
-        longest_line = max((metrics.horizontalAdvance(line) for line in lines), default=0)
         separators = "，。；;、,，：:（）()[]【】"
         token_source = value
         for separator in separators:
             token_source = token_source.replace(separator, " ")
         tokens = [item for item in token_source.split() if item]
-        longest_token = max((metrics.horizontalAdvance(item) for item in tokens), default=0)
-        natural = max(longest_line, longest_token) + 30
+        longest_token = max((self._token_width(item) for item in tokens), default=0)
+        units_by_line = [self._display_units(line) for line in value.splitlines() if line.strip()]
+        display_units = max(units_by_line, default=self._display_units(value))
+        cjk_unit = max(metrics.horizontalAdvance("汉"), metrics.averageCharWidth())
+        line_units = min(56, max(14, int(display_units * 0.62)))
+        estimated_line = int(line_units * cjk_unit + 30)
+        natural = max(estimated_line, longest_token + 30)
         if natural >= target_max:
             return target_max
         return max(target_min, min(target_max, natural))

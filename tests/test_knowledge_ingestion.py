@@ -16,6 +16,10 @@ def test_runtime_knowledge_empty_status_exposes_pipeline_contract(tmp_path) -> N
     assert status["rag_chunk_count"] == 0
     assert status["vector_chunk_count"] == 0
     assert status["vector_ready"] is False
+    assert status["vector_status"] == "pending"
+    assert status["vector_message"] == "等待写入向量索引"
+    assert status["vector_detail"] == ""
+    assert status["vector_backend"] == ""
     assert status["kg_entity_count"] == 0
     assert status["kg_relation_count"] == 0
     assert status["chunk_token_size"] == 64
@@ -82,6 +86,38 @@ def test_runtime_knowledge_ingestion_builds_chunks_kg_vector_index_and_dedupes(t
     relations = [json.loads(line) for line in service.relations_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     chunk_ids = {item["chunk_id"] for item in chunks}
     assert all(item["evidence_chunk_id"] in chunk_ids for item in relations)
+
+
+def test_runtime_knowledge_ingestion_marks_vector_status_warning_when_backend_fails(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_USE_HASH_EMBEDDING", "1")
+
+    class BrokenRAGEngine:
+        def __init__(self, *args, **kwargs) -> None:
+            raise RuntimeError("vector backend unavailable")
+
+    source = tmp_path / "pressure_hull_vector_failure.md"
+    source.write_text(
+        "\n\n".join(
+            [
+                "# 外压耐压壳向量状态",
+                "T700 composite pressure hull under external pressure uses ASME RD-1172 for buckling checks.",
+                "PBIPF and Abaqus Riks provide ultimate pressure verification.",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("core.knowledge_ingestion.RAGEngine", BrokenRAGEngine)
+    service = KnowledgeIngestionService(base_dir=tmp_path / "knowledge", chunk_token_size=48, chunk_overlap_tokens=8)
+    result = service.ingest_file(source)
+
+    manifest = json.loads(service.manifest_path.read_text(encoding="utf-8"))
+    assert result.success
+    assert manifest["vector_status"] == "warning"
+    assert manifest["vector_ready"] is False
+    assert manifest["vector_chunk_count"] == 0
+    assert manifest["vector_backend"] == "unavailable"
+    assert manifest["vector_message"] == "向量索引写入失败"
 
 
 def test_runtime_knowledge_ingestion_emits_step_progress(tmp_path, monkeypatch) -> None:

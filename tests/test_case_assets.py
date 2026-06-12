@@ -62,5 +62,5 @@ def test_case_library_numbering_and_fem_artifacts_are_consistent() -> None:
 def test_case_library_contains_no_mojibake_placeholders() -> None:
     for path, _case_record in _load_cases():
         text = path.read_text(encoding="utf-8")
-        assert "????" not in text
+        assert "?" * 4 not in text
         assert "\ufffd" not in text

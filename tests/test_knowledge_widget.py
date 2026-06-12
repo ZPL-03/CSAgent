@@ -27,6 +27,10 @@ class FakeKnowledge:
             "rag_chunk_count": 9,
             "vector_ready": True,
             "vector_chunk_count": 9,
+            "vector_status": "success",
+            "vector_message": "向量索引写入 9 个文本块",
+            "vector_detail": "collection=csdm_cph_project_knowledge，backend=hash_embedding",
+            "vector_backend": "hash_embedding",
             "kg_entity_count": 7,
             "kg_relation_count": 12,
             "manifest_path": "knowledge/runtime/manifest.json",
@@ -139,6 +143,36 @@ def test_knowledge_widget_renders_runtime_pipeline_and_evidence(monkeypatch, tmp
         assert widget.document_table.rowCount() == 1
         assert len(widget.graph_view.relations) == 1
         assert widget.graph_view.relations[0]["source"] == "Initial Imperfection"
+    finally:
+        widget.close()
+        app.processEvents()
+
+
+def test_knowledge_widget_vector_pill_follows_actual_vector_status(monkeypatch, tmp_path) -> None:
+    global _DOCS_PATH
+    _DOCS_PATH = tmp_path / "documents.jsonl"
+    _DOCS_PATH.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr("gui.knowledge_widget.DomainKnowledgeBase", FakeKnowledge)
+    monkeypatch.setattr("gui.knowledge_widget.KnowledgeIngestionService", FakeIngestionService)
+
+    app = _app()
+    widget = KnowledgeWidget()
+    try:
+        widget._update_status_pills(
+            {
+                "ready": True,
+                "document_count": 1,
+                "rag_chunk_count": 4,
+                "vector_ready": False,
+                "vector_chunk_count": 0,
+                "vector_status": "warning",
+                "kg_relation_count": 2,
+            }
+        )
+
+        assert widget.vector_pill.text == "Vector warning"
+        assert widget.vector_pill.status == "warning"
     finally:
         widget.close()
         app.processEvents()

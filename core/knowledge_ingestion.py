@@ -492,7 +492,16 @@ class KnowledgeIngestionService:
             retrieval_verification=retrieval_verification,
             steps=steps,
         )
-        self._write_manifest(last_result=result)
+        self._write_manifest(
+            last_result=result,
+            vector_stats={
+                "status": write_stats["vector_status"],
+                "message": write_stats["vector_message"],
+                "detail": write_stats["vector_detail"],
+                "count": write_stats["vector_count"],
+                "backend": write_stats["vector_backend"],
+            },
+        )
         return result
 
     def status(self) -> dict[str, Any]:
@@ -592,8 +601,9 @@ class KnowledgeIngestionService:
                 str(verification.get("detail") or ""),
             ),
         ]
-        self._write_manifest()
+        self._write_manifest(vector_stats=vector_stats)
         manifest = self._load_manifest()
+        manifest.update(self._vector_manifest_fields(vector_stats))
         manifest["pipeline"] = [asdict(step) for step in steps]
         manifest["last_reindex"] = {
             "updated_at": _utc_now(),
@@ -1511,7 +1521,26 @@ class KnowledgeIngestionService:
             result.append(relation)
         return result
 
-    def _write_manifest(self, last_result: IngestionResult | None = None) -> None:
+    def _vector_manifest_fields(self, vector_stats: dict[str, Any] | None = None) -> dict[str, Any]:
+        """返回顶层向量索引状态字段。"""
+
+        stats = vector_stats if isinstance(vector_stats, dict) else {}
+        status = str(stats.get("status") or "pending")
+        count = int(stats.get("count") or 0)
+        return {
+            "vector_chunk_count": count,
+            "vector_ready": bool(status == "success" and count > 0),
+            "vector_status": status,
+            "vector_message": str(stats.get("message") or "等待写入向量索引"),
+            "vector_detail": str(stats.get("detail") or ""),
+            "vector_backend": str(stats.get("backend") or ""),
+        }
+
+    def _write_manifest(
+        self,
+        last_result: IngestionResult | None = None,
+        vector_stats: dict[str, Any] | None = None,
+    ) -> None:
         documents = _read_jsonl(self.documents_path)
         chunks = _read_jsonl(self.chunks_path)
         entities = _read_jsonl(self.entities_path)
@@ -1521,14 +1550,13 @@ class KnowledgeIngestionService:
             **self._base_manifest(),
             "document_count": len(documents),
             "rag_chunk_count": len(chunks),
-            "vector_chunk_count": len(chunks) if self.vector_enabled else 0,
-            "vector_ready": bool(self.vector_enabled and chunks),
             "kg_entity_count": len(entities),
             "kg_relation_count": len(relations),
             "structured_document_count": len(documents),
             "structured_block_count": len(blocks),
             "markdown_document_count": len(list(self.markdown_dir.glob("*.md"))) if self.markdown_dir.exists() else 0,
             "updated_at": _utc_now(),
+            **self._vector_manifest_fields(vector_stats),
         }
         if last_result is not None:
             manifest["last_ingestion"] = {
@@ -1580,6 +1608,10 @@ class KnowledgeIngestionService:
             "rag_chunk_count": 0,
             "vector_chunk_count": 0,
             "vector_ready": False,
+            "vector_status": "pending",
+            "vector_message": "等待写入向量索引",
+            "vector_detail": "",
+            "vector_backend": "",
             "kg_entity_count": 0,
             "kg_relation_count": 0,
             "structured_document_count": 0,

@@ -682,12 +682,15 @@ class KnowledgeWidget(QWidget):
         doc_count = int(status.get("document_count", 0) or status.get("structured_document_count", 0) or 0)
         chunk_count = int(status.get("rag_chunk_count", 0) or 0)
         vector_count = int(status.get("vector_chunk_count", 0) or 0)
-        vector_ready = bool(status.get("vector_ready") or vector_count)
+        vector_status = str(status.get("vector_status") or "")
+        vector_ready = bool(status.get("vector_ready")) and vector_status == "success"
         relation_count = int(status.get("kg_relation_count", 0) or 0)
         parser = (status.get("last_ingestion") or {}).get("parser_backend") if isinstance(status.get("last_ingestion"), dict) else ""
         self.store_pill.set_state(f"知识库 {doc_count} 文档", "success" if ready else "pending")
         self.rag_pill.set_state(f"RAG {chunk_count} chunks", "success" if chunk_count else "pending")
-        self.vector_pill.set_state(f"Vector {vector_count} chunks", "success" if vector_ready else "pending")
+        vector_label = f"Vector {vector_count} chunks" if vector_count else f"Vector {vector_status or 'pending'}"
+        vector_state = "success" if vector_ready else ("warning" if vector_status in {"warning", "failed"} else "pending")
+        self.vector_pill.set_state(vector_label, vector_state)
         self.kg_pill.set_state(f"KG {relation_count} relations", "success" if relation_count else "pending")
         self.parser_pill.set_state(str(parser or "解析器待调用"), "success" if parser else "pending")
 
@@ -706,13 +709,18 @@ class KnowledgeWidget(QWidget):
             "<div style='display:grid;grid-template-columns:repeat(2,1fr);gap:8px;'>",
             self._summary_card("资料", f"{status.get('document_count', 0)} 文档"),
             self._summary_card("RAG", f"{status.get('rag_chunk_count', 0)} 文本块"),
-            self._summary_card("Vector", f"{status.get('vector_chunk_count', 0)} 向量块"),
+            self._summary_card(
+                "Vector",
+                f"{status.get('vector_chunk_count', 0)} 向量块",
+                f"后端 {status.get('vector_backend') or '-'}；状态 {status.get('vector_status') or '-'}",
+            ),
             self._summary_card("KG", f"{status.get('kg_entity_count', 0)} 实体 / {status.get('kg_relation_count', 0)} 关系"),
             self._summary_card("分块", f"{chunk_size} token / overlap {overlap}"),
             self._summary_card("案例", f"会话 {len(archive_cases)} / 正式 {len(formal_cases)}"),
             self._summary_card("FEM", f"ODB {odb_count} / 云图 {vis_count}"),
             "</div>",
             f"<p><b>最后入库：</b>{escape(str(last.get('title') or '-'))}；<b>解析器：</b>{escape(str(last.get('parser_backend') or '-'))}</p>",
+            f"<p><b>向量索引：</b>{escape(str(status.get('vector_status') or '-'))}；{escape(str(status.get('vector_message') or '-'))}</p>",
             f"<p><b>检索验证：</b>{escape(str(verification.get('message') or '-'))}</p>",
             f"<p><b>Manifest：</b>{escape(str(status.get('manifest_path') or '-'))}</p>",
         ]
@@ -723,7 +731,7 @@ class KnowledgeWidget(QWidget):
             )
         self.summary_browser.setHtml("".join(html))
 
-    def _summary_card(self, title: str, value: str) -> str:
+    def _summary_card(self, title: str, value: str, detail: str = "") -> str:
         if self.theme == "light":
             border = "#c8d2df"
             background = "#f8fafc"
@@ -734,11 +742,12 @@ class KnowledgeWidget(QWidget):
             background = "#111a28"
             muted = "#64748b"
             foreground = "#dbe4ef"
+        detail_html = f"<br><span style='color:{muted};font-size:11px;'>{escape(detail)}</span>" if detail else ""
         return (
             f"<div style='border:1px solid {border};border-radius:8px;padding:8px 10px;background:{background};'>"
             f"<span style='color:{muted};font-size:12px;'>{escape(title)}</span><br>"
             f"<span style='font-size:18px;font-weight:800;color:{foreground};'>{escape(value)}</span>"
-            "</div>"
+            f"{detail_html}</div>"
         )
 
     def _html_card_style(self) -> str:
