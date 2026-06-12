@@ -1,4 +1,4 @@
-"""CSDM_cph 环境自检脚本。"""
+"""CSAgent 环境自检脚本。"""
 
 from __future__ import annotations
 

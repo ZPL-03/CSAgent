@@ -98,6 +98,7 @@ class ReleaseAudit:
         self.check_clean_residuals()
         self.check_cache_absent()
         self.check_env_ignored()
+        self.check_product_identity()
         self.check_runtime_knowledge_paths()
         self.check_ui_assets()
         self.check_cases()
@@ -158,6 +159,20 @@ class ReleaseAudit:
         passed = tracked.stdout.strip() == "" and ignored.returncode == 0
         detail = ".env 未跟踪且被 .gitignore 忽略" if passed else f"tracked={tracked.stdout.strip()!r}, ignored_rc={ignored.returncode}"
         self.add("本地密钥文件", passed, detail)
+
+    def check_product_identity(self) -> None:
+        config = yaml.safe_load((ROOT / "config/app_config.yaml").read_text(encoding="utf-8"))
+        project = dict((config or {}).get("project", {}))
+        expected = {
+            "name": "CSAgent",
+            "display_name": "CSAgent 多智能体智能设计平台",
+            "package_name": "CSDM_cph",
+            "domain": "composite_pressure_hull",
+        }
+        mismatches = [f"{key}={project.get(key)!r}" for key, value in expected.items() if project.get(key) != value]
+        passed = not mismatches
+        detail = "产品显示名为 CSAgent，CSDM_cph 仅作为内部包名" if passed else "; ".join(mismatches)
+        self.add("产品身份配置", passed, detail)
 
     def check_runtime_knowledge_paths(self) -> None:
         config = yaml.safe_load((ROOT / "config/app_config.yaml").read_text(encoding="utf-8"))
@@ -228,6 +243,7 @@ class ReleaseAudit:
 
         load_dotenv(ROOT / ".env")
         results = probe_llm_backends(timeout_seconds=20)
+        primary_ok = any(item.get("role") == "primary" and item.get("health_status") == "success" for item in results)
         fallback_ok = any(item.get("role") == "fallback" and item.get("health_status") == "success" for item in results)
         primary = next((item for item in results if item.get("role") == "primary"), {})
         fallback = next((item for item in results if item.get("role") == "fallback"), {})
@@ -235,7 +251,7 @@ class ReleaseAudit:
             f"primary={primary.get('model')}:{primary.get('health_status')}；"
             f"fallback={fallback.get('model')}:{fallback.get('health_status')}"
         )
-        self.add("LLM 后端健康", fallback_ok, detail)
+        self.add("LLM 后端健康", primary_ok and fallback_ok, detail)
 
 
 def main() -> int:

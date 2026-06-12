@@ -1,5 +1,8 @@
 project:
-  name: CSDM_cph
+  name: CSAgent
+  display_name: CSAgent 多智能体智能设计平台
+  package_name: CSDM_cph
+  domain: composite_pressure_hull
   timezone: Asia/Shanghai
   default_language: zh-CN
 
