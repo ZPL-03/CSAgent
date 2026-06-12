@@ -5,8 +5,10 @@ from __future__ import annotations
 from html import escape
 from typing import Iterable
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QGridLayout,
+    QHeaderView,
     QHBoxLayout,
     QLabel,
     QSplitter,
@@ -73,6 +75,8 @@ class CandidateWidget(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
         self.table.itemSelectionChanged.connect(self._refresh_detail)
 
         self.summary_label = QLabel(tr("candidate.empty", language=self.language))

@@ -583,7 +583,7 @@ class MainWindow(QMainWindow):
         project_page.setObjectName("centerWorkbench")
         project_page.addWidget(self.task_config_widget)
         project_page.addWidget(self.tabs)
-        project_page.setSizes([260, 620])
+        project_page.setSizes([230, 650])
         self.stack.addWidget(project_page)
         self.stack.addWidget(self.knowledge_widget)
         self.monitor_page = self._build_monitor_page()

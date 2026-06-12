@@ -3,10 +3,18 @@
 from __future__ import annotations
 
 import json
-from html import escape
 from typing import Any
 
-from PyQt6.QtWidgets import QTextBrowser
+from PyQt6.QtCore import Qt
+from PyQt6.QtWidgets import (
+    QFrame,
+    QGridLayout,
+    QLabel,
+    QScrollArea,
+    QSizePolicy,
+    QVBoxLayout,
+    QWidget,
+)
 
 from core.task_contract import (
     describe_boundary_conditions,
@@ -40,15 +48,15 @@ LABELS = {
         "facts": "用户已给事实",
         "reference_geometry": "普通几何参考",
         "fixed_geometry": "固定几何约束",
-        "none": "无。",
+        "empty_fields": "等待解析字段",
+        "none": "无",
         "unspecified": "未指定，按来源比例计算",
         "fact_title": "事实边界",
-        "fact_note": (
-            "<li><code>user_input_facts</code> 只保存用户自然语言明确给出的事实。</li>"
-            "<li><code>geometry_reference</code> 是设计中心和几何包络参考，不强制候选方案等于该数值。</li>"
-            "<li><code>fixed_geometry</code> 是明确固定、限定或必须保持不变的几何约束，会覆盖候选对应参数。</li>"
-            "<li>参数域、材料库、单位格式和有限元接口字段属于系统工程域约束，不作为用户事实发送给 LLM。</li>"
-        ),
+        "fact_short": "用户事实、几何参考和固定约束分层记录；参数域、材料库、单位格式和有限元接口属于系统工程约束。",
+        "fact_user": "只保存用户自然语言明确给出的事实。",
+        "fact_reference": "作为设计中心和几何包络参考，不强制候选方案等于该数值。",
+        "fact_fixed": "明确固定、限定或必须保持不变的几何约束，会覆盖候选对应参数。",
+        "fact_system": "参数域、材料库、单位格式和有限元接口字段不作为用户事实发送给 LLM。",
     },
     "en": {
         "title": "Task Configuration",
@@ -73,40 +81,72 @@ LABELS = {
         "facts": "User Facts",
         "reference_geometry": "Reference Geometry",
         "fixed_geometry": "Fixed Geometry",
-        "none": "None.",
+        "empty_fields": "Pending Parsed Fields",
+        "none": "None",
         "unspecified": "Not specified, calculated by source ratio",
         "fact_title": "Fact Boundary",
-        "fact_note": (
-            "<li><code>user_input_facts</code> stores only facts explicitly provided by the user.</li>"
-            "<li><code>geometry_reference</code> is a design-center reference and does not force candidates to equal the value.</li>"
-            "<li><code>fixed_geometry</code> stores explicit fixed/equal constraints and overrides candidate fields.</li>"
-            "<li>Parameter ranges, material libraries, unit formats, and FEM interface fields are system constraints, not user facts sent to the LLM.</li>"
-        ),
+        "fact_short": "User facts, geometry references, and fixed constraints are stored separately; parameter ranges, materials, units, and FEM fields are system constraints.",
+        "fact_user": "Stores only facts explicitly provided by the user.",
+        "fact_reference": "Defines the design-center reference and does not force candidate values.",
+        "fact_fixed": "Stores explicit fixed/equal constraints and overrides candidate fields.",
+        "fact_system": "System parameter ranges, materials, units, and FEM fields are not sent to the LLM as user facts.",
     },
 }
 
 
-class TaskConfigWidget(QTextBrowser):
+class TaskConfigWidget(QWidget):
     """展示结构化任务契约、用户事实和工程域参数边界。"""
 
     def __init__(self, language: str = DEFAULT_LANGUAGE) -> None:
         super().__init__()
         self.language = language
         self.task: dict[str, Any] | None = None
-        self.setOpenExternalLinks(False)
+        self._plain_text = ""
+
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+
+        self.content = QWidget()
+        self.content_layout = QVBoxLayout(self.content)
+        self.content_layout.setContentsMargins(12, 12, 12, 12)
+        self.content_layout.setSpacing(12)
+        self.scroll_area.setWidget(self.content)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self.scroll_area)
         self.reset_view()
 
     def set_language(self, language: str) -> None:
         self.language = language if language in LABELS else DEFAULT_LANGUAGE
         self.update_task(self.task)
 
+    def toPlainText(self) -> str:
+        return self._plain_text
+
     def _label(self, key: str) -> str:
         return LABELS.get(self.language, LABELS[DEFAULT_LANGUAGE]).get(key, key)
 
     def reset_view(self) -> None:
-        self.setHtml(
-            f"<h3>{self._label('title')}</h3>"
-            f"<p>{self._label('empty')}</p>"
+        self.task = None
+        groups = [
+            (self._label("facts"), [("user_input_facts", self._label("fact_user"))]),
+            (self._label("reference_geometry"), [("geometry_reference", self._label("fact_reference"))]),
+            (self._label("fixed_geometry"), [("fixed_geometry", self._label("fact_fixed"))]),
+            (self._label("control"), [("candidate_generation / screening", self._label("unspecified"))]),
+            (
+                self._label("geometry_domain"),
+                [("length / radius / thickness / alpha / beta / imperfection", self._label("fact_system"))],
+            ),
+        ]
+        self._render(
+            header=(self._label("title"), self._label("empty")),
+            groups=groups,
+            note=False,
+            columns=5,
         )
 
     def update_task(self, task: dict[str, Any] | None) -> None:
@@ -125,9 +165,8 @@ class TaskConfigWidget(QTextBrowser):
         reference_geometry = facts.get("geometry_reference") or {}
         fixed_geometry = facts.get("fixed_geometry") or {}
 
-        html = (
-            f"<h3>{self._label('title')}</h3>"
-            + self._section(
+        groups = [
+            (
                 self._label("contract"),
                 [
                     (self._label("task_id"), task.get("task_id") or "-"),
@@ -137,8 +176,8 @@ class TaskConfigWidget(QTextBrowser):
                     (self._label("boundary"), describe_boundary_conditions(payload.get("boundary_conditions") or {})),
                     (self._label("material"), material.get("name") or "-"),
                 ],
-            )
-            + self._section(
+            ),
+            (
                 self._label("control"),
                 [
                     (self._label("total_candidates"), generation.get("total_candidates")),
@@ -150,28 +189,89 @@ class TaskConfigWidget(QTextBrowser):
                     (self._label("target_pressure"), self._pressure_text(targets.get("ultimate_pressure_min_MPa"))),
                     (self._label("objective"), targets.get("primary_objective") or "-"),
                 ],
-            )
-            + self._geometry_table(self._label("geometry_domain"), envelope)
-            + self._dict_table(self._label("facts"), facts)
-            + self._dict_table(self._label("reference_geometry"), reference_geometry)
-            + self._dict_table(self._label("fixed_geometry"), fixed_geometry)
-            + self._fact_boundary_note()
-        )
-        self.setHtml(html)
+            ),
+            (self._label("geometry_domain"), self._geometry_rows(envelope)),
+            (self._label("facts"), self._dict_rows(facts)),
+            (self._label("reference_geometry"), self._dict_rows(reference_geometry)),
+            (self._label("fixed_geometry"), self._dict_rows(fixed_geometry)),
+        ]
+        self._render(header=(self._label("title"), self._label("fact_short")), groups=groups, note=True)
 
-    def _section(self, title: str, rows: list[tuple[str, Any]]) -> str:
-        body = "".join(
-            f"<tr><th>{escape(str(label))}</th><td>{self._safe(value)}</td></tr>"
-            for label, value in rows
-        )
-        return (
-            f"<h4>{escape(title)}</h4>"
-            "<table border='1' cellspacing='0' cellpadding='6'>"
-            + body
-            + "</table>"
-        )
+    def _render(
+        self,
+        header: tuple[str, str],
+        groups: list[tuple[str, list[tuple[str, Any]]]],
+        note: bool,
+        columns: int | None = None,
+    ) -> None:
+        self._clear_layout(self.content_layout)
+        title, subtitle = header
+        self.content_layout.addWidget(self._header_widget(title, subtitle))
 
-    def _geometry_table(self, title: str, geometry: dict[str, Any]) -> str:
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(10)
+        columns = columns or (2 if len(groups) <= 2 else 3)
+        for index, (group_title, rows) in enumerate(groups):
+            card = self._card_widget(group_title, rows)
+            grid.addWidget(card, index // columns, index % columns)
+        self.content_layout.addLayout(grid)
+
+        if note:
+            self.content_layout.addWidget(self._fact_boundary_widget())
+        self.content_layout.addStretch(1)
+        self._plain_text = self._compose_plain_text(title, subtitle, groups, note)
+
+    def _header_widget(self, title: str, subtitle: str) -> QWidget:
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("configTitle")
+        subtitle_label = QLabel(subtitle)
+        subtitle_label.setObjectName("configSubtitle")
+        subtitle_label.setWordWrap(True)
+        layout.addWidget(title_label)
+        layout.addWidget(subtitle_label)
+        return widget
+
+    def _card_widget(self, title: str, rows: list[tuple[str, Any]]) -> QFrame:
+        card = QFrame()
+        card.setObjectName("configCard")
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(8)
+
+        title_label = QLabel(title)
+        title_label.setObjectName("configCardTitle")
+        layout.addWidget(title_label)
+
+        for label, value in rows:
+            key_label = QLabel(str(label))
+            key_label.setObjectName("configKey")
+            key_label.setWordWrap(True)
+            value_label = QLabel(self._safe(value))
+            value_label.setObjectName("configValue")
+            value_label.setWordWrap(True)
+            value_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+            layout.addWidget(key_label)
+            layout.addWidget(value_label)
+        return card
+
+    def _fact_boundary_widget(self) -> QFrame:
+        rows = [
+            ("user_input_facts", self._label("fact_user")),
+            ("geometry_reference", self._label("fact_reference")),
+            ("fixed_geometry", self._label("fact_fixed")),
+            ("system_constraints", self._label("fact_system")),
+        ]
+        return self._card_widget(self._label("fact_title"), rows)
+
+    def _geometry_rows(self, geometry: dict[str, Any]) -> list[tuple[str, Any]]:
         order = ["length_mm", "radius_mm", "thickness_mm", "alpha_deg", "beta_deg", "imperfection_ratio"]
         rows = []
         for key in order:
@@ -181,25 +281,22 @@ class TaskConfigWidget(QTextBrowser):
             else:
                 text = value
             rows.append((key, text))
-        return self._section(title, rows)
+        return rows
 
-    def _dict_table(self, title: str, payload: dict[str, Any]) -> str:
+    def _dict_rows(self, payload: dict[str, Any]) -> list[tuple[str, Any]]:
         if not payload:
-            return f"<h4>{escape(title)}</h4><p>{self._label('none')}</p>"
-        rows = []
-        for key, value in payload.items():
-            rows.append((key, self._format_value(value)))
-        return self._section(title, rows)
+            return [("-", self._label("none"))]
+        return [(str(key), self._format_value(value)) for key, value in payload.items()]
 
     def _format_value(self, value: Any) -> str:
         if isinstance(value, (dict, list)):
-            return json.dumps(value, ensure_ascii=False, indent=2)
+            return json.dumps(value, ensure_ascii=False)
         return str(value)
 
     def _safe(self, value: Any) -> str:
         if value is None or value == "":
             return "-"
-        return escape(str(value)).replace("\n", "<br>")
+        return str(value)
 
     def _optional_count(self, value: Any) -> str:
         return self._label("unspecified") if value is None else str(value)
@@ -207,10 +304,48 @@ class TaskConfigWidget(QTextBrowser):
     def _pressure_text(self, value: Any) -> str:
         return "-" if value is None or value == "" else f"{value} MPa"
 
-    def _fact_boundary_note(self) -> str:
-        return (
-            f"<h4>{self._label('fact_title')}</h4>"
-            "<ul>"
-            f"{self._label('fact_note')}"
-            "</ul>"
-        )
+    def _compose_plain_text(
+        self,
+        title: str,
+        subtitle: str,
+        groups: list[tuple[str, list[tuple[str, Any]]]],
+        note: bool,
+    ) -> str:
+        lines = [title, subtitle]
+        for group_title, rows in groups:
+            lines.append(group_title)
+            for label, value in rows:
+                lines.append(f"{label}: {self._safe(value)}")
+        if note:
+            lines.extend(
+                [
+                    self._label("fact_title"),
+                    "user_input_facts: " + self._label("fact_user"),
+                    "geometry_reference: " + self._label("fact_reference"),
+                    "fixed_geometry: " + self._label("fact_fixed"),
+                    "system_constraints: " + self._label("fact_system"),
+                ]
+            )
+        return "\n".join(lines)
+
+    @staticmethod
+    def _clear_layout(layout: QVBoxLayout) -> None:
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            child_layout = item.layout()
+            if widget is not None:
+                widget.deleteLater()
+            elif child_layout is not None:
+                TaskConfigWidget._clear_nested_layout(child_layout)
+
+    @staticmethod
+    def _clear_nested_layout(layout: Any) -> None:
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            child_layout = item.layout()
+            if widget is not None:
+                widget.deleteLater()
+            elif child_layout is not None:
+                TaskConfigWidget._clear_nested_layout(child_layout)

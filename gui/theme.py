@@ -546,6 +546,46 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
     QWidget#settingsCard QLabel {{
         background: transparent;
     }}
+    QLabel#configTitle {{
+        background: transparent;
+        color: {color["title"]};
+        font-size: 17px;
+        font-weight: 800;
+        padding: 0;
+    }}
+    QLabel#configSubtitle {{
+        background: transparent;
+        color: {color["muted"]};
+        font-size: 12px;
+        line-height: 1.35;
+        padding: 0;
+    }}
+    QFrame#configCard {{
+        background: {color["surface_alt"]};
+        border: 1px solid {color["border_soft"]};
+        border-radius: 10px;
+    }}
+    QLabel#configCardTitle {{
+        background: transparent;
+        color: {color["title"]};
+        font-size: 13px;
+        font-weight: 800;
+        padding: 0 0 2px 0;
+    }}
+    QLabel#configKey {{
+        background: transparent;
+        color: {color["muted"]};
+        font-size: 11px;
+        font-weight: 600;
+        padding: 0;
+    }}
+    QLabel#configValue {{
+        background: transparent;
+        color: {color["text"]};
+        font-size: 12px;
+        font-weight: 600;
+        padding: 0;
+    }}
     QSplitter::handle {{
         background: {color["border"]};
     }}

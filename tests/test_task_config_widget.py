@@ -98,7 +98,11 @@ def test_main_window_syncs_task_config_page(monkeypatch) -> None:
         assert "3" in text
 
         window._reset_session()
-        assert "输入自然语言设计需求" in window.task_config_widget.toPlainText()
+        reset_text = window.task_config_widget.toPlainText()
+        assert "输入自然语言设计需求" in reset_text
+        assert "user_input_facts" in reset_text
+        assert "geometry_reference" in reset_text
+        assert "candidate_generation / screening" in reset_text
     finally:
         window.close()
         app.processEvents()
