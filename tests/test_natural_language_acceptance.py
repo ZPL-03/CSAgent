@@ -6,11 +6,13 @@ from collections.abc import Iterable
 import pytest
 
 from agents.orchestrator import OrchestratorAgent
+from core.conversation_flow import ConversationFlowController
 from core.task_contract import (
     requested_candidate_pool_size,
     requested_screen_top_k,
     task_payload_from_request,
 )
+from workflow.event_store import WorkflowEventStore
 
 
 def _signature(candidate: dict) -> tuple:
@@ -33,6 +35,56 @@ def _signature(candidate: dict) -> tuple:
 def _assert_unique(candidates: Iterable[dict]) -> None:
     signatures = [_signature(candidate) for candidate in candidates]
     assert len(signatures) == len(set(signatures))
+
+
+def _patch_deterministic_downstream(monkeypatch, orchestrator: OrchestratorAgent, tmp_path) -> None:
+    def prepare_candidate_for_fem(task, candidate):
+        return {
+            **candidate,
+            "candidate_id": "C_TEST",
+            "display_name": "C_TEST",
+            "session_candidate_id": candidate["candidate_id"],
+        }
+
+    def evaluate_prepared_candidate(task, candidate):
+        predicted = float(candidate.get("surrogate_ultimate_pressure_MPa") or 45.0)
+        return {
+            "candidate_id": candidate["candidate_id"],
+            "display_name": candidate["display_name"],
+            "session_candidate_id": candidate["session_candidate_id"],
+            "status": "success",
+            "verdict": "通过",
+            "linear_buckling_pressure_MPa": float(candidate.get("asme_linear_buckling_pressure_MPa") or predicted),
+            "ultimate_pressure_MPa": round(max(predicted, 45.0), 3),
+            "failure_mode": "deterministic_acceptance_adapter",
+        }
+
+    def persist_knowledge_records(task, fem_designs, results):
+        return [
+            {
+                "status": "stored",
+                "case_id": "CASE_ACCEPTANCE",
+                "candidate_id": fem_designs[0]["candidate_id"],
+                "session_candidate_id": fem_designs[0]["session_candidate_id"],
+            }
+        ]
+
+    def generate_report(task, results, candidates=None):
+        markdown_path = tmp_path / "acceptance_report.md"
+        pdf_path = tmp_path / "acceptance_report.pdf"
+        markdown_path.write_text("# CSAgent 耐压壳设计报告\n\n验收报告。", encoding="utf-8")
+        pdf_path.write_bytes(b"%PDF-1.4\n% acceptance\n")
+        return {
+            "markdown_path": str(markdown_path),
+            "pdf_path": str(pdf_path),
+            "content": markdown_path.read_text(encoding="utf-8"),
+            "llm_explanation_used": False,
+        }
+
+    monkeypatch.setattr(orchestrator, "prepare_candidate_for_fem", prepare_candidate_for_fem)
+    monkeypatch.setattr(orchestrator, "evaluate_prepared_candidate", evaluate_prepared_candidate)
+    monkeypatch.setattr(orchestrator, "persist_knowledge_records", persist_knowledge_records)
+    monkeypatch.setattr(orchestrator, "generate_report", generate_report)
 
 
 @pytest.mark.parametrize(
@@ -122,3 +174,75 @@ def test_multi_natural_language_inputs_run_candidate_and_screening_pipeline(monk
     assert all(candidate["surrogate_ultimate_pressure_MPa"] is not None for candidate in screened)
     assert all(candidate["selection_reason"] for candidate in screened)
     _assert_unique(screened)
+
+
+@pytest.mark.parametrize(
+    "instruction",
+    [
+        "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 4 个候选，初筛保留 2 个候选",
+        "Design a composite external-pressure cylindrical pressure hull, external pressure 26 MPa, ultimate pressure at least 38 MPa, generate 4 candidates, keep 2 after screening",
+    ],
+)
+def test_natural_language_inputs_complete_runtime_workflow_with_real_candidate_screening(monkeypatch, tmp_path, instruction):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    orchestrator = OrchestratorAgent()
+    _patch_deterministic_downstream(monkeypatch, orchestrator, tmp_path)
+    events: list[tuple[str, str, dict]] = []
+    store = WorkflowEventStore(tmp_path / "workflow.sqlite3")
+    controller = ConversationFlowController(
+        orchestrator,
+        event_callback=lambda event_type, message, payload: events.append((event_type, message, payload)),
+        event_store=store,
+    )
+
+    state = controller.start(instruction)
+
+    assert state.workflow_run_id
+    assert state.stage == "awaiting_screen_confirmation"
+    assert state.pending_confirmation == "screen_candidates"
+    assert len(state.candidates) == 4
+    assert all(candidate["rule_check"]["is_valid"] for candidate in state.candidates)
+    _assert_unique(state.candidates)
+
+    state = controller.continue_after_confirmation(state, True)
+
+    assert state.stage == "awaiting_fem_confirmation"
+    assert state.pending_confirmation == "fem_evaluation"
+    assert len(state.evaluated_candidates) == 2
+    assert all(candidate["asme_linear_buckling_pressure_MPa"] for candidate in state.evaluated_candidates)
+    assert all(candidate["surrogate_PBIPF_MPa"] for candidate in state.evaluated_candidates)
+
+    state = controller.continue_after_confirmation(state, True)
+
+    assert state.stage == "awaiting_report_confirmation"
+    assert state.pending_confirmation == "export_report"
+    assert state.results[0]["candidate_id"] == "C_TEST"
+    assert state.results[0]["session_candidate_id"].startswith("TMP_")
+    assert state.knowledge_updates[0]["case_id"] == "CASE_ACCEPTANCE"
+
+    state = controller.continue_after_confirmation(state, True)
+
+    assert state.stage == "completed"
+    assert state.pending_confirmation is None
+    assert state.report and state.report["markdown_path"].endswith("acceptance_report.md")
+
+    snapshot = store.load_snapshot(state.workflow_run_id)
+    assert snapshot["stage"] == "completed"
+    assert snapshot["instruction"] == instruction
+    assert len(snapshot["candidates"]) == 4
+    assert len(snapshot["screened_candidates"]) == 2
+    assert snapshot["fem_designs"][0]["session_candidate_id"].startswith("TMP_")
+    assert snapshot["knowledge_updates"][0]["status"] == "stored"
+    assert store.list_runs(limit=1)[0]["status"] == "completed"
+    runtime_event_types = {
+        payload["runtime_event_type"]
+        for event_type, _message, payload in events
+        if event_type == "workflow_runtime_event"
+    }
+    assert {
+        "node_started",
+        "tool_started",
+        "tool_completed",
+        "simulation_job_queued",
+        "simulation_job_completed",
+    }.issubset(runtime_event_types)
