@@ -115,5 +115,5 @@ def test_static_candidate_preview_centers_shell_pixels() -> None:
     top = min(y for _x, y in shell_pixels)
     bottom = max(y for _x, y in shell_pixels)
     center_y = (top + bottom) / 2.0
-    assert abs(center_y - image.height() / 2.0) < image.height() * 0.12
+    assert abs(center_y - image.height() / 2.0) < image.height() * 0.09
     assert bottom - top > image.height() * 0.26

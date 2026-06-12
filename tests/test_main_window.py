@@ -474,6 +474,8 @@ def test_flow_dag_knowledge_node_has_even_spacing_and_stays_inside_panel() -> No
         assert knowledge.top() - node_rects[1].bottom() >= 12
         assert outer.bottom() - knowledge.bottom() >= 12
         assert knowledge.width() >= 220
+        assert knowledge.width() <= 280
+        assert abs(float(geometry["branch_x"]) - knowledge.center().x()) <= 1.0
         for previous, current in zip(node_rects, node_rects[1:]):
             assert previous.right() < current.left()
     finally:
@@ -503,10 +505,30 @@ def test_chat_empty_state_uses_adaptive_engineering_message_cards() -> None:
         bubbles = [item for item in widget.findChildren(QFrame) if item.objectName() == "chatBubble"]
         assert len(bubbles) >= 3
         widths = [bubble.width() for bubble in bubbles]
-        assert max(widths) <= int(widget.width() * 0.82)
-        assert min(widths) >= 320
+        assert max(widths) <= int(widget.width() * 0.72)
+        assert min(widths) >= 220
         assert len(set(widths)) > 1
         assert any(label.text() == "U" for label in widget.findChildren(QLabel))
+    finally:
+        widget.close()
+        app.processEvents()
+
+
+def test_chat_short_messages_do_not_expand_to_panel_width() -> None:
+    app = _app()
+    widget = ChatWidget()
+    try:
+        widget.resize(1000, 420)
+        widget.add_message("USER", "外压 30 MPa，生成 12 个候选。")
+        widget.add_message("ORCHESTRATOR", "已解析任务。")
+        widget.show()
+        app.processEvents()
+
+        bubbles = [item for item in widget.findChildren(QFrame) if item.objectName() == "chatBubble"]
+        widths = sorted(bubble.width() for bubble in bubbles)
+        assert len(widths) == 2
+        assert widths[0] <= 240
+        assert widths[1] <= 360
     finally:
         widget.close()
         app.processEvents()

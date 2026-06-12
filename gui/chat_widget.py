@@ -159,11 +159,11 @@ class ChatWidget(QWidget):
         viewport_width = max(self.scroll_area.viewport().width(), self.width())
         if viewport_width <= 0:
             viewport_width = self.width()
-        available = max(320, viewport_width - 104)
-        conversational_cap = max(360, int(viewport_width * 0.70))
+        available = max(260, viewport_width - 136)
+        conversational_cap = max(320, int(viewport_width * 0.68))
         available = min(available, conversational_cap)
         target_max = min(max_width, available)
-        target_min = min(max(min_width, 260), target_max)
+        target_min = min(max(min_width, 180), target_max)
         return target_max, target_min
 
     def _content_width(self, text: str, target_max: int, target_min: int) -> int:
@@ -171,14 +171,16 @@ class ChatWidget(QWidget):
         value = str(text)
         lines = value.splitlines() or [value]
         longest_line = max((metrics.horizontalAdvance(line) for line in lines), default=0)
-        tokens = [item for item in value.replace("，", " ").replace("。", " ").replace(",", " ").split() if item]
+        separators = "，。；;、,，：:（）()[]【】"
+        token_source = value
+        for separator in separators:
+            token_source = token_source.replace(separator, " ")
+        tokens = [item for item in token_source.split() if item]
         longest_token = max((metrics.horizontalAdvance(item) for item in tokens), default=0)
-        char_count = len("".join(value.split()))
-        estimated = max(longest_token + 34, int(230 + char_count * 5.6))
-        if len(lines) > 1:
-            estimated = max(estimated, max(metrics.horizontalAdvance(line) for line in lines) + 28)
-        preferred = min(longest_line + 34, estimated)
-        return max(min(target_min, target_max), min(target_max, preferred))
+        natural = max(longest_line, longest_token) + 30
+        if natural >= target_max:
+            return target_max
+        return max(target_min, min(target_max, natural))
 
     def _wrapped_text_height(self, text: str, width: int) -> int:
         metrics = self.fontMetrics()
@@ -236,7 +238,7 @@ class ChatWidget(QWidget):
 
         if role == "user":
             row_layout.addStretch(1)
-            bubble = self._bubble(message, palette["user_bg"], palette["user_bg"], palette["user_text"], 920, 320, fit_content=True)
+            bubble = self._bubble(message, palette["user_bg"], palette["user_bg"], palette["user_text"], 920, 220, fit_content=True)
             row_layout.addWidget(bubble)
             row_layout.addWidget(self._avatar_label("U", palette["user_bg"], palette["user_text"]), 0, Qt.AlignmentFlag.AlignTop)
             return row
@@ -254,7 +256,7 @@ class ChatWidget(QWidget):
         column_layout.setContentsMargins(0, 0, 0, 0)
         column_layout.setSpacing(5)
         column_layout.addWidget(self._label(sender, fg, 12, True))
-        column_layout.addWidget(self._bubble(message, bg, border, fg, 980, 360, fit_content=True))
+        column_layout.addWidget(self._bubble(message, bg, border, fg, 980, 220, fit_content=True))
         row_layout.addWidget(column, 1)
         return row
 
@@ -283,7 +285,7 @@ class ChatWidget(QWidget):
                 palette["user_bg"],
                 palette["user_text"],
                 760,
-                300,
+                220,
                 fit_content=True,
             )
         )
@@ -309,7 +311,7 @@ class ChatWidget(QWidget):
                 palette["agent_border"],
                 palette["agent_text"],
                 820,
-                300,
+                220,
                 fit_content=True,
             )
         )
@@ -320,7 +322,7 @@ class ChatWidget(QWidget):
             palette["tool_border"],
             palette["tool_text"],
             760,
-            300,
+            220,
             fit_content=True,
         )
         agent_column_layout.addWidget(tool)

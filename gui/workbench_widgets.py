@@ -327,9 +327,9 @@ class FlowDagWidget(QWidget):
         y = 58.0
         rects = [QRectF(left + index * (node_w + gap), y, node_w, node_h) for index in range(count)]
         branch_x = (rects[1].right() + rects[2].left()) / 2.0 if len(rects) > 2 else width / 2.0
-        knowledge_h = 56.0
-        knowledge_top = min(y + 74.0, max(y + 66.0, height - 22.0 - knowledge_h))
-        knowledge_w = min(max(248.0, node_w * 1.78), 324.0)
+        knowledge_h = 52.0
+        knowledge_top = min(y + 70.0, max(y + 64.0, height - 24.0 - knowledge_h))
+        knowledge_w = min(max(236.0, node_w * 1.54), 280.0)
         knowledge_x = min(max(18.0, branch_x - knowledge_w / 2.0), max(18.0, width - knowledge_w - 18.0))
         knowledge_rect = QRectF(knowledge_x, knowledge_top, knowledge_w, knowledge_h)
         return {
@@ -518,7 +518,7 @@ class FlowDagWidget(QWidget):
         body_font.setPointSize(7 if rect.width() < 136 else 8)
         body_metrics = QFontMetrics(body_font)
         status_text = self._status_text(state) if accent is None else node.subtitle
-        side_margin = 16.0 if accent == "rag" else 10.0
+        side_margin = 14.0 if accent == "rag" else 10.0
         dot_diameter = 8.0
         dot_gap = 7.0
         max_text_width = max(24.0, rect.width() - side_margin * 2.0 - dot_diameter - dot_gap)
@@ -541,6 +541,7 @@ class FlowDagWidget(QWidget):
         )
         content_width = dot_diameter + dot_gap + text_width
         content_x = rect.left() + max(side_margin, (rect.width() - content_width) / 2.0)
+        content_x = min(content_x, rect.right() - side_margin - content_width)
         line_height = max(12.0, float(title_metrics.height()) - 1.0)
         title_block_height = line_height * len(title_lines)
         block_height = title_block_height + 17.0
