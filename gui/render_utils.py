@@ -191,18 +191,18 @@ def render_candidate_png_bytes(
                 )
             axis.plot([-length / 2.0, length / 2.0], [radius, radius], [0, 0], color=edge, linewidth=1.0, alpha=0.82)
             axis.plot([-length / 2.0, length / 2.0], [-radius, -radius], [0, 0], color=edge, linewidth=1.0, alpha=0.82)
-            axis.set_position([0.0, 0.0, 1.0, 1.0])
-            figure.subplots_adjust(left=0, right=1, bottom=0, top=1)
+            axis.set_position([0.025, 0.035, 0.95, 0.93])
+            figure.subplots_adjust(left=0.02, right=0.98, bottom=0.025, top=0.975)
             try:
                 axis.set_proj_type("ortho")
             except Exception:
                 pass
             try:
-                axis.set_box_aspect((max(length, 1.0), max(radius * 2.0, 1.0), max(radius * 2.0, 1.0)), zoom=1.2)
+                axis.set_box_aspect((max(length, 1.0), max(radius * 2.0, 1.0), max(radius * 2.0, 1.0)), zoom=1.16)
             except TypeError:
                 axis.set_box_aspect((max(length, 1.0), max(radius * 2.0, 1.0), max(radius * 2.0, 1.0)))
-            radial_limit = radius * 1.08
-            axial_limit = length * 0.58
+            radial_limit = radius * 1.12
+            axial_limit = length * 0.59
             axis.set_xlim(-axial_limit, axial_limit)
             axis.set_ylim(-radial_limit, radial_limit)
             axis.set_zlim(-radial_limit, radial_limit)

@@ -299,7 +299,7 @@ class InteractivePlotWidget(QWidget):
         direction = (1.55, -1.8, 1.05)
         norm = math.sqrt(sum(value * value for value in direction))
         unit = tuple(value / norm for value in direction)
-        distance = diagonal * 1.72
+        distance = diagonal * 1.84
         camera_position = (
             center[0] + unit[0] * distance,
             center[1] + unit[1] * distance,
@@ -311,7 +311,7 @@ class InteractivePlotWidget(QWidget):
         camera.SetViewUp(0.0, 0.0, 1.0)
         try:
             camera.ParallelProjectionOn()
-            camera.SetParallelScale(max(diagonal * 0.35, dz * 0.76, dy * 0.62))
+            camera.SetParallelScale(max(diagonal * 0.41, dz * 0.88, dy * 0.74))
         except Exception:
             pass
         try:
