@@ -311,25 +311,25 @@ class FlowDagWidget(QWidget):
         left = 26.0
         right = max(left + 1.0, width - 26.0)
         available = max(1.0, right - left)
-        gap = max(10.0, min(22.0, available * 0.018))
+        gap = max(6.0, min(16.0, available * 0.012))
         node_w = (available - gap * (count - 1)) / count
-        if node_w < 108.0:
-            gap = max(6.0, min(14.0, (available - 92.0 * count) / max(1, count - 1)))
+        if node_w < 118.0:
+            gap = max(4.0, min(10.0, (available - 106.0 * count) / max(1, count - 1)))
             node_w = (available - gap * (count - 1)) / count
-        node_w = max(84.0, min(150.0, node_w))
+        node_w = max(94.0, min(172.0, node_w))
         total_w = node_w * count + gap * (count - 1)
         if total_w > available + 0.5:
-            gap = max(5.0, (available - 84.0 * count) / max(1, count - 1))
-            node_w = max(72.0, (available - gap * (count - 1)) / count)
+            gap = max(4.0, (available - 94.0 * count) / max(1, count - 1))
+            node_w = max(84.0, (available - gap * (count - 1)) / count)
             total_w = node_w * count + gap * (count - 1)
         left = max(18.0, (width - total_w) / 2.0)
-        node_h = 44.0
-        y = 62.0
+        node_h = 52.0
+        y = 58.0
         rects = [QRectF(left + index * (node_w + gap), y, node_w, node_h) for index in range(count)]
         branch_x = (rects[1].right() + rects[2].left()) / 2.0 if len(rects) > 2 else width / 2.0
-        knowledge_h = 56.0
-        knowledge_top = min(y + 72.0, max(y + 64.0, height - 22.0 - knowledge_h))
-        knowledge_w = min(max(220.0, node_w * 1.78), 286.0)
+        knowledge_h = 60.0
+        knowledge_top = min(y + 78.0, max(y + 68.0, height - 20.0 - knowledge_h))
+        knowledge_w = min(max(240.0, node_w * 1.86), 318.0)
         knowledge_x = min(max(18.0, branch_x - knowledge_w / 2.0), max(18.0, width - knowledge_w - 18.0))
         knowledge_rect = QRectF(knowledge_x, knowledge_top, knowledge_w, knowledge_h)
         return {
@@ -512,37 +512,51 @@ class FlowDagWidget(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
 
         title_font = QFont(self.font())
-        title_font.setPointSize(8 if rect.width() < 118 else 9)
+        title_font.setPointSize(8 if rect.width() < 150 else 9)
         title_font.setBold(True)
         body_font = QFont(self.font())
-        body_font.setPointSize(7 if rect.width() < 112 else 8)
-        title_metrics = QFontMetrics(title_font)
+        body_font.setPointSize(7 if rect.width() < 136 else 8)
         body_metrics = QFontMetrics(body_font)
         status_text = self._status_text(state) if accent is None else node.subtitle
-        side_margin = 18.0 if accent == "rag" else 12.0
+        side_margin = 16.0 if accent == "rag" else 8.0
         dot_diameter = 8.0
-        dot_gap = 10.0
+        dot_gap = 7.0
         max_text_width = max(24.0, rect.width() - side_margin * 2.0 - dot_diameter - dot_gap)
-        title_text = title_metrics.elidedText(node.name, Qt.TextElideMode.ElideRight, int(max_text_width))
+
+        title_lines = [part for part in node.name.split("_") if part] if "_" in node.name else [node.name]
+        while title_font.pointSize() > 6:
+            title_metrics = QFontMetrics(title_font)
+            if max(title_metrics.horizontalAdvance(line) for line in title_lines) <= max_text_width:
+                break
+            title_font.setPointSize(title_font.pointSize() - 1)
+        title_metrics = QFontMetrics(title_font)
+        title_lines = [
+            title_metrics.elidedText(line, Qt.TextElideMode.ElideRight, int(max_text_width))
+            for line in title_lines
+        ]
         subtitle_text = body_metrics.elidedText(status_text, Qt.TextElideMode.ElideRight, int(max_text_width))
         text_width = max(
-            float(title_metrics.horizontalAdvance(title_text)),
+            max(float(title_metrics.horizontalAdvance(line)) for line in title_lines),
             float(body_metrics.horizontalAdvance(subtitle_text)),
         )
         content_width = dot_diameter + dot_gap + text_width
         content_x = rect.left() + max(side_margin, (rect.width() - content_width) / 2.0)
-        block_height = 34.0
+        line_height = max(12.0, float(title_metrics.height()) - 1.0)
+        title_block_height = line_height * len(title_lines)
+        block_height = title_block_height + 17.0
         block_y = rect.top() + (rect.height() - block_height) / 2.0
-        dot_center = QPointF(content_x + dot_diameter / 2.0, block_y + 8.5)
+        dot_center = QPointF(content_x + dot_diameter / 2.0, block_y + title_block_height / 2.0)
         painter.drawEllipse(dot_center, dot_diameter / 2.0, dot_diameter / 2.0)
 
         text_x = content_x + dot_diameter + dot_gap
-        title_rect = QRectF(text_x, block_y, text_width + 2.0, 18.0)
-        status_rect = QRectF(text_x, block_y + 19.0, text_width + 2.0, 16.0)
+        title_rect = QRectF(text_x, block_y, text_width + 2.0, title_block_height)
+        status_rect = QRectF(text_x, block_y + title_block_height + 1.0, text_width + 2.0, 16.0)
 
         painter.setFont(title_font)
         painter.setPen(colors["text"])
-        painter.drawText(title_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, title_text)
+        for line_index, line in enumerate(title_lines):
+            line_rect = QRectF(title_rect.left(), title_rect.top() + line_index * line_height, title_rect.width(), line_height)
+            painter.drawText(line_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, line)
 
         painter.setFont(body_font)
         painter.setPen(state_color if state != "waiting" or accent == "rag" else colors["muted"])

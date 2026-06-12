@@ -1,5 +1,9 @@
 # CSAgent 多智能体智能设计平台
 
+<p align="center">
+  <img src="assets/csagent_logo.png" alt="CSAgent Logo" width="180">
+</p>
+
 CSAgent 多智能体智能设计平台面向复合材料外压圆柱耐压壳智能设计。主流程为：
 
 自然语言需求 -> 用户事实抽取 -> LLM 候选提案 -> 案例迁移 -> DOE 采样 -> PBIPF 公式初筛 -> ABAQUS 校核 -> 案例回流 -> 设计报告输出。

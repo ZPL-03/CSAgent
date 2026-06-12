@@ -8,6 +8,7 @@ ROOT_DIR = Path(__file__).resolve().parent.parent
 CONFIG_DIR = ROOT_DIR / "config"
 SCHEMA_DIR = ROOT_DIR / "schemas"
 DATA_DIR = ROOT_DIR / "data"
+ASSETS_DIR = ROOT_DIR / "assets"
 IO_DIR = DATA_DIR / "io"
 TASKS_DIR = DATA_DIR / "tasks"
 RESULTS_DIR = DATA_DIR / "results"
@@ -32,6 +33,7 @@ def ensure_project_dirs() -> None:
     """确保项目运行所需目录存在。"""
     for path in [
         DATA_DIR,
+        ASSETS_DIR,
         IO_DIR,
         TASKS_DIR,
         RESULTS_DIR,

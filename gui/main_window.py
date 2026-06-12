@@ -41,7 +41,7 @@ from PyQt6.QtWidgets import (
 
 from agents.orchestrator import OrchestratorAgent
 from core.conversation_flow import ConversationFlowController, ConversationState
-from core.paths import RESULTS_DIR, ensure_project_dirs
+from core.paths import ASSETS_DIR, RESULTS_DIR, ensure_project_dirs
 from core.task_contract import (
     describe_boundary_conditions,
     describe_load_conditions,
@@ -235,6 +235,10 @@ class MainWindow(QMainWindow):
         self.locale = LocaleManager()
         self.font_family = install_application_font(QApplication.instance())
         self.setWindowTitle(self.locale.text("app.title"))
+        self._app_icon_path = ASSETS_DIR / "csagent_icon_256.png"
+        self._brand_badge_path = ASSETS_DIR / "csagent_badge.png"
+        if self._app_icon_path.exists():
+            self.setWindowIcon(QIcon(str(self._app_icon_path)))
         self.resize(1680, 980)
         self.ui_state_settings = QSettings("CSAgent", "Workbench")
         self.session = PipelineSession()
@@ -249,8 +253,10 @@ class MainWindow(QMainWindow):
         self.app_subtitle_label.setObjectName("appSubtitle")
         self.logo_label = QLabel("CS")
         self.logo_label.setObjectName("logoBadge")
+        self.logo_label.setProperty("mode", "text")
         self.logo_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.logo_label.setFixedSize(38, 38)
+        self._sync_brand_logo()
         self.model_status_label = StatusPill(self.locale.text("model.current"), "success")
         self.language_label = QLabel(self.locale.text("section.language"))
         self.language_label.setObjectName("appSubtitle")
@@ -394,6 +400,27 @@ class MainWindow(QMainWindow):
         self._refresh_run_selector()
         self.knowledge_widget.refresh(load_evidence=False)
         self.live_result_view.show_reference_hull()
+
+    def _sync_brand_logo(self) -> None:
+        if not self._brand_badge_path.exists():
+            self.logo_label.setProperty("mode", "text")
+            self.logo_label.setText("CS")
+            self.logo_label.setPixmap(QPixmap())
+            return
+        pixmap = QPixmap(str(self._brand_badge_path))
+        if pixmap.isNull():
+            self.logo_label.setProperty("mode", "text")
+            self.logo_label.setText("CS")
+            return
+        self.logo_label.setProperty("mode", "image")
+        self.logo_label.setText("")
+        self.logo_label.setPixmap(
+            pixmap.scaled(
+                self.logo_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
 
     def _build_layout(self) -> None:
         input_action_layout = QHBoxLayout()

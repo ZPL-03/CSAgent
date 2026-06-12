@@ -217,6 +217,7 @@ class TaskParser:
             r"(?:初筛保留|筛选后保留|初步保留)\s*([1-9][0-9]?)\s*(?:个)?(?:候选|样本|方案)?",
             r"(?:初筛数量|筛选数量|TopK|Top-K)\D{0,4}([1-9][0-9]?)",
             r"(?:初筛|筛选)\D{0,8}(?:Top[- ]?|TOP[- ]?|top[- ]?)\s*([1-9][0-9]?)",
+            r"(?:keep|retain|reserve)\s*([1-9][0-9]?)\s*(?:candidates|designs|samples)?\s*(?:after|following)\s*(?:screening|prescreening|pre[- ]?screening)",
             r"(?:screen|select|top[- ]?k|top)\D{0,8}([1-9][0-9]?)",
         ]
         for pattern in patterns:

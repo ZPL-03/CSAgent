@@ -344,7 +344,8 @@ def test_main_window_shell_layout_keeps_reference_workbench_structure(monkeypatc
         window.show()
         app.processEvents()
 
-        assert window.logo_label.text() == "CS"
+        assert window.logo_label.property("mode") == "image"
+        assert not window.logo_label.pixmap().isNull()
         assert window.app_title_label.text() == "CSAgent"
         assert window.model_status_label.isVisible() is True
         assert window.reset_view_button.isVisible() is True

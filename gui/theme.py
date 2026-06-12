@@ -258,11 +258,19 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         border-bottom-color: {color["accent"]};
     }}
     QLabel#logoBadge {{
+        background: transparent;
+        border: 0;
+    }}
+    QLabel#logoBadge[mode="text"] {{
         background: {color["primary"]};
         color: #ffffff;
         border-radius: 8px;
         font-size: 13px;
         font-weight: 800;
+    }}
+    QLabel#logoBadge[mode="image"] {{
+        background: transparent;
+        border-radius: 8px;
     }}
     QLabel#modelChip {{
         background: {color["button_bg"]};
