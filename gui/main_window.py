@@ -591,7 +591,7 @@ class MainWindow(QMainWindow):
         project_page.addWidget(self.task_config_widget)
         project_page.addWidget(self.tabs)
         project_page.setChildrenCollapsible(False)
-        project_page.setSizes([250, 650])
+        project_page.setSizes([330, 570])
         self.stack.addWidget(project_page)
         self.stack.addWidget(self.knowledge_widget)
         self.monitor_page = self._build_monitor_page()
@@ -1074,7 +1074,7 @@ class MainWindow(QMainWindow):
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
         form.setHorizontalSpacing(10)
-        form.setVerticalSpacing(6)
+        form.setVerticalSpacing(9)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         for label, widget in rows:
             key_label = QLabel(label)

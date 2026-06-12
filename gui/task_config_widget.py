@@ -9,6 +9,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QFrame,
     QGridLayout,
+    QHBoxLayout,
     QLabel,
     QScrollArea,
     QSizePolicy,
@@ -112,7 +113,7 @@ class TaskConfigWidget(QWidget):
         self.content = QWidget()
         self.content_layout = QVBoxLayout(self.content)
         self.content_layout.setContentsMargins(14, 14, 14, 14)
-        self.content_layout.setSpacing(9)
+        self.content_layout.setSpacing(10)
         self.scroll_area.setWidget(self.content)
 
         layout = QVBoxLayout(self)
@@ -162,7 +163,6 @@ class TaskConfigWidget(QWidget):
             header=(self._label("title"), self._label("empty")),
             groups=groups,
             note=False,
-            columns=3,
         )
 
     def update_task(self, task: dict[str, Any] | None) -> None:
@@ -218,33 +218,30 @@ class TaskConfigWidget(QWidget):
         header: tuple[str, str],
         groups: list[tuple[str, list[tuple[str, Any]]]],
         note: bool,
-        columns: int | None = None,
     ) -> None:
         self._clear_layout(self.content_layout)
         title, subtitle = header
         self.content_layout.addWidget(self._header_widget(title, subtitle))
 
-        grid = QGridLayout()
-        grid.setContentsMargins(0, 0, 0, 0)
-        grid.setHorizontalSpacing(10)
-        grid.setVerticalSpacing(10)
-        columns = columns or (3 if len(groups) >= 5 else 2)
-        for index, (group_title, rows) in enumerate(groups):
-            card = self._card_widget(group_title, rows)
-            grid.addWidget(card, index // columns, index % columns)
-        for column in range(columns):
-            grid.setColumnStretch(column, 1)
-        self.content_layout.addLayout(grid)
-
+        left_groups, right_groups = self._split_groups(groups)
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(10)
+        left_column = self._column_widget(left_groups)
+        right_column = self._column_widget(right_groups)
         if note:
-            self.content_layout.addWidget(self._fact_boundary_widget())
+            right_column.layout().addWidget(self._fact_boundary_widget())
+        body.addWidget(left_column, 3)
+        body.addWidget(right_column, 2)
+        self.content_layout.addLayout(body)
         self._plain_text = self._compose_plain_text(title, subtitle, groups, note)
 
     def _header_widget(self, title: str, subtitle: str) -> QWidget:
-        widget = QWidget()
+        widget = QFrame()
+        widget.setObjectName("configHero")
         widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(4)
 
         title_label = QLabel(title)
@@ -256,13 +253,44 @@ class TaskConfigWidget(QWidget):
         layout.addWidget(subtitle_label)
         return widget
 
+    def _split_groups(
+        self,
+        groups: list[tuple[str, list[tuple[str, Any]]]],
+    ) -> tuple[
+        list[tuple[str, list[tuple[str, Any]]]],
+        list[tuple[str, list[tuple[str, Any]]]],
+    ]:
+        preferred_left = {self._label("contract"), self._label("control"), self._label("facts")}
+        left: list[tuple[str, list[tuple[str, Any]]]] = []
+        right: list[tuple[str, list[tuple[str, Any]]]] = []
+        for group in groups:
+            if group[0] in preferred_left:
+                left.append(group)
+            else:
+                right.append(group)
+        if not left or not right:
+            midpoint = max(1, (len(groups) + 1) // 2)
+            return groups[:midpoint], groups[midpoint:]
+        return left, right
+
+    def _column_widget(self, groups: list[tuple[str, list[tuple[str, Any]]]]) -> QWidget:
+        widget = QWidget()
+        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        layout = QVBoxLayout(widget)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(10)
+        for group_title, rows in groups:
+            layout.addWidget(self._card_widget(group_title, rows))
+        layout.addStretch(1)
+        return widget
+
     def _card_widget(self, title: str, rows: list[tuple[str, Any]]) -> QFrame:
         card = QFrame()
         card.setObjectName("configCard")
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(11, 8, 11, 9)
-        layout.setSpacing(6)
+        layout.setContentsMargins(12, 9, 12, 10)
+        layout.setSpacing(7)
 
         title_label = QLabel(title)
         title_label.setObjectName("configCardTitle")
@@ -270,8 +298,8 @@ class TaskConfigWidget(QWidget):
 
         row_grid = QGridLayout()
         row_grid.setContentsMargins(0, 0, 0, 0)
-        row_grid.setHorizontalSpacing(8)
-        row_grid.setVerticalSpacing(4)
+        row_grid.setHorizontalSpacing(10)
+        row_grid.setVerticalSpacing(5)
         for row, (label, value) in enumerate(rows):
             key_label = QLabel(str(label))
             key_label.setObjectName("configKey")
@@ -284,7 +312,7 @@ class TaskConfigWidget(QWidget):
             row_grid.addWidget(value_label, row, 1, Qt.AlignmentFlag.AlignTop)
         row_grid.setColumnStretch(0, 0)
         row_grid.setColumnStretch(1, 1)
-        row_grid.setColumnMinimumWidth(0, 82)
+        row_grid.setColumnMinimumWidth(0, 96)
         layout.addLayout(row_grid)
         return card
 

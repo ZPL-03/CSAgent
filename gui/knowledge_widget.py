@@ -495,8 +495,8 @@ class KnowledgeWidget(QWidget):
         self.document_stack.setMinimumHeight(160)
 
         self.pipeline_widget = PipelineStatusWidget()
-        self.pipeline_widget.setMinimumHeight(196)
-        self.pipeline_widget.setMaximumHeight(228)
+        self.pipeline_widget.setMinimumHeight(238)
+        self.pipeline_widget.setMaximumHeight(276)
         self.graph_view = KnowledgeGraphView()
         self.graph_view.setMinimumHeight(214)
         self.graph_search_input = QLineEdit()

@@ -421,11 +421,27 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
     QLineEdit, QComboBox {{
         min-height: 38px;
         padding: 8px 12px;
+        padding-right: 30px;
         color: {color["field_text"]};
     }}
+    QComboBox::drop-down {{
+        subcontrol-origin: padding;
+        subcontrol-position: top right;
+        width: 28px;
+        border-left: 1px solid {color["border_soft"]};
+        border-top-right-radius: 8px;
+        border-bottom-right-radius: 8px;
+        background: transparent;
+    }}
+    QComboBox::down-arrow {{
+        image: none;
+        width: 0;
+        height: 0;
+    }}
     QLineEdit#settingsInput, QComboBox#settingsInput {{
-        min-height: 30px;
-        padding: 5px 10px;
+        min-height: 34px;
+        padding: 2px 10px;
+        padding-right: 28px;
     }}
     QTableWidget {{
         gridline-color: {color["border_soft"]};
@@ -585,6 +601,11 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         font-size: 12px;
         line-height: 1.35;
         padding: 0;
+    }}
+    QFrame#configHero {{
+        background: {color["surface_alt"]};
+        border: 1px solid {color["border_soft"]};
+        border-radius: 12px;
     }}
     QFrame#configCard {{
         background: {color["surface_alt"]};

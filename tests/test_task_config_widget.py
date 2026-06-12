@@ -106,3 +106,24 @@ def test_main_window_syncs_task_config_page(monkeypatch) -> None:
     finally:
         window.close()
         app.processEvents()
+
+
+def test_project_page_gives_task_contract_enough_initial_height(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window.resize(1680, 980)
+        window.show()
+        app.processEvents()
+
+        window._switch_workspace_page(1)
+        app.processEvents()
+
+        project_splitter = window.stack.widget(1)
+        top_height, bottom_height = project_splitter.sizes()
+        assert top_height >= 300
+        assert bottom_height >= 480
+    finally:
+        window.close()
+        app.processEvents()

@@ -148,6 +148,7 @@ def test_knowledge_widget_renders_runtime_pipeline_and_evidence(monkeypatch, tmp
         assert widget.graph_zoom_in_button.toolTip()
         assert widget.graph_zoom_out_button.toolTip()
         assert widget.graph_label_button.isChecked() is True
+        assert widget.pipeline_widget.minimumHeight() >= 230
     finally:
         widget.close()
         app.processEvents()
