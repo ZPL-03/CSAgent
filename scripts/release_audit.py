@@ -74,6 +74,17 @@ REQUIRED_UI_ASSETS = [
     "docs/assets/ui_workbench_dark.png",
 ]
 
+UI_ASSET_SOURCES = [
+    "assets/csagent_badge.png",
+    "assets/csagent_logo.png",
+    "gui/main_window.py",
+    "gui/theme.py",
+    "gui/workbench_widgets.py",
+    "gui/chat_widget.py",
+    "gui/render_utils.py",
+    "gui/interactive_view.py",
+]
+
 
 @dataclass
 class AuditItem:
@@ -207,7 +218,19 @@ class ReleaseAudit:
 
     def check_ui_assets(self) -> None:
         missing = [asset for asset in REQUIRED_UI_ASSETS if not (ROOT / asset).is_file()]
-        self.add("UI 展示资产", not missing, "主工作台深色展示图存在" if not missing else ", ".join(missing))
+        if missing:
+            self.add("UI 展示资产", False, ", ".join(missing))
+            return
+        asset_paths = [ROOT / asset for asset in REQUIRED_UI_ASSETS]
+        source_paths = [ROOT / path for path in UI_ASSET_SOURCES]
+        newest_source = max(path.stat().st_mtime for path in source_paths if path.exists())
+        stale_assets = [
+            path.relative_to(ROOT).as_posix()
+            for path in asset_paths
+            if path.stat().st_mtime + 1.0 < newest_source
+        ]
+        detail = "主工作台深色展示图与当前 GUI 和品牌资产同步" if not stale_assets else "展示图早于当前 GUI 或品牌资产: " + ", ".join(stale_assets)
+        self.add("UI 展示资产", not stale_assets, detail)
 
     def check_cases(self) -> None:
         case_dir = ROOT / "data/cases"

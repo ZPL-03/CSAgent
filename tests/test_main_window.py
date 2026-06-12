@@ -6,6 +6,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtGui import QFont, QFontMetrics
 from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QPushButton
 
 from core.task_parser import TaskParser
@@ -14,6 +15,7 @@ from gui.main_window import MainWindow
 from gui.theme import application_stylesheet
 from gui.workbench_widgets import AgentStatusCard
 from gui.workbench_widgets import FlowDagWidget
+from gui.workbench_widgets import StatusPill
 from workflow.event_store import WorkflowEventStore
 from workflow.simulation_queue import SimulationJobQueue
 
@@ -417,6 +419,32 @@ def test_main_window_shell_layout_keeps_reference_workbench_structure(monkeypatc
     finally:
         window.close()
         app.processEvents()
+
+
+def test_status_pill_centers_status_dot_and_text_group() -> None:
+    app = _app()
+    _ = app
+    pill = StatusPill("领域主模型", "success")
+    pill.resize(164, 34)
+    font = QFont(pill.font())
+    font.setPointSize(10)
+
+    dot_center, text_rect, display_text = pill._content_geometry(font)
+    metrics = QFontMetrics(font)
+    content_left = dot_center.x() - 5.5
+    content_right = text_rect.left() + metrics.horizontalAdvance(display_text)
+    content_center = (content_left + content_right) / 2.0
+
+    assert abs(dot_center.y() - pill.height() / 2.0) < 0.1
+    assert abs(text_rect.center().y() - pill.height() / 2.0) < 0.1
+    assert abs(content_center - pill.width() / 2.0) < 1.5
+
+
+def test_flow_dag_merges_requirement_parsing_into_orchestrator() -> None:
+    names = [node.name for node in FlowDagWidget.MAIN_NODES]
+    assert names == ["ORCHESTRATOR", "CANDIDATE_GEN", "SCREENER", "FEM_AGENT", "REPORT_GEN"]
+    assert FlowDagWidget.MAIN_NODES[0].subtitle == "需求解析 / 编排"
+    assert FlowDagWidget.KNOWLEDGE_NODE.agent == "KNOWLEDGE_AGENT"
 
 
 def test_visible_workbench_buttons_keep_text_inside_layout(monkeypatch) -> None:

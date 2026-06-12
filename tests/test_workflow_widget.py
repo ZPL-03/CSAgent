@@ -61,7 +61,7 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
         WorkflowEvent(
             run_id="RUN_TEST",
             event_type="tool_completed",
-            agent="RequirementAgent",
+            agent="ORCHESTRATOR",
             message="工具 parse_task 调用完成",
             stage="parse_task",
             payload={
@@ -85,7 +85,7 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
         WorkflowEvent(
             run_id="RUN_TEST",
             event_type="tool_completed",
-            agent="KnowledgeMemoryAgent",
+            agent="KNOWLEDGE_AGENT",
             message="工具 persist_knowledge 调用完成",
             stage="persist_knowledge",
             payload={
@@ -100,7 +100,7 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
         WorkflowEvent(
             run_id="RUN_TEST",
             event_type="llm_call_trace",
-            agent="CandidateGenAgent",
+            agent="CANDIDATE_GEN",
             message="LLM 调用完成：使用 fallback / fallback-model，后端尝试 2 次",
             stage="generate_candidates",
             payload={
@@ -129,7 +129,7 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
 
         assert "智能体流程" in html
         assert "RUN_TEST" in html
-        assert "任务解析" in html
+        assert "编排入口" in html
         assert "完成" in html
         assert "screen_candidates" in html
         assert "工具 parse_task 调用完成" in html
@@ -143,7 +143,7 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
         assert "案例记忆" in html
         assert "回流=1" in html
         assert "智能体职责契约" in html
-        assert "KnowledgeMemoryAgent" in html
+        assert "KNOWLEDGE_AGENT" in html
         assert "不调用 LLM" in html
         assert "DOE=1" in html
         assert "LLM=1" in html

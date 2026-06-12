@@ -21,7 +21,7 @@ class WorkflowWidget(QWidget):
     """展示工作流节点、人工确认点和事件审计。"""
 
     NODE_LABELS = [
-        ("parse_task", "任务解析"),
+        ("parse_task", "编排入口"),
         ("generate_candidates", "候选生成"),
         ("wait_screen", "初筛确认"),
         ("screen_candidates", "代理初筛"),

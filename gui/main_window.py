@@ -1261,17 +1261,17 @@ class MainWindow(QMainWindow):
     def _ui_agent_for_runtime_stage(self, runtime_stage: str, runtime_agent: str = "") -> str:
         stage = runtime_stage or ""
         agent = runtime_agent or ""
-        if stage.startswith("parse_task") or agent in {"RequirementAgent", "parse_task"}:
+        if stage.startswith("parse_task") or agent in {"ORCHESTRATOR", "parse_task"}:
             return "ORCHESTRATOR"
-        if stage.startswith("generate_candidates") or agent in {"CandidateStrategyAgent", "generate_candidates"}:
+        if stage.startswith("generate_candidates") or agent in {"CANDIDATE_GEN", "generate_candidates"}:
             return "CANDIDATE_GEN"
-        if stage.startswith("screen_candidates") or agent in {"SurrogateAgent", "screen_candidates"}:
+        if stage.startswith("screen_candidates") or agent in {"SCREENER", "screen_candidates"}:
             return "SCREENER"
-        if stage.startswith("evaluate_candidates") or agent in {"FEMExecutionAgent", "SimulationQueue", "evaluate_candidates"}:
+        if stage.startswith("evaluate_candidates") or agent in {"FEM_AGENT", "SimulationQueue", "evaluate_candidates"}:
             return "FEM_AGENT"
-        if stage.startswith("persist_knowledge") or agent in {"KnowledgeMemoryAgent", "persist_knowledge"}:
+        if stage.startswith("persist_knowledge") or agent in {"KNOWLEDGE_AGENT", "persist_knowledge"}:
             return "KNOWLEDGE_AGENT"
-        if stage.startswith("generate_report") or agent in {"ReportAgent", "generate_report"}:
+        if stage.startswith("generate_report") or agent in {"REPORT_GEN", "generate_report"}:
             return "REPORT_GEN"
         return "ORCHESTRATOR"
 

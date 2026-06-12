@@ -179,7 +179,7 @@ def test_workflow_runtime_completes_full_approved_path(tmp_path):
     assert "simulation_job_completed" in event_types
     assert "knowledge_update_completed" in event_types
     tool_events = [event for event in store.list_events(state["run_id"]) if event["event_type"] == "tool_completed"]
-    assert any(event["agent"] == "KnowledgeMemoryAgent" for event in tool_events)
+    assert any(event["agent"] == "KNOWLEDGE_AGENT" for event in tool_events)
     evaluate_event = next(event for event in tool_events if event["payload"].get("tool") == "evaluate_candidates")
     assert evaluate_event["payload"]["input_summary"]["candidates"]["count"] == 1
     assert evaluate_event["payload"]["output_summary"]["results"]["count"] == 1

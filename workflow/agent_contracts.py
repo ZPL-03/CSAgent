@@ -24,11 +24,11 @@ class AgentContract:
 AGENT_CONTRACTS: tuple[AgentContract, ...] = (
     AgentContract(
         node_name="parse_task",
-        label="任务解析",
-        runtime_agent="RequirementAgent",
+        label="需求解析与编排",
+        runtime_agent="ORCHESTRATOR",
         implementation="core.task_parser.TaskParser",
         tool_name="parse_task",
-        responsibility="把自然语言需求转换为结构化任务契约和用户已给事实。",
+        responsibility="在编排入口把自然语言需求转换为结构化任务契约和用户已给事实。",
         input_contract="自然语言需求、可选覆盖参数。",
         output_contract="task 字典；包含候选池总数、初筛数量、工况、边界、目标和几何参考或固定约束。",
         llm_policy="不调用 LLM。",
@@ -37,7 +37,7 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
     AgentContract(
         node_name="generate_candidates",
         label="候选生成",
-        runtime_agent="CandidateStrategyAgent",
+        runtime_agent="CANDIDATE_GEN",
         implementation="agents.candidate_gen.CandidateGenAgent",
         tool_name="generate_candidates",
         responsibility="按 LLM、案例迁移和 DOE 三路生成候选池，并完成字段校验、规则检查和结构去重。",
@@ -49,7 +49,7 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
     AgentContract(
         node_name="screen_candidates",
         label="代理初筛",
-        runtime_agent="SurrogateAgent",
+        runtime_agent="SCREENER",
         implementation="agents.screener.ScreenerAgent",
         tool_name="screen_candidates",
         responsibility="计算 ASME RD-1172 线性屈曲压力和 PBIPF 极限压力，按评分公式排序。",
@@ -61,7 +61,7 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
     AgentContract(
         node_name="evaluate_candidates",
         label="有限元校核",
-        runtime_agent="FEMExecutionAgent",
+        runtime_agent="FEM_AGENT",
         implementation="agents.fem_agent.FEMAgent",
         tool_name="evaluate_candidates",
         responsibility="将会话候选晋级为正式 C_N 输入，执行 Abaqus 两阶段真实有限元校核并记录作业队列。",
@@ -73,7 +73,7 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
     AgentContract(
         node_name="persist_knowledge",
         label="知识回流",
-        runtime_agent="KnowledgeMemoryAgent",
+        runtime_agent="KNOWLEDGE_AGENT",
         implementation="agents.knowledge_agent.KnowledgeAgent",
         tool_name="persist_knowledge",
         responsibility="把有限元结果、正式候选和任务契约写入案例库、案例记忆和代理公式校准数据。",
@@ -85,7 +85,7 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
     AgentContract(
         node_name="generate_report",
         label="报告生成",
-        runtime_agent="ReportAgent",
+        runtime_agent="REPORT_GEN",
         implementation="agents.report_gen.ReportGenAgent",
         tool_name="generate_report",
         responsibility="基于结构化任务、候选和有限元结果生成 Markdown/PDF 报告。",

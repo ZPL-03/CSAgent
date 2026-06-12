@@ -135,7 +135,27 @@ class StatusPill(QWidget):
         self.update()
 
     def _sync_width(self) -> None:
-        self.setMinimumWidth(max(128, min(300, self.fontMetrics().horizontalAdvance(self.text) + 64)))
+        font = QFont(self.font())
+        font.setPointSize(10)
+        text_width = QFontMetrics(font).horizontalAdvance(self.text)
+        self.setMinimumWidth(max(128, min(320, text_width + 56)))
+
+    def sizeHint(self) -> QSize:
+        return QSize(max(self.minimumWidth(), 128), 34)
+
+    def _content_geometry(self, font: QFont) -> tuple[QPointF, QRectF, str]:
+        dot_diameter = 11.0
+        dot_gap = 9.0
+        side_padding = 14.0
+        metrics = QFontMetrics(font)
+        available_text_width = max(24, int(self.width() - side_padding * 2 - dot_diameter - dot_gap))
+        display_text = metrics.elidedText(self.text, Qt.TextElideMode.ElideRight, available_text_width)
+        text_width = metrics.horizontalAdvance(display_text)
+        content_width = dot_diameter + dot_gap + text_width
+        left = max(side_padding, (self.width() - content_width) / 2.0)
+        dot_center = QPointF(left + dot_diameter / 2.0, self.height() / 2.0)
+        text_rect = QRectF(left + dot_diameter + dot_gap, 0, text_width + 2, self.height())
+        return dot_center, text_rect, display_text
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
@@ -154,12 +174,13 @@ class StatusPill(QWidget):
         painter.drawRoundedRect(rect, self.height() / 2, self.height() / 2)
         painter.setBrush(QBrush(_status_color(self.status)))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(QPointF(18, self.height() / 2), 5.5, 5.5)
         font = QFont(self.font())
         font.setPointSize(10)
+        dot_center, text_rect, display_text = self._content_geometry(font)
+        painter.drawEllipse(dot_center, 5.5, 5.5)
         painter.setFont(font)
         painter.setPen(text)
-        painter.drawText(QRectF(32, 0, self.width() - 40, self.height()), Qt.AlignmentFlag.AlignVCenter, self.text)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, display_text)
 
 
 class PipelineStatusWidget(QWidget):
@@ -268,8 +289,7 @@ class FlowDagWidget(QWidget):
     """绘制 LangGraph 多智能体 DAG。"""
 
     MAIN_NODES = [
-        DagNode("需求解析", "parse_task", "ORCHESTRATOR"),
-        DagNode("ORCHESTRATOR", "任务调度", "ORCHESTRATOR"),
+        DagNode("ORCHESTRATOR", "需求解析 / 编排", "ORCHESTRATOR"),
         DagNode("CANDIDATE_GEN", "候选生成", "CANDIDATE_GEN"),
         DagNode("SCREENER", "代理初筛", "SCREENER"),
         DagNode("FEM_AGENT", "有限元校核", "FEM_AGENT"),
@@ -326,7 +346,7 @@ class FlowDagWidget(QWidget):
         node_h = 50.0
         y = 58.0
         rects = [QRectF(left + index * (node_w + gap), y, node_w, node_h) for index in range(count)]
-        branch_x = (rects[1].right() + rects[2].left()) / 2.0 if len(rects) > 2 else width / 2.0
+        branch_x = (rects[0].right() + rects[1].left()) / 2.0 if len(rects) > 1 else width / 2.0
         knowledge_h = 52.0
         knowledge_top = min(y + 70.0, max(y + 64.0, height - 24.0 - knowledge_h))
         knowledge_w = min(max(236.0, node_w * 1.54), 280.0)
@@ -450,7 +470,7 @@ class FlowDagWidget(QWidget):
 
         branch_x = float(layout["branch_x"])
         knowledge_rect = layout["knowledge_rect"]
-        self._draw_branch(painter, branch_x, rects[1], knowledge_rect, colors)
+        self._draw_branch(painter, branch_x, rects[0], knowledge_rect, colors)
 
         for rect, node in zip(rects, self.MAIN_NODES):
             self._draw_node(painter, rect, node, self.agent_states.get(node.agent, "waiting"), colors)

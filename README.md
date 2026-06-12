@@ -50,7 +50,7 @@ P_PBIPF = d1 * lg(Q) * t / R
 
 | 智能体 | 模块 | 当前职责 |
 | --- | --- | --- |
-| 任务解析 | `core/task_parser.py` | 规则解析外压、边界、几何参考值、固定几何约束、目标压力、候选池总数和初筛保留数 |
+| `ORCHESTRATOR` | `agents/orchestrator.py` / `core/task_parser.py` | 负责任务编排、人工确认和确定性需求解析；`parse_task` 是该智能体的运行阶段，不作为独立智能体展示 |
 | 候选生成 | `agents/candidate_gen.py` | 按默认初始比例调度 LLM、案例迁移和 DOE；LLM 输入为系统整理后的工程任务书，输出为自然语言候选表；系统解析、校验并去重候选 |
 | 快速筛选 | `agents/screener.py` | 使用 ASME RD-1172 线性屈曲压力和 PBIPF 公式预测极限压力并排序 |
 | 有限元校核 | `agents/fem_agent.py` | 生成 ABAQUS 耐压壳脚本并读取标准结果 JSON |

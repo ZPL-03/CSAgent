@@ -171,10 +171,11 @@ class DesignWorkflowRuntime:
             job_id = self.simulation_queue.enqueue(self._active_run_id, fem_candidate)
             self._emit_event(
                 "simulation_job_queued",
-                "SimulationQueue",
+                "FEM_AGENT",
                 f"有限元作业入队：{job_id}",
                 {
                     "job_id": job_id,
+                    "source": "SimulationQueue",
                     "candidate_id": fem_candidate.get("candidate_id"),
                     "session_candidate_id": fem_candidate.get("session_candidate_id"),
                 },
@@ -182,10 +183,11 @@ class DesignWorkflowRuntime:
             self.simulation_queue.mark_running(job_id)
             self._emit_event(
                 "simulation_job_started",
-                "FEMExecutionAgent",
+                "FEM_AGENT",
                 f"有限元作业开始：{job_id}",
                 {
                     "job_id": job_id,
+                    "source": "SimulationQueue",
                     "candidate_id": fem_candidate.get("candidate_id"),
                     "session_candidate_id": fem_candidate.get("session_candidate_id"),
                 },
@@ -196,18 +198,19 @@ class DesignWorkflowRuntime:
                 self.simulation_queue.mark_failed(job_id, str(exc))
                 self._emit_event(
                     "simulation_job_failed",
-                    "FEMExecutionAgent",
+                    "FEM_AGENT",
                     f"有限元作业失败：{job_id}：{exc}",
-                    {"job_id": job_id, "error": str(exc)},
+                    {"job_id": job_id, "source": "SimulationQueue", "error": str(exc)},
                 )
                 raise
             self.simulation_queue.mark_success(job_id, result)
             self._emit_event(
                 "simulation_job_completed",
-                "FEMExecutionAgent",
+                "FEM_AGENT",
                 f"有限元作业完成：{job_id}",
                 {
                     "job_id": job_id,
+                    "source": "SimulationQueue",
                     "candidate_id": result.get("candidate_id"),
                     "session_candidate_id": result.get("session_candidate_id"),
                     "status": result.get("status"),
