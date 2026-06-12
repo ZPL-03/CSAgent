@@ -107,6 +107,7 @@ class ReleaseAudit:
         self.check_env_ignored()
         self.check_product_identity()
         self.check_runtime_knowledge_paths()
+        self.check_runtime_knowledge_status_contract()
         self.check_knowledge_pipeline_contract()
         self.check_ui_assets()
         self.check_cases()
@@ -196,6 +197,44 @@ class ReleaseAudit:
         passed = not mismatches and not external_exists
         detail = "知识库运行事实源为 knowledge/runtime + knowledge/chroma_db" if passed else "; ".join([*mismatches, f"knowledge/external exists={external_exists}"])
         self.add("知识库运行时路径", passed, detail)
+
+    def check_runtime_knowledge_status_contract(self) -> None:
+        from core.knowledge_ingestion import (
+            STEP_CHUNK,
+            STEP_KG,
+            STEP_PARSE,
+            STEP_RETRIEVAL,
+            STEP_VECTOR,
+            KnowledgeIngestionService,
+        )
+
+        status = KnowledgeIngestionService().status()
+        required_keys = {
+            "store_type",
+            "document_count",
+            "rag_chunk_count",
+            "vector_chunk_count",
+            "kg_entity_count",
+            "kg_relation_count",
+            "chunk_token_size",
+            "chunk_overlap_tokens",
+            "min_chunk_tokens",
+            "dedupe_key",
+            "pipeline",
+        }
+        missing = [key for key in sorted(required_keys) if key not in status]
+        expected_steps = [STEP_PARSE, STEP_CHUNK, STEP_VECTOR, STEP_KG, STEP_RETRIEVAL]
+        pipeline = status.get("pipeline") if isinstance(status.get("pipeline"), list) else []
+        step_names = [str(step.get("name") or "") for step in pipeline if isinstance(step, dict)]
+        errors = list(missing)
+        if status.get("store_type") != "project_runtime_knowledge":
+            errors.append(f"store_type={status.get('store_type')!r}")
+        if status.get("dedupe_key") != "content_hash":
+            errors.append(f"dedupe_key={status.get('dedupe_key')!r}")
+        if step_names[:5] != expected_steps:
+            errors.append(f"pipeline={step_names[:5]!r}")
+        detail = "空库和已有库均暴露分块、去重、RAG/KG 计数和五阶段流水线状态" if not errors else "; ".join(errors[:12])
+        self.add("知识库状态契约", not errors, detail)
 
     def check_knowledge_pipeline_contract(self) -> None:
         required_files = [

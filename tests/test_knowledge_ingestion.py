@@ -5,6 +5,32 @@ import json
 from core.knowledge_ingestion import KnowledgeIngestionService, SUPPORTED_INGEST_SUFFIXES, SUPPORTED_QT_FILE_FILTER
 
 
+def test_runtime_knowledge_empty_status_exposes_pipeline_contract(tmp_path) -> None:
+    service = KnowledgeIngestionService(base_dir=tmp_path / "knowledge", chunk_token_size=64, chunk_overlap_tokens=12)
+
+    status = service.status()
+
+    assert status["ready"] is False
+    assert status["store_type"] == "project_runtime_knowledge"
+    assert status["document_count"] == 0
+    assert status["rag_chunk_count"] == 0
+    assert status["vector_chunk_count"] == 0
+    assert status["vector_ready"] is False
+    assert status["kg_entity_count"] == 0
+    assert status["kg_relation_count"] == 0
+    assert status["chunk_token_size"] == 64
+    assert status["chunk_overlap_tokens"] == 12
+    assert status["dedupe_key"] == "content_hash"
+    assert [step["status"] for step in status["pipeline"]] == ["pending", "pending", "pending", "pending", "pending"]
+    assert [step["name"] for step in status["pipeline"]] == [
+        "MinerU / Docling 文档解析",
+        "语义分块",
+        "BGE-M3 向量化索引",
+        "Neo4j 实体/关系抽取",
+        "检索验证 / 证据引用",
+    ]
+
+
 def test_runtime_knowledge_ingestion_builds_chunks_kg_vector_index_and_dedupes(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_USE_HASH_EMBEDDING", "1")
     source = tmp_path / "pressure_hull_notes.md"

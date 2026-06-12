@@ -706,12 +706,14 @@ class KnowledgeIngestionService:
 
     def _load_manifest(self) -> dict[str, Any]:
         if not self.manifest_path.exists():
-            return {}
+            return self._base_manifest()
         try:
             payload = json.loads(self.manifest_path.read_text(encoding="utf-8"))
         except (json.JSONDecodeError, OSError):
-            return {}
-        return payload if isinstance(payload, dict) else {}
+            return self._base_manifest()
+        if not isinstance(payload, dict):
+            return self._base_manifest()
+        return {**self._base_manifest(), **payload}
 
     def _parse_document(self, path: Path) -> tuple[str, str]:
         suffix = path.suffix.lower()
@@ -1516,22 +1518,11 @@ class KnowledgeIngestionService:
         relations = _read_jsonl(self.relations_path)
         blocks = _read_jsonl(self.blocks_path)
         manifest = {
-            "store_type": "project_runtime_knowledge",
-            "base_dir": str(self.base_dir),
-            "upload_dir": str(self.uploads_dir),
-            "manifest_path": str(self.manifest_path),
-            "rag_chunks_path": str(self.chunks_path),
-            "kg_dir": str(self.kg_dir),
-            "vector_enabled": self.vector_enabled,
-            "vector_collection_name": self.vector_collection_name,
-            "vector_chroma_dir": str(self.vector_chroma_dir),
-            "chunk_token_size": self.chunk_token_size,
-            "chunk_overlap_tokens": self.chunk_overlap_tokens,
-            "min_chunk_tokens": self.min_chunk_tokens,
-            "dedupe_key": "content_hash",
+            **self._base_manifest(),
             "document_count": len(documents),
             "rag_chunk_count": len(chunks),
             "vector_chunk_count": len(chunks) if self.vector_enabled else 0,
+            "vector_ready": bool(self.vector_enabled and chunks),
             "kg_entity_count": len(entities),
             "kg_relation_count": len(relations),
             "structured_document_count": len(documents),
@@ -1557,6 +1548,43 @@ class KnowledgeIngestionService:
             manifest["last_retrieval_verification"] = last_result.retrieval_verification
             manifest["pipeline"] = [asdict(step) for step in last_result.steps]
         else:
-            manifest.setdefault("pipeline", [])
+            manifest["pipeline"] = self._default_pipeline()
         self.manifest_path.parent.mkdir(parents=True, exist_ok=True)
         self.manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    def _default_pipeline(self) -> list[dict[str, Any]]:
+        return [
+            asdict(PipelineStep(STEP_PARSE, "pending", "等待上传资料", "")),
+            asdict(PipelineStep(STEP_CHUNK, "pending", "等待解析文本", f"{self.chunk_token_size} token / overlap {self.chunk_overlap_tokens}")),
+            asdict(PipelineStep(STEP_VECTOR, "pending", "等待写入向量索引", self.vector_collection_name)),
+            asdict(PipelineStep(STEP_KG, "pending", "等待抽取实体关系", "")),
+            asdict(PipelineStep(STEP_RETRIEVAL, "pending", "等待检索验证", "")),
+        ]
+
+    def _base_manifest(self) -> dict[str, Any]:
+        return {
+            "store_type": "project_runtime_knowledge",
+            "base_dir": str(self.base_dir),
+            "upload_dir": str(self.uploads_dir),
+            "manifest_path": str(self.manifest_path),
+            "rag_chunks_path": str(self.chunks_path),
+            "kg_dir": str(self.kg_dir),
+            "vector_enabled": self.vector_enabled,
+            "vector_collection_name": self.vector_collection_name,
+            "vector_chroma_dir": str(self.vector_chroma_dir),
+            "chunk_token_size": self.chunk_token_size,
+            "chunk_overlap_tokens": self.chunk_overlap_tokens,
+            "min_chunk_tokens": self.min_chunk_tokens,
+            "dedupe_key": "content_hash",
+            "document_count": 0,
+            "rag_chunk_count": 0,
+            "vector_chunk_count": 0,
+            "vector_ready": False,
+            "kg_entity_count": 0,
+            "kg_relation_count": 0,
+            "structured_document_count": 0,
+            "structured_block_count": 0,
+            "markdown_document_count": 0,
+            "last_retrieval_verification": {},
+            "pipeline": self._default_pipeline(),
+        }
