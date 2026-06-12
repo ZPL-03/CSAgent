@@ -97,6 +97,15 @@ D:\anaconda3\envs\GPT\python.exe main.py
 D:\anaconda3\envs\GPT\python.exe scripts\check_env.py
 ```
 
+发布审计：
+
+```powershell
+D:\anaconda3\envs\GPT\python.exe scripts\release_audit.py
+D:\anaconda3\envs\GPT\python.exe scripts\release_audit.py --with-llm-health
+```
+
+默认发布审计不访问网络，检查品牌残留、缓存残留、案例编号、知识库运行时路径、UI 展示资产、报告标题和 `.env` 忽略规则；`--with-llm-health` 会额外探测主模型和回退模型连通性。
+
 批量生成初始案例：
 
 ```powershell
