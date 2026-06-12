@@ -28,7 +28,6 @@ PyQt6 桌面端默认为简体中文界面，顶部语言选择器支持切换�
 主界面采用 `QMainWindow + QSplitter + QStackedWidget` 工程工作台布局。顶部为系统身份栏、工作台/项目/知识库/监控/设置导航和当前模型标识；语言和主题配置位于“设置”页。当前模型标识读取 `llm_call_trace` 事件，显示本次调用实际使用的领域主模型、回退模型或失败状态，并同步写入运行日志。工作台左栏展示 `ORCHESTRATOR`、`CANDIDATE_GEN`、`SCREENER`、`FEM_AGENT`、`KNOWLEDGE_AGENT`、`REPORT_GEN` 的状态点、实时状态和任务队列；中部上方为自绘 LangGraph DAG，下方为对话优先的多智能体协作区；右栏展示实时三维视口、会话指标、运行日志、阶段报告、会话数据导出和报告打开入口。实时三维视口在本机 OpenGL 可用时使用 PyVista 交互视图，支持旋转、缩放、平移、双击重置、按钮重置视角和适配窗口。项目页承载任务契约、候选、FEM、追踪和报告详情；知识库页承载检索与证据预览；监控页承载工作流审计面板、运行日志和状态恢复入口。界面层只显示和触发流程，不改变任务解析、候选生成、代理初筛、有限元校核、知识回流和报告生成的业务契约。会话数据导出写入 `data/results/session_export_<RUN_ID>.json` 和 `data/results/session_trace_<RUN_ID>.csv`，分别保存当前任务快照与 TMP-C-CASE 追踪表。
 
 ![深色工程工作台](docs/assets/ui_workbench_dark.png)
-![亮色工程工作台](docs/assets/ui_workbench_light.png)
 
 ## PBIPF 公式
 
@@ -120,6 +119,6 @@ D:\anaconda3\envs\GPT\python.exe scripts\build_initial_cases.py --reset --count 
 
 ## 有限元说明
 
-自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出。流程先执行单位外压线性屈曲分析并提取一阶模态云图，再以一阶模态缺陷进入 Static Riks 后屈曲分析，极限压力取最大 LPF 与基准外压的乘积。GUI 的右侧实时视口、“候选”页和“FEM”页优先使用 `pyvistaqt` 显示可旋转、缩放、平移的三维几何模型和模态云图；没有候选或结果时，真实交互环境显示参考耐压壳模型，离线环境只显示状态文字，不生成初始化静态占位图。交互式 OpenGL 视图不可用、`QT_QPA_PLATFORM=offscreen`、`CSDM_cph_DISABLE_INTERACTIVE_3D=1` 或离线审计环境中，只有候选几何或 FEM 模态数据存在时才使用 Matplotlib 离线 PNG 显示候选剖面或一阶模态云图。离线图注跟随界面语言，并在详情中展示模态数据路径、点面数量和可用性状态。
+自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出。流程先执行单位外压线性屈曲分析并提取一阶模态云图，再以一阶模态缺陷进入 Static Riks 后屈曲分析，极限压力取最大 LPF 与基准外压的乘积。GUI 的右侧实时视口、“候选”页和“FEM”页优先使用 `pyvistaqt` 显示可旋转、缩放、平移的三维几何模型和模态云图；没有候选或结果时，真实交互环境显示参考耐压壳模型。交互式 OpenGL 视图不可用、`QT_QPA_PLATFORM=offscreen`、`CSDM_cph_DISABLE_INTERACTIVE_3D=1` 或离线审计环境中，界面使用与当前主题一致的 Matplotlib 静态工程预览显示参考几何、候选几何或一阶模态云图。离线图注跟随界面语言，并在详情中展示模态数据路径、点面数量和可用性状态。
 
 `reference/wangge.py` 与 `reference/zhangusdfld.for` 只作为人工建模和用户子程序参考，不属于主流程必需资产。`reference/zhangusdfld.for` 通过 `config/app_config.yaml` 的 `abaqus.use_user_subroutine` 显式启用，默认关闭以避免本机用户子程序编译环境阻断主流程。未找到 ABAQUS 命令时返回带诊断信息的失败结果，不伪造有限元通过。

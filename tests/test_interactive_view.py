@@ -45,7 +45,7 @@ def test_interactive_plot_widget_uses_static_candidate_fallback_in_offscreen() -
         app.processEvents()
 
 
-def test_reference_hull_does_not_create_static_placeholder_in_offscreen() -> None:
+def test_reference_hull_uses_static_engineering_preview_in_offscreen() -> None:
     app = _app()
     widget = InteractivePlotWidget("empty")
     try:
@@ -53,10 +53,10 @@ def test_reference_hull_does_not_create_static_placeholder_in_offscreen() -> Non
         shown = widget.show_reference_hull()
         app.processEvents()
 
-        assert shown is False
+        assert shown is True
         assert widget._interactive is False
-        assert widget._static_pixmap is None
-        assert widget.stack.currentWidget() is widget.message_label
+        assert widget._static_pixmap is not None
+        assert widget.stack.currentWidget() is widget.static_label
     finally:
         widget.close()
         app.processEvents()

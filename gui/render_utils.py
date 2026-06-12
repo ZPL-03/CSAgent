@@ -25,8 +25,6 @@ def _float(value: object, default: float = 0.0) -> float:
 
 
 def _matplotlib_font(language: str):
-    if language != "zh":
-        return None
     try:
         from matplotlib.font_manager import FontProperties
     except Exception:
@@ -138,6 +136,8 @@ def render_candidate_png_bytes(
     width: int = 900,
     height: int = 520,
     language: str = DEFAULT_LANGUAGE,
+    theme: str = "dark",
+    show_annotations: bool = False,
 ) -> bytes | None:
     """生成候选几何的离线工程剖面图，供无 OpenGL 或离线审计环境使用。"""
 
@@ -149,6 +149,82 @@ def render_candidate_png_bytes(
     thickness = _float(geometry.get("thickness_mm"))
     if length <= 0.0 or radius <= 0.0 or thickness <= 0.0:
         return None
+
+    try:
+        import numpy as np
+        from matplotlib.backends.backend_agg import FigureCanvasAgg
+        from matplotlib.figure import Figure
+    except Exception:
+        np = None
+    if np is not None:
+        try:
+            dpi = 100
+            dark = theme != "light"
+            bg = "#101821" if dark else "#f8fbff"
+            panel = bg
+            text_color = "#dbe4ef" if dark else "#172033"
+            muted = "#94a3b8" if dark else "#475569"
+            edge = "#38bdf8" if dark else "#1d4ed8"
+            figure = Figure(figsize=(width / dpi, height / dpi), dpi=dpi, facecolor=bg)
+            canvas = FigureCanvasAgg(figure)
+            axis = figure.add_subplot(111, projection="3d", facecolor=panel)
+            text_props = _text_props(language)
+            theta = np.linspace(0, 2 * np.pi, 96)
+            x_values = np.linspace(-length / 2.0, length / 2.0, 36)
+            theta_grid, x_grid = np.meshgrid(theta, x_values)
+            outer_y = radius * np.cos(theta_grid)
+            outer_z = radius * np.sin(theta_grid)
+            inner_radius = max(radius - thickness, radius * 0.82)
+            inner_y = inner_radius * np.cos(theta_grid)
+            inner_z = inner_radius * np.sin(theta_grid)
+            axis.plot_surface(x_grid, outer_y, outer_z, color="#2563eb", alpha=0.72, linewidth=0, shade=True)
+            axis.plot_surface(x_grid, inner_y, inner_z, color="#0f172a" if dark else "#dbeafe", alpha=0.18, linewidth=0, shade=True)
+            for x in (-length / 2.0, length / 2.0):
+                axis.plot(np.full_like(theta, x), radius * np.cos(theta), radius * np.sin(theta), color=edge, linewidth=1.5)
+                axis.plot(
+                    np.full_like(theta, x),
+                    inner_radius * np.cos(theta),
+                    inner_radius * np.sin(theta),
+                    color="#60a5fa" if dark else "#2563eb",
+                    linewidth=1.0,
+                    alpha=0.78,
+                )
+            axis.plot([-length / 2.0, length / 2.0], [radius, radius], [0, 0], color=edge, linewidth=1.0, alpha=0.82)
+            axis.plot([-length / 2.0, length / 2.0], [-radius, -radius], [0, 0], color=edge, linewidth=1.0, alpha=0.82)
+            axis.set_position([0.01, 0.01, 0.98, 0.98])
+            axis.set_box_aspect((max(length, 1.0), max(radius * 2.0, 1.0), max(radius * 2.0, 1.0)))
+            axis.view_init(elev=20, azim=-56)
+            axis.set_axis_off()
+            if show_annotations:
+                axis.set_position([0.02, 0.02, 0.96, 0.9])
+                display_name = candidate.get("display_name") or candidate.get("candidate_id") or tr(
+                    "render.candidate_fallback", language=language
+                )
+                material = (candidate.get("material_system") or {}).get("name") or "-"
+                alpha = _float(geometry.get("alpha_deg"))
+                beta = _float(geometry.get("beta_deg"))
+                title = tr(
+                    "render.candidate_section",
+                    language=language,
+                    name=display_name,
+                    length=length,
+                    radius=radius,
+                    thickness=thickness,
+                )
+                subtitle = tr(
+                    "render.material_layup",
+                    language=language,
+                    material=material,
+                    alpha=alpha,
+                    beta=beta,
+                )
+                figure.text(0.035, 0.94, title, color=text_color, fontsize=10, weight="bold", **text_props)
+                figure.text(0.035, 0.885, subtitle, color=muted, fontsize=8, **text_props)
+            buffer = io.BytesIO()
+            canvas.print_png(buffer)
+            return buffer.getvalue()
+        except Exception:
+            pass
 
     try:
         from matplotlib.backends.backend_agg import FigureCanvasAgg

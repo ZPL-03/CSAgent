@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from core.knowledge_ingestion import KnowledgeIngestionService
+from core.knowledge_ingestion import KnowledgeIngestionService, SUPPORTED_INGEST_SUFFIXES, SUPPORTED_QT_FILE_FILTER
 
 
 def test_runtime_knowledge_ingestion_builds_chunks_kg_vector_index_and_dedupes(tmp_path, monkeypatch) -> None:
@@ -134,3 +134,36 @@ def test_runtime_knowledge_rebuild_and_snapshot_export(tmp_path, monkeypatch) ->
     assert len(payload["chunks"]) == rebuilt["rag_chunk_count"]
     assert len(payload["entities"]) == rebuilt["kg_entity_count"]
     assert len(payload["relations"]) == rebuilt["kg_relation_count"]
+
+
+def test_runtime_knowledge_ingestion_accepts_engineering_text_and_binary_metadata(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_USE_HASH_EMBEDDING", "1")
+    service = KnowledgeIngestionService(base_dir=tmp_path / "knowledge", chunk_token_size=48, chunk_overlap_tokens=8)
+
+    status_file = tmp_path / "buckling_job.sta"
+    status_file.write_text(
+        "Abaqus Lanczos buckling step completed for composite pressure hull. PBIPF and ASME RD-1172 are checked.",
+        encoding="utf-8",
+    )
+    status_result = service.ingest_file(status_file)
+
+    odb_file = tmp_path / "buckling_job.odb"
+    odb_file.write_bytes(b"ODB_BINARY_PLACEHOLDER")
+    odb_result = service.ingest_file(odb_file)
+
+    assert status_result.success
+    assert status_result.parser_backend == "text"
+    assert odb_result.success
+    assert odb_result.parser_backend == "engineering_metadata"
+    assert odb_result.chunk_count >= 1
+
+    chunks = [json.loads(line) for line in service.chunks_path.read_text(encoding="utf-8").splitlines() if line.strip()]
+    odb_chunks = [item for item in chunks if item.get("source_id") == odb_result.document_id]
+    assert odb_chunks
+    assert any("工程二进制文件元数据" in item.get("content_markdown", "") for item in odb_chunks)
+
+
+def test_runtime_knowledge_supported_suffix_contract_is_shared_with_gui_filter() -> None:
+    for suffix in [".pdf", ".docx", ".pptx", ".xlsx", ".png", ".webp", ".inp", ".sta", ".odb"]:
+        assert suffix in SUPPORTED_INGEST_SUFFIXES
+        assert f"*{suffix}" in SUPPORTED_QT_FILE_FILTER

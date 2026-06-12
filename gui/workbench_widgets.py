@@ -5,9 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from PyQt6.QtCore import QPointF, QRectF, QSize, Qt
-from PyQt6.QtGui import QBrush, QColor, QFont, QPainter, QPen
-from PyQt6.QtWidgets import QWidget
+from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPen
+from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
+from gui.i18n import DEFAULT_LANGUAGE, text as tr
 from gui.theme import resolve_theme
 
 
@@ -33,6 +34,82 @@ def _status_color(status: str) -> QColor:
     if status in {"failed", "error", "offline"}:
         return QColor("#ef4444")
     return QColor("#64748b")
+
+
+class AgentStatusCard(QFrame):
+    """左侧智能体状态卡片，保证状态灯、名称和状态行严格对齐。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.theme = "dark"
+        self.state = "waiting"
+        self.setObjectName("agentStatusCard")
+        self.setProperty("state", self.state)
+        self.setMinimumHeight(66)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        self.dot = QLabel()
+        self.dot.setFixedSize(9, 9)
+
+        self.title = QLabel()
+        self.title.setObjectName("agentTitle")
+        self.title.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+
+        self.detail = QLabel()
+        self.detail.setObjectName("agentDetail")
+        self.detail.setWordWrap(True)
+        self.detail.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+
+        header_layout = QHBoxLayout()
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(10)
+        header_layout.addWidget(self.dot, 0, Qt.AlignmentFlag.AlignVCenter)
+        header_layout.addWidget(self.title, 1, Qt.AlignmentFlag.AlignVCenter)
+
+        text_layout = QVBoxLayout()
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(3)
+        text_layout.addLayout(header_layout)
+        text_layout.addWidget(self.detail)
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setSpacing(0)
+        layout.addLayout(text_layout, 1)
+
+    def set_theme(self, theme: str) -> None:
+        self.theme = resolve_theme(theme)
+        self._sync_visuals()
+
+    def set_content(self, agent_name: str, state: str, status_label: str, description: str) -> None:
+        self.state = state
+        self.setProperty("state", state)
+        self.title.setText(agent_name)
+        status_color = self._state_color()
+        muted = "#475569" if self.theme == "light" else "#94a3b8"
+        self.detail.setText(
+            f"<span style='color:{status_color};font-weight:600;'>{status_label}</span>"
+            f"<span style='color:{muted};'> · {description}</span>"
+        )
+        self._sync_visuals()
+
+    def _state_color(self) -> str:
+        if self.state == "done":
+            return "#0f766e" if self.theme == "light" else "#34d399"
+        if self.state == "active":
+            return "#2563eb" if self.theme == "light" else "#f59e0b"
+        if self.state == "failed":
+            return "#dc2626" if self.theme == "light" else "#fb7185"
+        return "#64748b"
+
+    def _sync_visuals(self) -> None:
+        color = self._state_color()
+        text = "#172033" if self.theme == "light" else "#dbe4ef"
+        self.dot.setStyleSheet(f"background:{color}; border-radius:4px;")
+        self.title.setStyleSheet(f"background:transparent;color:{text};font-size:13px;font-weight:800;")
+        self.detail.setStyleSheet("background:transparent;font-size:12px;")
+        self.style().unpolish(self)
+        self.style().polish(self)
 
 
 class StatusPill(QWidget):
@@ -203,23 +280,64 @@ class FlowDagWidget(QWidget):
     def __init__(self) -> None:
         super().__init__()
         self.theme = "dark"
+        self.language = DEFAULT_LANGUAGE
         self.agent_states: dict[str, str] = {node.agent: "waiting" for node in self.MAIN_NODES}
         self.agent_states["KNOWLEDGE_AGENT"] = "waiting"
         self.stage_text = "等待任务输入"
-        self.setMinimumHeight(166)
-        self.setMaximumHeight(190)
+        self.setMinimumHeight(190)
+        self.setMaximumHeight(218)
 
     def sizeHint(self) -> QSize:
-        return QSize(1040, 178)
+        return QSize(1040, 204)
 
     def set_theme(self, theme: str) -> None:
         self.theme = resolve_theme(theme)
+        self.update()
+
+    def set_language(self, language: str) -> None:
+        self.language = language
         self.update()
 
     def update_state(self, agent_states: dict[str, str], stage_text: str) -> None:
         self.agent_states.update(agent_states)
         self.stage_text = stage_text or "等待任务输入"
         self.update()
+
+    def layout_rects(self, width: int | None = None, height: int | None = None) -> dict[str, object]:
+        width = width or self.width()
+        height = height or self.height()
+        outer = QRectF(10, 8, max(0, width - 20), max(0, height - 16))
+        count = len(self.MAIN_NODES)
+        left = 26.0
+        right = max(left + 1.0, width - 26.0)
+        available = max(1.0, right - left)
+        gap = max(10.0, min(22.0, available * 0.018))
+        node_w = (available - gap * (count - 1)) / count
+        if node_w < 108.0:
+            gap = max(6.0, min(14.0, (available - 92.0 * count) / max(1, count - 1)))
+            node_w = (available - gap * (count - 1)) / count
+        node_w = max(84.0, min(150.0, node_w))
+        total_w = node_w * count + gap * (count - 1)
+        if total_w > available + 0.5:
+            gap = max(5.0, (available - 84.0 * count) / max(1, count - 1))
+            node_w = max(72.0, (available - gap * (count - 1)) / count)
+            total_w = node_w * count + gap * (count - 1)
+        left = max(18.0, (width - total_w) / 2.0)
+        node_h = 44.0
+        y = 62.0
+        rects = [QRectF(left + index * (node_w + gap), y, node_w, node_h) for index in range(count)]
+        branch_x = (rects[1].right() + rects[2].left()) / 2.0 if len(rects) > 2 else width / 2.0
+        knowledge_h = 56.0
+        knowledge_top = min(y + 72.0, max(y + 64.0, height - 22.0 - knowledge_h))
+        knowledge_w = min(max(220.0, node_w * 1.78), 286.0)
+        knowledge_x = min(max(18.0, branch_x - knowledge_w / 2.0), max(18.0, width - knowledge_w - 18.0))
+        knowledge_rect = QRectF(knowledge_x, knowledge_top, knowledge_w, knowledge_h)
+        return {
+            "outer": outer,
+            "node_rects": rects,
+            "knowledge_rect": knowledge_rect,
+            "branch_x": branch_x,
+        }
 
     def _colors(self) -> dict[str, QColor]:
         if self.theme == "light":
@@ -289,7 +407,8 @@ class FlowDagWidget(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
         painter.fillRect(self.rect(), colors["bg"])
 
-        outer = QRectF(10, 8, self.width() - 20, self.height() - 16)
+        layout = self.layout_rects(self.width(), self.height())
+        outer = layout["outer"]
         painter.setPen(QPen(colors["border"], 1.2))
         painter.setBrush(QBrush(colors["panel"]))
         painter.drawRoundedRect(outer, 10, 10)
@@ -299,7 +418,7 @@ class FlowDagWidget(QWidget):
         title_font.setBold(True)
         painter.setFont(title_font)
         painter.setPen(colors["text"])
-        painter.drawText(QRectF(28, 22, 320, 24), Qt.AlignmentFlag.AlignLeft, "工作流 · LangGraph DAG")
+        painter.drawText(QRectF(28, 22, 320, 24), Qt.AlignmentFlag.AlignLeft, tr("section.workbench", language=self.language))
 
         small_font = QFont(self.font())
         small_font.setPointSize(9)
@@ -317,18 +436,7 @@ class FlowDagWidget(QWidget):
             painter.setPen(colors["muted"])
             painter.drawText(QRectF(x + 10, 25, 66, 20), Qt.AlignmentFlag.AlignLeft, label)
 
-        count = len(self.MAIN_NODES)
-        gap = 22
-        left = 26
-        right = self.width() - 26
-        node_w = max(120, min(154, (right - left - gap * (count - 1)) / count))
-        node_h = 44
-        y = 58
-        rects: list[QRectF] = []
-        for index, node in enumerate(self.MAIN_NODES):
-            x = left + index * (node_w + gap)
-            rect = QRectF(x, y, node_w, node_h)
-            rects.append(rect)
+        rects: list[QRectF] = layout["node_rects"]
 
         for index in range(1, len(rects)):
             prev = rects[index - 1]
@@ -340,21 +448,13 @@ class FlowDagWidget(QWidget):
                 colors,
             )
 
-        knowledge_w = min(node_w * 1.45, 236)
-        branch_x = (rects[1].right() + rects[2].left()) / 2
-        knowledge_rect = QRectF(branch_x - knowledge_w / 2, y + 62, knowledge_w, 40)
+        branch_x = float(layout["branch_x"])
+        knowledge_rect = layout["knowledge_rect"]
         self._draw_branch(painter, branch_x, rects[1], knowledge_rect, colors)
 
         for rect, node in zip(rects, self.MAIN_NODES):
             self._draw_node(painter, rect, node, self.agent_states.get(node.agent, "waiting"), colors)
 
-        painter.setFont(small_font)
-        painter.setPen(colors["muted"])
-        painter.drawText(
-            QRectF(branch_x + 16, rects[1].bottom() + 9, 180, 16),
-            Qt.AlignmentFlag.AlignCenter,
-            "检索 / 证据注入",
-        )
         self._draw_node(painter, knowledge_rect, self.KNOWLEDGE_NODE, self.agent_states.get("KNOWLEDGE_AGENT", "waiting"), colors, accent="rag")
 
     def _draw_arrow(self, painter: QPainter, start: QPointF, end: QPointF, colors: dict[str, QColor]) -> None:
@@ -410,21 +510,45 @@ class FlowDagWidget(QWidget):
         painter.drawRoundedRect(rect, 8, 8)
         painter.setBrush(QBrush(state_color))
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawEllipse(QPointF(rect.left() + 14, rect.top() + 14), 4, 4)
 
         title_font = QFont(self.font())
-        title_font.setPointSize(9)
+        title_font.setPointSize(8 if rect.width() < 118 else 9)
         title_font.setBold(True)
+        body_font = QFont(self.font())
+        body_font.setPointSize(7 if rect.width() < 112 else 8)
+        title_metrics = QFontMetrics(title_font)
+        body_metrics = QFontMetrics(body_font)
+        status_text = self._status_text(state) if accent is None else node.subtitle
+        side_margin = 18.0 if accent == "rag" else 12.0
+        dot_diameter = 8.0
+        dot_gap = 10.0
+        max_text_width = max(24.0, rect.width() - side_margin * 2.0 - dot_diameter - dot_gap)
+        title_text = title_metrics.elidedText(node.name, Qt.TextElideMode.ElideRight, int(max_text_width))
+        subtitle_text = body_metrics.elidedText(status_text, Qt.TextElideMode.ElideRight, int(max_text_width))
+        text_width = max(
+            float(title_metrics.horizontalAdvance(title_text)),
+            float(body_metrics.horizontalAdvance(subtitle_text)),
+        )
+        content_width = dot_diameter + dot_gap + text_width
+        content_x = rect.left() + max(side_margin, (rect.width() - content_width) / 2.0)
+        block_height = 34.0
+        block_y = rect.top() + (rect.height() - block_height) / 2.0
+        dot_center = QPointF(content_x + dot_diameter / 2.0, block_y + 8.5)
+        painter.drawEllipse(dot_center, dot_diameter / 2.0, dot_diameter / 2.0)
+
+        text_x = content_x + dot_diameter + dot_gap
+        title_rect = QRectF(text_x, block_y, text_width + 2.0, 18.0)
+        status_rect = QRectF(text_x, block_y + 19.0, text_width + 2.0, 16.0)
+
         painter.setFont(title_font)
         painter.setPen(colors["text"])
-        painter.drawText(QRectF(rect.left() + 28, rect.top() + 8, rect.width() - 36, 18), Qt.AlignmentFlag.AlignLeft, node.name)
+        painter.drawText(title_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, title_text)
 
-        body_font = QFont(self.font())
-        body_font.setPointSize(8)
         painter.setFont(body_font)
         painter.setPen(state_color if state != "waiting" or accent == "rag" else colors["muted"])
-        painter.drawText(
-            QRectF(rect.left() + 28, rect.top() + 25, rect.width() - 36, 16),
-            Qt.AlignmentFlag.AlignLeft,
-            self._status_text(state) if accent is None else node.subtitle,
-        )
+        painter.drawText(status_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, subtitle_text)
+
+    @staticmethod
+    def _elide(painter: QPainter, value: str, width: float) -> str:
+        metrics = QFontMetrics(painter.font())
+        return metrics.elidedText(value, Qt.TextElideMode.ElideRight, max(16, int(width)))

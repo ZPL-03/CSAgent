@@ -78,14 +78,14 @@ def _theme_palette(theme: str) -> dict[str, str]:
         return {
             "app_bg": "#eef3f8",
             "text": "#172033",
-            "top_bg": "#101827",
-            "title": "#f8fafc",
-            "subtitle": "#cbd5e1",
-            "nav": "#dbe4ef",
-            "nav_hover": "#ffffff",
+            "top_bg": "#ffffff",
+            "title": "#172033",
+            "subtitle": "#64748b",
+            "nav": "#475569",
+            "nav_hover": "#172033",
             "section": "#334155",
-            "agent_bg": "#101827",
-            "agent_border": "#263244",
+            "agent_bg": "#e8eef6",
+            "agent_border": "#c3cedd",
             "center_bg": "#f8fbff",
             "result_bg": "#f4f7fb",
             "surface": "#ffffff",
@@ -118,18 +118,19 @@ def _theme_palette(theme: str) -> dict[str, str]:
             "secondary_text": "#3730a3",
             "accent": "#2563eb",
             "accent_soft": "#dbeafe",
-            "agent_card": "#141f31",
-            "agent_card_active": "#102a43",
-            "agent_card_done": "#10251f",
-            "agent_text": "#dbe4ef",
-            "agent_done_text": "#ecfdf5",
+            "agent_card": "#ffffff",
+            "agent_card_active": "#eaf2ff",
+            "agent_card_done": "#ecfdf5",
+            "agent_text": "#172033",
+            "agent_done_text": "#065f46",
             "agent_wait": "#64748b",
-            "agent_active": "#38bdf8",
-            "agent_done": "#14b8a6",
-            "progress_bg": "#0b1220",
-            "progress_chunk": "#38bdf8",
-            "log_bg": "#0b1220",
-            "log_text": "#a7b3c6",
+            "agent_active": "#2563eb",
+            "agent_done": "#0f766e",
+            "progress_bg": "#dbe4ef",
+            "progress_chunk": "#2563eb",
+            "log_bg": "#ffffff",
+            "log_text": "#334155",
+            "plot_bg": "#f8fbff",
         }
     return {
         "app_bg": "#080d15",
@@ -184,8 +185,9 @@ def _theme_palette(theme: str) -> dict[str, str]:
         "agent_done": "#14b8a6",
         "progress_bg": "#08111f",
         "progress_chunk": "#38bdf8",
-        "log_bg": "#080d15",
+        "log_bg": "#111a28",
         "log_text": "#a7b3c6",
+        "plot_bg": "#101821",
     }
 
 
@@ -272,6 +274,7 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         min-width: 118px;
     }}
     QLabel#sectionTitle {{
+        background: transparent;
         color: {color["section"]};
         font-size: 12px;
         font-weight: 700;
@@ -300,6 +303,24 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
     }}
     QWidget#agentRail QLabel#sectionTitle {{
         color: {color["agent_text"]};
+    }}
+    QFrame#agentStatusCard {{
+        background: {color["agent_card"]};
+        border: 1px solid {color["agent_border"]};
+        border-radius: 10px;
+        color: {color["agent_text"]};
+    }}
+    QFrame#agentStatusCard[state="active"] {{
+        background: {color["agent_card_active"]};
+        border-color: {color["border_soft"]};
+    }}
+    QFrame#agentStatusCard[state="done"] {{
+        background: {color["agent_card_done"]};
+        border-color: {color["agent_done"]};
+    }}
+    QFrame#agentStatusCard[state="failed"] {{
+        background: {color["danger_bg"]};
+        border-color: {color["danger_border"]};
     }}
     QWidget#agentRail QLabel#agentCard {{
         background: {color["agent_card"]};
@@ -385,6 +406,7 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         font-size: 12px;
         color: {color["log_text"]};
         background: {color["log_bg"]};
+        border: 1px solid {color["border_soft"]};
         border-radius: 10px;
         padding: 12px;
     }}
@@ -475,6 +497,37 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         border-color: {color["secondary_border"]};
         color: {color["secondary_text"]};
     }}
+    QPushButton[variant="icon"] {{
+        background: {color["button_bg"]};
+        border-color: {color["border_soft"]};
+        color: {color["text"]};
+        min-width: 34px;
+        max-width: 34px;
+        min-height: 30px;
+        max-height: 30px;
+        border-radius: 8px;
+        padding: 0;
+        font-size: 15px;
+        font-weight: 700;
+    }}
+    QPushButton[variant="icon"]:hover {{
+        background: {color["button_hover"]};
+        border-color: {color["accent"]};
+        color: {color["accent"]};
+    }}
+    QPushButton[variant="link"] {{
+        background: transparent;
+        border: 0;
+        color: {color["accent"]};
+        min-height: 24px;
+        padding: 2px 4px;
+        font-weight: 600;
+    }}
+    QPushButton[variant="link"]:hover {{
+        background: transparent;
+        border: 0;
+        color: {color["nav_hover"]};
+    }}
     QLabel#settingsCard, QWidget#settingsCard {{
         background: {color["surface_alt"]};
         border: 1px solid {color["border_soft"]};
@@ -482,16 +535,33 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         padding: 12px 16px;
         color: {color["text"]};
     }}
+    QWidget#settingsCard QLabel {{
+        background: transparent;
+    }}
     QSplitter::handle {{
         background: {color["border"]};
     }}
     QLabel#plotHint {{
-        background: {color["surface_alt"]};
-        border: 1px solid {color["border_soft"]};
-        border-radius: 3px;
-        padding: 6px 8px;
+        background: transparent;
+        border: 0;
+        border-radius: 0;
+        padding: 2px 0;
         color: {color["muted"]};
         font-size: 12px;
+    }}
+    QLabel#plotCanvas {{
+        background: {color["plot_bg"]};
+        border: 1px solid {color["border"]};
+        border-radius: 10px;
+        padding: 0;
+    }}
+    QLabel#plotEmpty {{
+        background: {color["surface_alt"]};
+        border: 1px solid {color["border_soft"]};
+        border-radius: 10px;
+        padding: 18px;
+        color: {color["muted"]};
+        line-height: 1.4;
     }}
     QSplitter::handle {{
         background: {color["app_bg"]};

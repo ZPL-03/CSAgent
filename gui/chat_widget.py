@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
+from PyQt6.QtCore import QRect, Qt
+from PyQt6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from gui.theme import resolve_theme
 
@@ -17,6 +17,7 @@ class ChatWidget(QWidget):
         self._messages: list[tuple[str, str]] = []
         self.empty_text = ""
         self.empty_state: dict[str, str] = {}
+        self._last_render_width = 0
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -25,8 +26,8 @@ class ChatWidget(QWidget):
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.content = QWidget()
         self.content_layout = QVBoxLayout(self.content)
-        self.content_layout.setContentsMargins(18, 14, 18, 14)
-        self.content_layout.setSpacing(12)
+        self.content_layout.setContentsMargins(16, 10, 16, 10)
+        self.content_layout.setSpacing(8)
         self.scroll_area.setWidget(self.content)
 
         root_layout = QVBoxLayout(self)
@@ -143,22 +144,70 @@ class ChatWidget(QWidget):
         label = QLabel(text)
         label.setWordWrap(True)
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         weight = "700" if bold else "400"
         label.setStyleSheet(f"color:{color};font-size:{size}px;font-weight:{weight};background:transparent;")
         return label
 
-    def _bubble(self, text: str, bg: str, border: str, fg: str, max_width: int = 760) -> QFrame:
+    def _single_line_label(self, text: str, color: str, size: int = 13, bold: bool = False) -> QLabel:
+        label = self._label(text, color, size, bold)
+        label.setWordWrap(False)
+        label.setFixedHeight(max(22, label.fontMetrics().height() + 8))
+        return label
+
+    def _responsive_width(self, max_width: int, min_width: int) -> tuple[int, int]:
+        viewport_width = max(self.scroll_area.viewport().width(), self.width())
+        if viewport_width <= 0:
+            viewport_width = self.width()
+        available = max(320, viewport_width - 74)
+        conversational_cap = max(360, int(viewport_width * 0.78))
+        available = min(available, conversational_cap)
+        target_max = min(max_width, available)
+        target_min = min(max(min_width, 260), target_max)
+        return target_max, target_min
+
+    def _content_width(self, text: str, target_max: int, target_min: int) -> int:
+        longest_line = max((self.fontMetrics().horizontalAdvance(line) for line in str(text).splitlines()), default=0)
+        screen_width = QApplication.primaryScreen().availableGeometry().width() if QApplication.primaryScreen() else 1440
+        if target_max >= int(screen_width * 0.42):
+            target_min = min(target_min, max(320, longest_line + 42))
+        return max(min(target_min, target_max), min(target_max, longest_line + 42))
+
+    def _wrapped_text_height(self, text: str, width: int) -> int:
+        metrics = self.fontMetrics()
+        rect = metrics.boundingRect(
+            QRect(0, 0, max(120, width), 4000),
+            Qt.TextFlag.TextWordWrap,
+            str(text),
+        )
+        return max(metrics.height(), rect.height())
+
+    def _bubble(
+        self,
+        text: str,
+        bg: str,
+        border: str,
+        fg: str,
+        max_width: int = 760,
+        min_width: int = 360,
+        fit_content: bool = False,
+    ) -> QFrame:
         frame = QFrame()
         frame.setObjectName("chatBubble")
-        frame.setMaximumWidth(max_width)
-        frame.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Minimum)
+        target_max, target_min = self._responsive_width(max_width, min_width)
+        bubble_width = self._content_width(text, target_max, target_min) if fit_content else target_max
+        frame.setFixedWidth(bubble_width)
+        frame.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         frame.setStyleSheet(
             f"QFrame#chatBubble {{ background:{bg}; border:1px solid {border}; border-radius:14px; }}"
         )
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(14, 10, 14, 10)
-        layout.setSpacing(6)
-        layout.addWidget(self._label(text, fg, 13))
+        layout.setContentsMargins(14, 8, 14, 8)
+        layout.setSpacing(4)
+        text_label = self._label(text, fg, 13)
+        text_label.setFixedWidth(max(120, bubble_width - 28))
+        layout.addWidget(text_label)
+        frame.setFixedHeight(max(42, self._wrapped_text_height(text, bubble_width - 28) + 18))
         return frame
 
     def _avatar_label(self, text: str, bg: str, fg: str) -> QLabel:
@@ -180,8 +229,9 @@ class ChatWidget(QWidget):
 
         if role == "user":
             row_layout.addStretch(1)
-            bubble = self._bubble(message, palette["user_bg"], palette["user_bg"], palette["user_text"], 700)
+            bubble = self._bubble(message, palette["user_bg"], palette["user_bg"], palette["user_text"], 920, 320, fit_content=True)
             row_layout.addWidget(bubble)
+            row_layout.addWidget(self._avatar_label("U", palette["user_bg"], palette["user_text"]), 0, Qt.AlignmentFlag.AlignTop)
             return row
 
         if role == "system":
@@ -197,23 +247,27 @@ class ChatWidget(QWidget):
         column_layout.setContentsMargins(0, 0, 0, 0)
         column_layout.setSpacing(5)
         column_layout.addWidget(self._label(sender, fg, 12, True))
-        column_layout.addWidget(self._bubble(message, bg, border, fg, 760))
+        column_layout.addWidget(self._bubble(message, bg, border, fg, 980, 360, fit_content=True))
         row_layout.addWidget(column, 1)
         return row
 
     def _empty_widget(self) -> QWidget:
         palette = self._palette()
         box = QWidget()
+        box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout = QVBoxLayout(box)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(14)
+        layout.setSpacing(8)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-        layout.addWidget(self._label(self.empty_state.get("title", ""), palette["body"], 15, True))
-        layout.addWidget(self._label(self.empty_text, palette["muted"], 13))
+        layout.addWidget(self._single_line_label(self.empty_state.get("title", ""), palette["body"], 15, True))
+        layout.addWidget(self._single_line_label(self.empty_text, palette["muted"], 13))
 
         user_row = QWidget()
+        user_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         user_layout = QHBoxLayout(user_row)
         user_layout.setContentsMargins(0, 0, 0, 0)
+        user_layout.setSpacing(10)
         user_layout.addStretch(1)
         user_layout.addWidget(
             self._bubble(
@@ -221,20 +275,25 @@ class ChatWidget(QWidget):
                 palette["user_bg"],
                 palette["user_bg"],
                 palette["user_text"],
-                660,
+                920,
+                320,
+                fit_content=True,
             )
         )
+        user_layout.addWidget(self._avatar_label("U", palette["user_bg"], palette["user_text"]), 0, Qt.AlignmentFlag.AlignTop)
         layout.addWidget(user_row)
 
-        agent_row = QWidget()
-        agent_layout = QHBoxLayout(agent_row)
+        agent_group = QWidget()
+        agent_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        agent_layout = QHBoxLayout(agent_group)
         agent_layout.setContentsMargins(0, 0, 0, 0)
         agent_layout.setSpacing(10)
         agent_layout.addWidget(self._avatar_label("O", palette["avatar_bg"], palette["avatar_text"]), 0, Qt.AlignmentFlag.AlignTop)
         agent_column = QWidget()
+        agent_column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         agent_column_layout = QVBoxLayout(agent_column)
         agent_column_layout.setContentsMargins(0, 0, 0, 0)
-        agent_column_layout.setSpacing(6)
+        agent_column_layout.setSpacing(8)
         agent_column_layout.addWidget(self._label(self.empty_state.get("agent_title", "ORCHESTRATOR"), palette["user_bg"], 12, True))
         agent_column_layout.addWidget(
             self._bubble(
@@ -242,47 +301,56 @@ class ChatWidget(QWidget):
                 palette["agent_bg"],
                 palette["agent_border"],
                 palette["agent_text"],
-                760,
+                980,
+                360,
+                fit_content=True,
             )
         )
-        agent_layout.addWidget(agent_column, 1)
-        layout.addWidget(agent_row)
 
         tool = self._bubble(
             f"{self.empty_state.get('tool_title', '')}\n{self.empty_state.get('tool_body', '')}",
             palette["tool_bg"],
             palette["tool_border"],
             palette["tool_text"],
-            760,
+            900,
+            360,
+            fit_content=True,
         )
-        tool_container = QWidget()
-        tool_layout = QHBoxLayout(tool_container)
-        tool_layout.setContentsMargins(42, 0, 0, 0)
-        tool_layout.addWidget(tool)
-        tool_layout.addStretch(1)
-        layout.addWidget(tool_container)
+        agent_column_layout.addWidget(tool)
 
         chips = QWidget()
         chips_layout = QHBoxLayout(chips)
-        chips_layout.setContentsMargins(42, 0, 0, 0)
-        chips_layout.setSpacing(10)
+        chips_layout.setContentsMargins(0, 0, 0, 0)
+        chips_layout.setSpacing(8)
         for key in ["evidence_a", "evidence_b"]:
             chip = QLabel(self.empty_state.get(key, ""))
+            chip_width = max(112, min(190, chip.fontMetrics().horizontalAdvance(chip.text()) + 34))
+            chip.setFixedSize(chip_width, 26)
+            chip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            chip.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
             chip.setStyleSheet(
                 f"background:{palette['chip_bg']}; color:{palette['muted']}; border:1px solid {palette['chip_border']};"
-                "border-radius:12px; padding:4px 12px; font-size:12px;"
+                "border-radius:13px; padding:0 12px; font-size:12px;"
             )
             chips_layout.addWidget(chip)
         chips_layout.addStretch(1)
-        layout.addWidget(chips)
-        layout.addStretch(1)
+        agent_column_layout.addWidget(chips)
+        agent_layout.addWidget(agent_column, 1)
+        layout.addWidget(agent_group, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addSpacing(2)
         return box
 
     def _render_messages(self) -> None:
+        self._last_render_width = self.width()
         self._clear_layout()
         if not self._messages:
-            self.content_layout.addWidget(self._empty_widget())
+            self.content_layout.addWidget(self._empty_widget(), 0, Qt.AlignmentFlag.AlignTop)
             return
         for sender, message in self._messages:
             self.content_layout.addWidget(self._message_widget(sender, message))
         self.content_layout.addStretch(1)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if abs(event.size().width() - self._last_render_width) >= 32:
+            self._render_messages()

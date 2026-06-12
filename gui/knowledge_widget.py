@@ -16,7 +16,9 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QFrame,
     QSplitter,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTextBrowser,
@@ -26,7 +28,7 @@ from PyQt6.QtWidgets import (
 
 from core.case_memory import CaseMemoryIndex
 from core.domain_knowledge import DomainKnowledgeBase
-from core.knowledge_ingestion import KnowledgeIngestionService
+from core.knowledge_ingestion import KnowledgeIngestionService, SUPPORTED_QT_FILE_FILTER
 from core.paths import ABAQUS_RUNS_DIR, CASES_DIR, CASE_LIBRARY_DIR, MODELS_DIR
 from gui.theme import resolve_theme
 from gui.workbench_widgets import PipelineStatusWidget, StatusPill
@@ -142,6 +144,33 @@ class KnowledgeWidget(QWidget):
         self.document_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         self.document_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
+        self.document_empty_state = QFrame()
+        self.document_empty_state.setObjectName("settingsCard")
+        empty_layout = QVBoxLayout(self.document_empty_state)
+        empty_layout.setContentsMargins(18, 14, 18, 14)
+        empty_layout.setSpacing(8)
+        empty_title = QLabel("资料库等待入库")
+        empty_title.setObjectName("sectionTitle")
+        empty_body = QLabel("上传资料并入库后，这里显示解析器、Chunk、SHA256、入库时间和路径。")
+        empty_body.setWordWrap(True)
+        empty_hint = QLabel("支持解析、token 分块、overlap、内容去重、向量索引和 KG 实体关系抽取。")
+        empty_hint.setObjectName("chatStatus")
+        empty_hint.setWordWrap(True)
+        empty_layout.addWidget(empty_title)
+        empty_layout.addWidget(empty_body)
+        empty_layout.addWidget(empty_hint)
+        self.document_empty_state.setMinimumHeight(130)
+        self.document_empty_state.setMaximumHeight(166)
+        empty_page = QWidget()
+        empty_page_layout = QVBoxLayout(empty_page)
+        empty_page_layout.setContentsMargins(0, 0, 0, 0)
+        empty_page_layout.setSpacing(0)
+        empty_page_layout.addWidget(self.document_empty_state)
+        empty_page_layout.addStretch(1)
+        self.document_stack = QStackedWidget()
+        self.document_stack.addWidget(empty_page)
+        self.document_stack.addWidget(self.document_table)
+
         self.pipeline_widget = PipelineStatusWidget()
         self.evidence_browser = QTextBrowser()
         self.evidence_browser.setOpenExternalLinks(True)
@@ -189,7 +218,7 @@ class KnowledgeWidget(QWidget):
         left_layout.setSpacing(12)
         left_layout.addWidget(self.summary_browser)
         left_layout.addWidget(QLabel("资料库 · DOCUMENTS"))
-        left_layout.addWidget(self.document_table, 1)
+        left_layout.addWidget(self.document_stack, 1)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
@@ -249,7 +278,7 @@ class KnowledgeWidget(QWidget):
             self,
             "选择需要入库的资料",
             "",
-            "知识资料 (*.pdf *.docx *.pptx *.md *.markdown *.txt *.csv *.tsv *.xlsx *.xlsm *.png *.jpg *.jpeg *.inp *.py *.for *.f90 *.log);;所有文件 (*.*)",
+            SUPPORTED_QT_FILE_FILTER,
         )
         if path:
             self.ingest_path(path)
@@ -259,7 +288,7 @@ class KnowledgeWidget(QWidget):
             self,
             "选择需要批量解析入库的资料",
             "",
-            "知识资料 (*.pdf *.docx *.pptx *.md *.markdown *.txt *.csv *.tsv *.xlsx *.xlsm *.png *.jpg *.jpeg *.inp *.py *.for *.f90 *.log);;所有文件 (*.*)",
+            SUPPORTED_QT_FILE_FILTER,
         )
         if paths:
             self.ingest_paths(paths)
@@ -510,6 +539,10 @@ class KnowledgeWidget(QWidget):
                     if isinstance(payload, dict):
                         rows.append(payload)
         self.document_table.setRowCount(len(rows))
+        if not rows:
+            self.document_stack.setCurrentIndex(0)
+            return
+        self.document_stack.setCurrentIndex(1)
         for row_index, item in enumerate(rows):
             values = [
                 item.get("title") or item.get("file_name") or item.get("document_id") or "",

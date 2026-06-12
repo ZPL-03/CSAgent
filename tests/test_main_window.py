@@ -6,10 +6,14 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication, QPushButton
+from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QPushButton
 
 from core.task_parser import TaskParser
+from gui.chat_widget import ChatWidget
 from gui.main_window import MainWindow
+from gui.theme import application_stylesheet
+from gui.workbench_widgets import AgentStatusCard
+from gui.workbench_widgets import FlowDagWidget
 from workflow.event_store import WorkflowEventStore
 from workflow.simulation_queue import SimulationJobQueue
 
@@ -345,7 +349,10 @@ def test_main_window_shell_layout_keeps_reference_workbench_structure(monkeypatc
         assert window.model_status_label.isVisible() is True
         assert window.reset_view_button.isVisible() is True
         assert window.fit_view_button.isVisible() is True
-        assert window.live_view_control_label.text()
+        assert not window.reset_view_button.icon().isNull()
+        assert not window.fit_view_button.icon().isNull()
+        assert window.reset_view_button.toolTip()
+        assert window.fit_view_button.toolTip()
         assert "#e5edf7" in window.stage_card.text()
         assert window.queue_progress.isVisible() is False
 
@@ -357,6 +364,10 @@ def test_main_window_shell_layout_keeps_reference_workbench_structure(monkeypatc
         dag_height, chat_height = window.workbench_splitter.sizes()
         assert 160 <= dag_height <= 230
         assert chat_height >= 520
+        chat_bubbles = [item for item in window.chat_widget.findChildren(QFrame) if item.objectName() == "chatBubble"]
+        widths = [bubble.width() for bubble in chat_bubbles]
+        assert max(widths) <= int(window.chat_widget.width() * 0.82)
+        assert len(set(widths)) > 1
 
         for index, button in enumerate(window.nav_buttons):
             window._switch_workspace_page(index)
@@ -407,4 +418,89 @@ def test_visible_workbench_buttons_keep_text_inside_layout(monkeypatch) -> None:
         assert id(window.knowledge_widget.export_snapshot_button) in checked_buttons
     finally:
         window.close()
+        app.processEvents()
+
+
+def test_flow_dag_knowledge_node_has_even_spacing_and_stays_inside_panel() -> None:
+    app = _app()
+    widget = FlowDagWidget()
+    try:
+        widget.resize(960, 218)
+        widget.show()
+        app.processEvents()
+
+        geometry = widget.layout_rects(960, 218)
+        outer = geometry["outer"]
+        knowledge = geometry["knowledge_rect"]
+        node_rects = geometry["node_rects"]
+
+        assert outer.contains(knowledge)
+        assert knowledge.height() >= 50
+        assert knowledge.top() - node_rects[1].bottom() >= 12
+        assert outer.bottom() - knowledge.bottom() >= 12
+        assert knowledge.width() >= 220
+        for previous, current in zip(node_rects, node_rects[1:]):
+            assert previous.right() < current.left()
+    finally:
+        widget.close()
+        app.processEvents()
+
+
+def test_chat_empty_state_uses_adaptive_engineering_message_cards() -> None:
+    app = _app()
+    widget = ChatWidget()
+    try:
+        widget.resize(1120, 520)
+        widget.set_empty_text("输入设计需求后，系统展示实时协作过程。")
+        widget.set_empty_state(
+            title="对话 · 等待设计任务",
+            user_prompt="请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 12 个候选，初筛保留 5 个候选",
+            agent_title="ORCHESTRATOR",
+            agent_body="收到任务后，系统会抽取用户已给事实，构建候选池和初筛目标，并在代理初筛、有限元校核、报告导出前请求人工确认。",
+            tool_title="工具调用 · abaqus_solver",
+            tool_body="有限元阶段会显示正式 C 编号、作业状态、线性屈曲、Static Riks 后屈曲、云图路径和诊断摘要。",
+            evidence_a="RAG/KG 证据",
+            evidence_b="候选来源审计",
+        )
+        widget.show()
+        app.processEvents()
+
+        bubbles = [item for item in widget.findChildren(QFrame) if item.objectName() == "chatBubble"]
+        assert len(bubbles) >= 3
+        widths = [bubble.width() for bubble in bubbles]
+        assert max(widths) <= int(widget.width() * 0.82)
+        assert min(widths) >= 320
+        assert len(set(widths)) > 1
+        assert any(label.text() == "U" for label in widget.findChildren(QLabel))
+    finally:
+        widget.close()
+        app.processEvents()
+
+
+def test_light_theme_uses_light_log_and_sidebar_surfaces() -> None:
+    stylesheet = application_stylesheet("Microsoft YaHei UI", "light")
+
+    assert 'background: #ffffff;' in stylesheet
+    assert 'color: #334155;' in stylesheet
+    assert 'background: #0b1220;' not in stylesheet
+    assert 'background: #141f31;' not in stylesheet
+    assert "ui_workbench_light.png" not in (open("README.md", encoding="utf-8").read())
+
+
+def test_agent_status_card_aligns_dot_and_labels_without_rich_text_blocks() -> None:
+    app = _app()
+    card = AgentStatusCard()
+    try:
+        card.resize(260, 72)
+        card.set_theme("dark")
+        card.set_content("ORCHESTRATOR", "active", "运行中", "任务编排与人工确认")
+        card.show()
+        app.processEvents()
+
+        assert card.dot.width() == card.dot.height() == 9
+        assert abs(card.dot.geometry().center().y() - card.title.geometry().center().y()) <= 5
+        assert "background:transparent" in card.detail.styleSheet()
+        assert card.title.text() == "ORCHESTRATOR"
+    finally:
+        card.close()
         app.processEvents()

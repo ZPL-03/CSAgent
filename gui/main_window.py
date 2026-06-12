@@ -13,9 +13,11 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
+UI_LAYOUT_VERSION = 3
+
 from PyQt6 import sip
-from PyQt6.QtCore import QObject, QSettings, Qt, QThread, QUrl, pyqtSignal
-from PyQt6.QtGui import QCloseEvent, QDesktopServices
+from PyQt6.QtCore import QObject, QRectF, QSettings, QSize, Qt, QThread, QUrl, pyqtSignal
+from PyQt6.QtGui import QColor, QCloseEvent, QDesktopServices, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -28,6 +30,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QProgressBar,
     QPushButton,
+    QSizePolicy,
     QSplitter,
     QStackedWidget,
     QTabWidget,
@@ -58,7 +61,7 @@ from gui.report_widget import ReportWidget
 from gui.result_trace_widget import ResultTraceWidget
 from gui.task_config_widget import TaskConfigWidget
 from gui.theme import application_stylesheet, install_application_font, resolve_theme
-from gui.workbench_widgets import FlowDagWidget, StatusPill
+from gui.workbench_widgets import AgentStatusCard, FlowDagWidget, StatusPill
 from gui.workflow_widget import WorkflowWidget
 from workflow.event_store import WorkflowEventStore
 
@@ -233,7 +236,7 @@ class MainWindow(QMainWindow):
         self.font_family = install_application_font(QApplication.instance())
         self.setWindowTitle(self.locale.text("app.title"))
         self.resize(1680, 980)
-        self.ui_state_settings = QSettings("CSDM", "CSDM_cph")
+        self.ui_state_settings = QSettings("CSAgent", "Workbench")
         self.session = PipelineSession()
         self.worker_thread: QThread | None = None
         self.worker: PipelineWorker | None = None
@@ -298,14 +301,19 @@ class MainWindow(QMainWindow):
         self.generate_button = QPushButton(self.locale.text("button.start"))
         self.confirm_yes_button = QPushButton(self.locale.text("button.confirm"))
         self.confirm_no_button = QPushButton(self.locale.text("button.pause"))
+        self.trace_button = QPushButton(self.locale.text("button.view_trace"))
+        self.trace_button.setObjectName("traceLinkButton")
+        self.trace_button.setMinimumWidth(132)
 
         self.example_button = QPushButton(self.locale.text("button.example"))
         self.example_button.setToolTip(self.locale.text("button.example"))
         self.refresh_button = QPushButton(self.locale.text("button.refresh_knowledge"))
         self.open_report_button = QPushButton(self.locale.text("button.open_report"))
         self.export_data_button = QPushButton(self.locale.text("button.export_data"))
-        self.reset_view_button = QPushButton(self.locale.text("button.reset_view"))
-        self.fit_view_button = QPushButton(self.locale.text("button.fit_view"))
+        self.reset_view_button = QPushButton()
+        self.reset_view_button.setToolTip(self.locale.text("button.reset_view"))
+        self.fit_view_button = QPushButton()
+        self.fit_view_button.setToolTip(self.locale.text("button.fit_view"))
         self.run_selector = QComboBox()
         self.run_selector.setMinimumHeight(42)
         self.refresh_runs_button = QPushButton(self.locale.text("button.refresh_runs"))
@@ -342,9 +350,7 @@ class MainWindow(QMainWindow):
         self.dialog_header.setObjectName("sectionTitle")
         self.details_header = QLabel(self.locale.text("section.details"))
         self.details_header.setObjectName("sectionTitle")
-        self.live_view_control_label = QLabel(self.locale.text("plot.controls"))
-        self.live_view_control_label.setObjectName("chatStatus")
-        self.agent_cards: dict[str, QLabel] = {}
+        self.agent_cards: dict[str, AgentStatusCard] = {}
         self.queue_label = QLabel(self.locale.text("queue.idle"))
         self.queue_label.setObjectName("statusLabel")
         self.queue_label.setWordWrap(True)
@@ -417,10 +423,14 @@ class MainWindow(QMainWindow):
         agent_layout.setSpacing(10)
         agent_layout.addWidget(self.agent_header)
         for agent_name, description_key in self.AGENT_DESCRIPTIONS:
-            card = QLabel()
-            card.setObjectName("agentCard")
-            card.setWordWrap(True)
-            card.setProperty("state", "waiting")
+            card = AgentStatusCard()
+            card.set_theme(self.locale.theme)
+            card.set_content(
+                agent_name,
+                "waiting",
+                self.locale.text("agent.waiting"),
+                self.locale.text(description_key),
+            )
             self.agent_cards[agent_name] = card
             agent_layout.addWidget(card)
         agent_layout.addStretch(1)
@@ -437,8 +447,8 @@ class MainWindow(QMainWindow):
 
         workflow_panel = QWidget()
         workflow_panel.setObjectName("centerWorkbench")
-        workflow_panel.setMinimumHeight(168)
-        workflow_panel.setMaximumHeight(198)
+        workflow_panel.setMinimumHeight(210)
+        workflow_panel.setMaximumHeight(236)
         workflow_layout = QVBoxLayout(workflow_panel)
         workflow_layout.setContentsMargins(0, 0, 0, 0)
         workflow_layout.setSpacing(0)
@@ -449,7 +459,12 @@ class MainWindow(QMainWindow):
         chat_layout = QVBoxLayout(chat_panel)
         chat_layout.setContentsMargins(12, 12, 12, 12)
         chat_layout.setSpacing(12)
-        chat_layout.addWidget(self.dialog_header)
+        chat_title_layout = QHBoxLayout()
+        chat_title_layout.setSpacing(10)
+        chat_title_layout.addWidget(self.dialog_header)
+        chat_title_layout.addStretch(1)
+        chat_title_layout.addWidget(self.trace_button)
+        chat_layout.addLayout(chat_title_layout)
         chat_layout.addWidget(self.chat_widget, 1)
         chat_layout.addWidget(self.status_label)
         chat_layout.addLayout(input_action_layout)
@@ -458,7 +473,7 @@ class MainWindow(QMainWindow):
         workbench_splitter = QSplitter(Qt.Orientation.Vertical)
         workbench_splitter.addWidget(workflow_panel)
         workbench_splitter.addWidget(chat_panel)
-        workbench_splitter.setSizes([210, 800])
+        workbench_splitter.setSizes([236, 780])
         self.workbench_splitter = workbench_splitter
 
         workbench_page = QWidget()
@@ -470,14 +485,14 @@ class MainWindow(QMainWindow):
         right_layout = QVBoxLayout()
         right_layout.setContentsMargins(14, 14, 14, 14)
         right_layout.setSpacing(10)
-        right_layout.addWidget(self.details_header)
+        live_header_layout = QHBoxLayout()
+        live_header_layout.setContentsMargins(0, 0, 0, 0)
+        live_header_layout.setSpacing(8)
+        live_header_layout.addWidget(self.details_header, 1)
+        live_header_layout.addWidget(self.reset_view_button)
+        live_header_layout.addWidget(self.fit_view_button)
+        right_layout.addLayout(live_header_layout)
         right_layout.addWidget(self.live_result_view, 2)
-        view_control_layout = QHBoxLayout()
-        view_control_layout.setSpacing(8)
-        view_control_layout.addWidget(self.live_view_control_label, 1)
-        view_control_layout.addWidget(self.reset_view_button)
-        view_control_layout.addWidget(self.fit_view_button)
-        right_layout.addLayout(view_control_layout)
         right_layout.addWidget(self.stats_header)
         right_layout.addLayout(stats_layout)
         right_layout.addWidget(self.log_header)
@@ -728,6 +743,17 @@ class MainWindow(QMainWindow):
         self.left_stack.setCurrentIndex(index)
         self.right_stack.setCurrentIndex(index)
 
+    def _settings_label_card(self, title: str, body: str, footer: str = "") -> QLabel:
+        footer_html = f"<p style='color:#94a3b8;'>{footer}</p>" if footer else ""
+        card = QLabel(f"<h2>{title}</h2><p>{body}</p>{footer_html}")
+        card.setObjectName("settingsCard")
+        card.setWordWrap(True)
+        card.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        card.setMinimumHeight(130)
+        card.setMaximumHeight(170)
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        return card
+
     def _build_settings_page(self) -> QWidget:
         page = QWidget()
         page.setObjectName("centerWorkbench")
@@ -735,48 +761,87 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(14)
 
-        model_card = QLabel(
-            "<h2>模型与 API</h2>"
-            "<p>主模型和回退模型读取本项目 .env 与 config/llm_config.yaml。"
-            "候选提案与报告解释调用 LLM，代理初筛、FEM、案例回流不调用 LLM。</p>"
+        model_card = self._settings_label_card(
+            "模型与 API",
+            "主模型和回退模型读取本项目 .env 与 config/llm_config.yaml。候选提案、工程解释和报告补充调用 LLM；代理初筛、FEM、案例回流不调用 LLM。",
+            "模型状态灯来自真实调用轨迹，主模型不可用时显示回退模型。",
         )
-        model_card.setObjectName("settingsCard")
-        model_card.setWordWrap(True)
 
-        solver_card = QLabel(
-            "<h2>求解器集成 · ABAQUS</h2>"
-            "<p>求解器路径、工作目录、用户子程序开关读取 config/app_config.yaml。"
-            "真实校核包含线性屈曲和 Static Riks 两阶段流程。</p>"
+        solver_card = self._settings_label_card(
+            "求解器集成 · ABAQUS",
+            "求解器路径、工作目录、用户子程序开关读取 config/app_config.yaml。真实校核包含线性屈曲和 Static Riks 两阶段流程。",
+            "有限元队列、作业状态、云图路径和失败诊断写入运行审计。",
         )
-        solver_card.setObjectName("settingsCard")
-        solver_card.setWordWrap(True)
+
+        graph_card = self._settings_label_card(
+            "智能体编排 · LangGraph",
+            "状态图节点覆盖任务解析、候选生成、代理初筛、有限元校核、知识回流和报告导出，人工确认点由 GUI 恢复推进。",
+            "SQLite checkpoint 保存运行状态，支持中断后继续和审计复核。",
+        )
+
+        rag_card = self._settings_label_card(
+            "知识库 / RAG / KG",
+            "知识库由本项目运行时维护，支持上传资料、解析、token 分块、overlap、内容去重、检索和实体关系抽取。",
+            "检索证据用于上下文和审计，不替代代理公式或 FEM 结果。",
+        )
+
+        parsing_card = self._settings_label_card(
+            "解析与切块",
+            "资料解析优先使用可用的 MinerU / Docling 能力，分块 token 数、overlap 和去重策略由知识库运行配置控制。",
+            "入库流水线显示解析、分块、向量索引、KG 抽取和检索验证状态。",
+        )
+
+        audit_card = self._settings_label_card(
+            "运行审计与恢复",
+            "运行事件、工具调用、候选来源、去重、LLM 调用、有限元队列和案例回流结果均写入审计记录。",
+            "监控页可检测 LLM 后端、导出运行审计并恢复历史状态。",
+        )
+
+        report_card = self._settings_label_card(
+            "报告与导出",
+            "阶段报告和最终报告读取真实任务、候选、初筛、FEM、知识证据与 LLM 工程解释生成。",
+            "会话导出包含 JSON 快照和 TMP-C-CASE 追踪 CSV。",
+        )
 
         ui_card = QWidget()
         ui_card.setObjectName("settingsCard")
-        ui_layout = QGridLayout(ui_card)
+        ui_card.setMinimumHeight(130)
+        ui_card.setMaximumHeight(170)
+        ui_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        ui_layout = QVBoxLayout(ui_card)
         ui_layout.setContentsMargins(14, 12, 14, 12)
-        ui_layout.setHorizontalSpacing(14)
-        ui_layout.setVerticalSpacing(10)
+        ui_layout.setSpacing(10)
         title = QLabel("界面语言与主题")
         title.setObjectName("sectionTitle")
-        ui_layout.addWidget(title, 0, 0, 1, 4)
-        ui_layout.addWidget(self.language_label, 1, 0)
-        ui_layout.addWidget(self.language_selector, 1, 1)
-        ui_layout.addWidget(self.theme_label, 1, 2)
-        ui_layout.addWidget(self.theme_selector, 1, 3)
+        title.setFixedHeight(26)
+        description = QLabel("界面语言与主题只影响本地工作台显示，不改变任务、候选、FEM 或报告数据。")
+        description.setWordWrap(True)
+        description.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        controls = QGridLayout()
+        controls.setContentsMargins(0, 0, 0, 0)
+        controls.setHorizontalSpacing(14)
+        controls.setVerticalSpacing(8)
+        controls.addWidget(self.language_label, 0, 0)
+        controls.addWidget(self.language_selector, 0, 1)
+        controls.addWidget(self.theme_label, 0, 2)
+        controls.addWidget(self.theme_selector, 0, 3)
+        ui_layout.addWidget(title)
+        ui_layout.addWidget(description)
+        ui_layout.addLayout(controls)
 
-        rag_card = QLabel(
-            "<h2>知识库 / RAG / KG</h2>"
-            "<p>知识库由本项目运行时维护，支持上传资料、解析、token 分块、内容去重、检索和实体关系抽取；"
-            "检索证据用于上下文和审计，不替代代理公式或 FEM 结果。</p>"
-        )
-        rag_card.setObjectName("settingsCard")
-        rag_card.setWordWrap(True)
-
-        layout.addWidget(model_card)
-        layout.addWidget(solver_card)
-        layout.addWidget(ui_card)
-        layout.addWidget(rag_card)
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(14)
+        cards = [model_card, solver_card, graph_card, rag_card, parsing_card, audit_card, report_card, ui_card]
+        for index, card in enumerate(cards):
+            row = index // 2
+            column = index % 2
+            grid.addWidget(card, row, column)
+            grid.setRowStretch(row, 0)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        layout.addLayout(grid, 0)
         layout.addStretch(1)
         return page
 
@@ -793,7 +858,10 @@ class MainWindow(QMainWindow):
         return page
 
     def _set_button_variant(self, button: QPushButton, variant: str = "default") -> None:
-        button.setMinimumHeight(38)
+        if variant == "icon":
+            button.setFixedSize(34, 30)
+        else:
+            button.setMinimumHeight(38)
         button.setProperty("variant", variant)
 
     def _apply_styles(self) -> None:
@@ -802,12 +870,13 @@ class MainWindow(QMainWindow):
         self._set_button_variant(self.generate_button, "primary")
         self._set_button_variant(self.confirm_yes_button, "success")
         self._set_button_variant(self.confirm_no_button, "warning")
+        self._set_button_variant(self.trace_button, "link")
         self._set_button_variant(self.example_button)
         self._set_button_variant(self.refresh_button)
         self._set_button_variant(self.open_report_button, "secondary")
         self._set_button_variant(self.export_data_button, "secondary")
-        self._set_button_variant(self.reset_view_button, "secondary")
-        self._set_button_variant(self.fit_view_button, "secondary")
+        self._set_button_variant(self.reset_view_button, "icon")
+        self._set_button_variant(self.fit_view_button, "icon")
         self._set_button_variant(self.refresh_runs_button)
         self._set_button_variant(self.restore_run_button, "secondary")
         self._set_button_variant(self.screen_button)
@@ -817,13 +886,54 @@ class MainWindow(QMainWindow):
         self._set_button_variant(self.reset_button, "danger")
         self.workflow_widget.set_theme(self.locale.theme)
         self.flow_dag_widget.set_theme(self.locale.theme)
+        self.flow_dag_widget.set_language(self.locale.language)
         self.model_status_label.set_theme(self.locale.theme)
+        for card in self.agent_cards.values():
+            card.set_theme(self.locale.theme)
         self.live_result_view.set_theme(self.locale.theme)
         self.knowledge_widget.set_theme(self.locale.theme)
         self.chat_widget.set_theme(self.locale.theme)
         self.setStyleSheet(application_stylesheet(self.font_family, self.locale.theme))
+        self._sync_view_button_icons()
+
+    def _sync_view_button_icons(self) -> None:
+        self.reset_view_button.setText("")
+        self.reset_view_button.setIcon(self._make_view_icon("reset"))
+        self.reset_view_button.setIconSize(QSize(15, 15))
+        self.fit_view_button.setText("")
+        self.fit_view_button.setIcon(self._make_view_icon("fit"))
+        self.fit_view_button.setIconSize(QSize(15, 15))
+
+    def _make_view_icon(self, icon_type: str) -> QIcon:
+        pixmap = QPixmap(20, 20)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        color = QColor("#2563eb" if resolve_theme(self.locale.theme) == "light" else "#60a5fa")
+        pen = QPen(color, 2.0)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        if icon_type == "reset":
+            painter.drawArc(QRectF(4, 4, 12, 12), 35 * 16, 285 * 16)
+            painter.drawLine(5, 6, 5, 11)
+            painter.drawLine(5, 6, 10, 6)
+        else:
+            painter.drawLine(4, 8, 4, 4)
+            painter.drawLine(4, 4, 8, 4)
+            painter.drawLine(12, 4, 16, 4)
+            painter.drawLine(16, 4, 16, 8)
+            painter.drawLine(16, 12, 16, 16)
+            painter.drawLine(16, 16, 12, 16)
+            painter.drawLine(8, 16, 4, 16)
+            painter.drawLine(4, 16, 4, 12)
+        painter.end()
+        return QIcon(pixmap)
 
     def _restore_window_layout(self) -> None:
+        if int(self.ui_state_settings.value("layout_version", 0) or 0) != UI_LAYOUT_VERSION:
+            self.ui_state_settings.clear()
+            return
         geometry = self.ui_state_settings.value("window_geometry")
         state = self.ui_state_settings.value("window_state")
         if geometry:
@@ -832,6 +942,7 @@ class MainWindow(QMainWindow):
             self.restoreState(state)
 
     def _save_window_layout(self) -> None:
+        self.ui_state_settings.setValue("layout_version", UI_LAYOUT_VERSION)
         self.ui_state_settings.setValue("window_geometry", self.saveGeometry())
         self.ui_state_settings.setValue("window_state", self.saveState())
 
@@ -841,6 +952,7 @@ class MainWindow(QMainWindow):
         self.confirm_yes_button.clicked.connect(lambda: self._respond_confirmation(True))
         self.confirm_no_button.clicked.connect(lambda: self._respond_confirmation(False))
         self.example_button.clicked.connect(self._load_example_prompt)
+        self.trace_button.clicked.connect(lambda: self._switch_workspace_page(3))
         self.refresh_button.clicked.connect(self._refresh_knowledge_view)
         self.open_report_button.clicked.connect(self._open_latest_report)
         self.export_data_button.clicked.connect(self._export_session_data)
@@ -872,7 +984,7 @@ class MainWindow(QMainWindow):
             return
         self.locale.set_theme(theme)
         self._apply_styles()
-        self._update_runtime_panel()
+        self._update_overview_cards()
 
     def _apply_language(self) -> None:
         self.setWindowTitle(self.locale.text("app.title"))
@@ -901,14 +1013,19 @@ class MainWindow(QMainWindow):
         self.generate_button.setText(self.locale.text("button.start"))
         self.confirm_yes_button.setText(self.locale.text("button.confirm"))
         self.confirm_no_button.setText(self.locale.text("button.pause"))
+        self.trace_button.setText(self.locale.text("button.view_trace"))
+        self.trace_button.setMinimumWidth(max(132, self.trace_button.fontMetrics().horizontalAdvance(self.trace_button.text()) + 24))
         self.example_button.setText("+")
         self.example_button.setToolTip(self.locale.text("button.example"))
         self.refresh_button.setText(self.locale.text("button.refresh_knowledge"))
         self.open_report_button.setText(self.locale.text("button.open_report"))
         self.export_data_button.setText(self.locale.text("button.export_data"))
-        self.reset_view_button.setText(self.locale.text("button.reset_view"))
-        self.fit_view_button.setText(self.locale.text("button.fit_view"))
-        self.live_view_control_label.setText(self.locale.text("plot.controls"))
+        self.reset_view_button.setText("")
+        self.reset_view_button.setToolTip(self.locale.text("button.reset_view"))
+        self.fit_view_button.setText("")
+        self.fit_view_button.setToolTip(self.locale.text("button.fit_view"))
+        self._sync_view_button_icons()
+        self.flow_dag_widget.set_language(self.locale.language)
         self.refresh_runs_button.setText(self.locale.text("button.refresh_runs"))
         self.restore_run_button.setText(self.locale.text("button.restore_run"))
         self.restore_run_button.setToolTip(self.locale.text("tooltip.restore_run"))
@@ -966,6 +1083,7 @@ class MainWindow(QMainWindow):
         self.confirm_no_button.setEnabled(not busy and self.session.pending_confirmation is not None)
         for button in [
             self.example_button,
+            self.trace_button,
             self.refresh_button,
             self.open_report_button,
             self.export_data_button,
@@ -1012,9 +1130,11 @@ class MainWindow(QMainWindow):
         candidate_pool_target = requested_candidate_pool_size(self.session.task) if self.session.task else 0
         requested_top_k = requested_screen_top_k(self.session.task) if self.session.task else 0
         def metric_html(label: str, value: str) -> str:
-            value_color = "#172033" if resolve_theme(self.locale.theme) == "light" else "#e5edf7"
+            light_theme = resolve_theme(self.locale.theme) == "light"
+            value_color = "#172033" if light_theme else "#e5edf7"
+            label_color = "#475569" if light_theme else "#94a3b8"
             return (
-                "<span style='color:#94a3b8;font-size:12px;'>"
+                f"<span style='color:{label_color};font-size:12px;'>"
                 f"{label}</span><br>"
                 f"<span style='color:{value_color};font-size:22px;font-weight:800;'>"
                 f"{value}</span>"
@@ -1142,16 +1262,12 @@ class MainWindow(QMainWindow):
             if card is None:
                 continue
             state = state_map.get(agent_name, "waiting")
-            state_color = self._agent_state_color(state)
-            card.setProperty("state", state)
-            card.setText(
-                f"<span style='color:{state_color};font-size:18px;'>●</span> "
-                f"<b>{agent_name}</b><br>"
-                f"<span style='color:{state_color};'>{self._agent_status_label(state)}</span>"
-                f"<span style='color:#94a3b8;'> · {self.locale.text(description_key)}</span>"
+            card.set_content(
+                agent_name,
+                state,
+                self._agent_status_label(state),
+                self.locale.text(description_key),
             )
-            card.style().unpolish(card)
-            card.style().polish(card)
 
         percent = self._stage_progress()
         self.queue_progress.setValue(percent)

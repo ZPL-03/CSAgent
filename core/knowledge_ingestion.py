@@ -29,12 +29,49 @@ from core.paths import (
 from core.rag_engine import RAGEngine
 
 
-TEXT_SUFFIXES = {".txt", ".md", ".markdown", ".rst", ".inp", ".py", ".for", ".f", ".f90", ".log", ".jnl", ".rpy"}
+TEXT_SUFFIXES = {
+    ".txt",
+    ".md",
+    ".markdown",
+    ".rst",
+    ".json",
+    ".yaml",
+    ".yml",
+    ".toml",
+    ".ini",
+    ".inp",
+    ".py",
+    ".for",
+    ".f",
+    ".f90",
+    ".log",
+    ".jnl",
+    ".rpy",
+    ".dat",
+    ".msg",
+    ".sta",
+    ".prt",
+}
 TABLE_SUFFIXES = {".csv", ".tsv"}
 PDF_SUFFIXES = {".pdf"}
+DOCX_SUFFIXES = {".docx"}
+PPTX_SUFFIXES = {".pptx"}
+EXCEL_SUFFIXES = {".xlsx", ".xlsm"}
 IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp"}
-MINERU_SUFFIXES = PDF_SUFFIXES | {".docx", ".pptx"} | IMAGE_SUFFIXES
-DOCLING_SUFFIXES = PDF_SUFFIXES | {".docx", ".pptx"} | IMAGE_SUFFIXES
+BINARY_ENGINEERING_SUFFIXES = {".odb", ".sim", ".cae"}
+MINERU_SUFFIXES = PDF_SUFFIXES | DOCX_SUFFIXES | PPTX_SUFFIXES | IMAGE_SUFFIXES
+DOCLING_SUFFIXES = PDF_SUFFIXES | DOCX_SUFFIXES | PPTX_SUFFIXES | IMAGE_SUFFIXES
+SUPPORTED_INGEST_SUFFIXES = (
+    TEXT_SUFFIXES
+    | TABLE_SUFFIXES
+    | PDF_SUFFIXES
+    | DOCX_SUFFIXES
+    | PPTX_SUFFIXES
+    | EXCEL_SUFFIXES
+    | IMAGE_SUFFIXES
+    | BINARY_ENGINEERING_SUFFIXES
+)
+SUPPORTED_QT_FILE_FILTER = "知识资料 (" + " ".join(f"*{suffix}" for suffix in sorted(SUPPORTED_INGEST_SUFFIXES)) + ");;所有文件 (*.*)"
 
 STEP_PARSE = "MinerU / Docling 文档解析"
 STEP_CHUNK = "语义分块"
@@ -694,11 +731,25 @@ class KnowledgeIngestionService:
                 return self._parse_pdf_text(path), "pypdf_text"
             except Exception as exc:
                 errors.append(f"PDF 文本层: {exc}")
+        if suffix in DOCX_SUFFIXES:
+            try:
+                return self._parse_docx_text(path), "python_docx_text"
+            except Exception as exc:
+                errors.append(f"DOCX 文本层: {exc}")
+        if suffix in PPTX_SUFFIXES:
+            try:
+                return self._parse_pptx_text(path), "python_pptx_text"
+            except Exception as exc:
+                errors.append(f"PPTX 文本层: {exc}")
+        if suffix in IMAGE_SUFFIXES:
+            return self._parse_image_metadata(path, errors), "image_metadata"
+        if suffix in BINARY_ENGINEERING_SUFFIXES:
+            return self._parse_engineering_binary_metadata(path), "engineering_metadata"
         if suffix in TEXT_SUFFIXES:
             return _read_text(path), "text"
         if suffix in TABLE_SUFFIXES:
             return self._parse_csv_table(path), "table_text"
-        if suffix in {".xlsx", ".xlsm"}:
+        if suffix in EXCEL_SUFFIXES:
             try:
                 return self._parse_xlsx_table(path), "openpyxl_table"
             except Exception as exc:
@@ -790,6 +841,75 @@ class KnowledgeIngestionService:
         if not parts:
             raise RuntimeError("PDF 文本层为空。")
         return "\n\n".join(parts)
+
+    def _parse_docx_text(self, path: Path) -> str:
+        try:
+            import docx
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("当前环境没有 python-docx，无法读取 DOCX 文本层。") from exc
+        document = docx.Document(str(path))
+        parts: list[str] = []
+        for paragraph in document.paragraphs:
+            text = paragraph.text.strip()
+            if text:
+                parts.append(text)
+        for table_index, table in enumerate(document.tables, start=1):
+            rows = [[cell.text.strip() for cell in row.cells] for row in table.rows]
+            markdown = self._rows_to_markdown(f"{path.stem}_table_{table_index}", rows)
+            if markdown.strip():
+                parts.append(markdown)
+        if not parts:
+            raise RuntimeError("DOCX 文本层为空。")
+        return "\n\n".join(parts)
+
+    def _parse_pptx_text(self, path: Path) -> str:
+        try:
+            from pptx import Presentation
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("当前环境没有 python-pptx，无法读取 PPTX 文本层。") from exc
+        presentation = Presentation(str(path))
+        sections: list[str] = []
+        for slide_index, slide in enumerate(presentation.slides, start=1):
+            texts: list[str] = []
+            for shape in slide.shapes:
+                if hasattr(shape, "text"):
+                    text = str(shape.text or "").strip()
+                    if text:
+                        texts.append(text)
+            if texts:
+                sections.append(f"## Slide {slide_index}\n\n" + "\n\n".join(texts))
+        if not sections:
+            raise RuntimeError("PPTX 文本层为空。")
+        return "\n\n".join(sections)
+
+    def _parse_image_metadata(self, path: Path, parser_errors: list[str]) -> str:
+        stat = path.stat()
+        error_text = "\n".join(f"- {item}" for item in parser_errors) if parser_errors else "- 未调用外部 OCR 解析器。"
+        return "\n\n".join(
+            [
+                f"# {path.stem}",
+                "## 图片资料元数据",
+                f"- 文件名：{path.name}",
+                f"- 文件类型：{path.suffix.lower().lstrip('.')}",
+                f"- 文件大小：{stat.st_size} bytes",
+                "- 说明：MinerU / Docling 未返回可检索文本时，系统保留图片资料元数据，供资料追溯和后续重新解析。",
+                "## 解析诊断",
+                error_text,
+            ]
+        )
+
+    def _parse_engineering_binary_metadata(self, path: Path) -> str:
+        stat = path.stat()
+        return "\n\n".join(
+            [
+                f"# {path.stem}",
+                "## 工程二进制文件元数据",
+                f"- 文件名：{path.name}",
+                f"- 文件类型：{path.suffix.lower().lstrip('.')}",
+                f"- 文件大小：{stat.st_size} bytes",
+                "- 说明：该文件属于工程二进制资料，知识库保存可检索元数据；ODB/CAE 内部场变量和云图仍由有限元结果可视化链路读取。",
+            ]
+        )
 
     def _parse_csv_table(self, path: Path) -> str:
         dialect = "excel-tab" if path.suffix.lower() == ".tsv" else "excel"

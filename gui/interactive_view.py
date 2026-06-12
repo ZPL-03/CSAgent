@@ -37,26 +37,28 @@ class InteractivePlotWidget(QWidget):
         self.plotter = None
         self._initial_camera_position = None
         self._static_pixmap: QPixmap | None = None
+        self._static_kind: str | None = None
+        self._static_payload: Dict | None = None
+        self._static_fallback: str = empty_message
+        self._static_render_size: tuple[int, int] | None = None
+        self._display_mode = "message"
 
         self.message_label = QLabel(empty_message)
+        self.message_label.setObjectName("plotEmpty")
         self.message_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.message_label.setWordWrap(True)
         self.message_label.setMinimumHeight(320)
 
         self.static_label = QLabel()
+        self.static_label.setObjectName("plotCanvas")
         self.static_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.static_label.setMinimumHeight(360)
         self.static_label.setWordWrap(True)
 
-        self.hint_label = QLabel(tr("plot.hint", language=self.language))
-        self.hint_label.setObjectName("plotHint")
-        self.hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.hint_label.setWordWrap(True)
-
         self.plot_container = QWidget()
         self.plot_layout = QVBoxLayout(self.plot_container)
         self.plot_layout.setContentsMargins(0, 0, 0, 0)
-        self.plot_layout.setSpacing(6)
+        self.plot_layout.setSpacing(0)
 
         self.stack = QStackedLayout()
         self.stack.addWidget(self.message_label)
@@ -73,7 +75,6 @@ class InteractivePlotWidget(QWidget):
         self.language = language
         if empty_message is not None:
             self.empty_message = empty_message
-        self.hint_label.setText(tr("plot.hint", language=self.language))
         if self.stack.currentWidget() is self.message_label:
             self.message_label.setText(self.empty_message)
 
@@ -85,9 +86,13 @@ class InteractivePlotWidget(QWidget):
                 self.plotter.render()
             except Exception:
                 pass
+        elif self.stack.currentWidget() is self.static_label and self._static_kind == "candidate" and self._static_payload:
+            self._show_static_candidate(self._static_payload, self._static_fallback)
+        elif self.stack.currentWidget() is self.static_label and self._static_kind == "mode" and self._static_payload:
+            self._show_static_mode(self._static_payload, self._static_fallback)
 
     def _plot_background(self) -> str:
-        return "#f8fbff" if self.theme == "light" else "#080d15"
+        return "#f8fbff" if self.theme == "light" else "#101821"
 
     def _ensure_plotter(self) -> bool:
         if self.plotter is not None:
@@ -109,8 +114,6 @@ class InteractivePlotWidget(QWidget):
 
         self.plot_layout.addWidget(self.plotter.interactor)
         self.plotter.interactor.installEventFilter(self)
-        if self.plot_layout.indexOf(self.hint_label) == -1:
-            self.plot_layout.addWidget(self.hint_label)
         self.plotter.set_background(self._plot_background())
         self.plotter.enable_trackball_style()
         return True
@@ -155,7 +158,12 @@ class InteractivePlotWidget(QWidget):
                 self._dispose_plotter()
         self._initial_camera_position = None
         self._static_pixmap = None
+        self._static_kind = None
+        self._static_payload = None
+        self._static_fallback = message or self.empty_message
+        self._static_render_size = None
         self.static_label.clear()
+        self._display_mode = "message"
         self.stack.setCurrentWidget(self.message_label)
 
     def _show_static_png(self, png_bytes: bytes | None, fallback_message: str) -> bool:
@@ -169,8 +177,56 @@ class InteractivePlotWidget(QWidget):
         self._static_pixmap = pixmap
         self.static_label.setToolTip(tr("plot.offline_preview", language=self.language))
         self._update_static_pixmap()
+        self._display_mode = "static"
         self.stack.setCurrentWidget(self.static_label)
         return True
+
+    def _show_static_candidate(self, candidate: Dict, fallback_message: str) -> bool:
+        self._static_kind = "candidate"
+        self._static_payload = dict(candidate)
+        self._static_fallback = fallback_message
+        width, height = self._target_static_size()
+        self._static_render_size = (width, height)
+        return self._show_static_png(
+            render_candidate_png_bytes(
+                candidate,
+                width=width,
+                height=height,
+                language=self.language,
+                theme=self.theme,
+            ),
+            fallback_message,
+        )
+
+    def _show_static_mode(self, result: Dict, fallback_message: str) -> bool:
+        self._static_kind = "mode"
+        self._static_payload = dict(result)
+        self._static_fallback = fallback_message
+        width, height = self._target_static_size()
+        self._static_render_size = (width, height)
+        return self._show_static_png(
+            render_mode_shape_png_bytes(result, width=width, height=height, language=self.language),
+            fallback_message,
+        )
+
+    def _target_static_size(self) -> tuple[int, int]:
+        size = self.static_label.size()
+        width = size.width() if size.width() > 0 else self.width()
+        height = size.height() if size.height() > 0 else self.height()
+        return max(320, width), max(240, height)
+
+    def _rerender_static_if_needed(self) -> None:
+        if self._display_mode != "static":
+            return
+        if self._static_kind not in {"candidate", "mode"} or not self._static_payload:
+            return
+        target = self._target_static_size()
+        if self._static_render_size == target:
+            return
+        if self._static_kind == "candidate":
+            self._show_static_candidate(self._static_payload, self._static_fallback)
+        else:
+            self._show_static_mode(self._static_payload, self._static_fallback)
 
     def _update_static_pixmap(self) -> None:
         if self._static_pixmap is None:
@@ -234,15 +290,15 @@ class InteractivePlotWidget(QWidget):
         text_color = "#172033" if self.theme == "light" else "#dbe4ef"
         self.plotter.add_text(title, position="upper_left", font_size=11, color=text_color)
         self.plotter.add_axes(line_width=2)
+        self._static_kind = None
+        self._static_payload = None
+        self._display_mode = "plot"
         self.stack.setCurrentWidget(self.plot_container)
         return True
 
     def show_reference_hull(self) -> bool:
-        """在真实交互视口中显示参考耐压壳，不生成初始化静态占位图。"""
+        """在交互视口中显示参考耐压壳；离线环境生成同主题工程预览。"""
 
-        if not self._interactive:
-            self.clear_scene(self.empty_message)
-            return False
         candidate = {
             "candidate_id": "REFERENCE",
             "display_name": tr("plot.reference_hull", language=self.language),
@@ -250,14 +306,14 @@ class InteractivePlotWidget(QWidget):
             "geometry": default_geometry("CYLINDRICAL"),
             "material_system": {"name": "T700/Epoxy"},
         }
+        if not self._interactive:
+            return self._show_static_candidate(candidate, self.empty_message)
         scene = build_candidate_scene(candidate)
         if scene is None:
-            self.clear_scene(self.empty_message)
-            return False
+            return self._show_static_candidate(candidate, self.empty_message)
         meshes, title = scene
         if not self._activate_plotter(title):
-            self.clear_scene(self.empty_message)
-            return False
+            return self._show_static_candidate(candidate, self.empty_message)
         assert self.plotter is not None
         for mesh, kwargs in meshes:
             self.plotter.add_mesh(mesh, **kwargs)
@@ -269,23 +325,34 @@ class InteractivePlotWidget(QWidget):
         super().closeEvent(event)
 
     def resizeEvent(self, event) -> None:
+        self._rerender_static_if_needed()
         self._update_static_pixmap()
+        self._restore_display_mode()
         super().resizeEvent(event)
+
+    def showEvent(self, event) -> None:
+        self._rerender_static_if_needed()
+        self._restore_display_mode()
+        super().showEvent(event)
+
+    def _restore_display_mode(self) -> None:
+        if self._display_mode == "static" and self._static_pixmap is not None:
+            self._update_static_pixmap()
+            self.stack.setCurrentWidget(self.static_label)
+            return
+        if self._display_mode == "plot" and self.plotter is not None:
+            self.stack.setCurrentWidget(self.plot_container)
+            return
+        self.stack.setCurrentWidget(self.message_label)
 
     def show_candidate(self, candidate: Dict) -> None:
         scene = build_candidate_scene(candidate)
         if scene is None:
-            self._show_static_png(
-                render_candidate_png_bytes(candidate, language=self.language),
-                tr("plot.no_candidate_geometry", language=self.language),
-            )
+            self._show_static_candidate(candidate, tr("plot.no_candidate_geometry", language=self.language))
             return
         meshes, title = scene
         if not self._activate_plotter(title):
-            self._show_static_png(
-                render_candidate_png_bytes(candidate, language=self.language),
-                tr("plot.static_candidate_failed", language=self.language),
-            )
+            self._show_static_candidate(candidate, tr("plot.static_candidate_failed", language=self.language))
             return
         assert self.plotter is not None
         for mesh, kwargs in meshes:
@@ -295,17 +362,11 @@ class InteractivePlotWidget(QWidget):
     def show_mode_shape(self, result: Dict) -> None:
         scene = build_mode_shape_scene(result)
         if scene is None:
-            self._show_static_png(
-                render_mode_shape_png_bytes(result, language=self.language),
-                tr("plot.no_mode", language=self.language),
-            )
+            self._show_static_mode(result, tr("plot.no_mode", language=self.language))
             return
         mesh, scalar_name, title = scene
         if not self._activate_plotter(title):
-            self._show_static_png(
-                render_mode_shape_png_bytes(result, language=self.language),
-                tr("plot.static_mode_failed", language=self.language),
-            )
+            self._show_static_mode(result, tr("plot.static_mode_failed", language=self.language))
             return
         assert self.plotter is not None
         self.plotter.add_mesh(

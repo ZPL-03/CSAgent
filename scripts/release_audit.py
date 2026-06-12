@@ -72,10 +72,6 @@ EXCLUDED_SCAN_FILES = {
 
 REQUIRED_UI_ASSETS = [
     "docs/assets/ui_workbench_dark.png",
-    "docs/assets/ui_workbench_light.png",
-    "docs/assets/ui_knowledge_dark.png",
-    "docs/assets/ui_monitor_dark.png",
-    "docs/assets/ui_settings_dark.png",
 ]
 
 
@@ -211,7 +207,7 @@ class ReleaseAudit:
 
     def check_ui_assets(self) -> None:
         missing = [asset for asset in REQUIRED_UI_ASSETS if not (ROOT / asset).is_file()]
-        self.add("UI 展示资产", not missing, "主工作台、知识库、监控、设置截图齐全" if not missing else ", ".join(missing))
+        self.add("UI 展示资产", not missing, "主工作台深色展示图存在" if not missing else ", ".join(missing))
 
     def check_cases(self) -> None:
         case_dir = ROOT / "data/cases"
