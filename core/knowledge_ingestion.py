@@ -470,6 +470,143 @@ class KnowledgeIngestionService:
             **manifest,
         }
 
+    def rebuild_indexes(self) -> dict[str, Any]:
+        """基于当前已解析文本块重建向量索引、KG 关系、统计清单和检索验证状态。"""
+
+        self.ensure_dirs()
+        documents = _read_jsonl(self.documents_path)
+        chunks, duplicate_chunk_count = self._dedupe_chunks(_read_jsonl(self.chunks_path))
+        retained_chunk_ids = {str(row.get("chunk_id") or "") for row in chunks}
+        if len(chunks) != len(_read_jsonl(self.chunks_path)):
+            _write_jsonl(self.chunks_path, chunks)
+
+        entities: list[dict[str, Any]] = []
+        relations: list[dict[str, Any]] = []
+        document_titles = {str(row.get("document_id") or ""): str(row.get("title") or row.get("file_name") or row.get("document_id") or "") for row in documents}
+        for document_id, title in document_titles.items():
+            document_chunks = [row for row in chunks if str(row.get("source_id") or "") == document_id]
+            doc_entities, doc_relations = self._build_kg(document_id, title, document_chunks)
+            entities.extend(doc_entities)
+            relations.extend(doc_relations)
+        entities = self._dedupe_entities(entities)
+        relations = self._dedupe_relations(
+            [row for row in relations if str(row.get("evidence_chunk_id") or "") in retained_chunk_ids]
+        )
+        _write_jsonl(self.entities_path, entities)
+        _write_jsonl(self.relations_path, relations)
+
+        vector_stats = self._sync_vector_index(chunks)
+        verification = (
+            self._verify_retrieval_evidence(
+                str(documents[-1].get("document_id") or ""),
+                str(documents[-1].get("title") or documents[-1].get("file_name") or ""),
+                chunks,
+                relations,
+            )
+            if documents
+            else {
+                "status": "warning",
+                "message": "当前没有可验证的入库资料",
+                "detail": "document_count=0",
+                "hit_count": 0,
+                "relation_hit_count": 0,
+                "invalid_relation_refs": [],
+                "evidence_chunks": [],
+                "evidence_relations": [],
+                "verified_at": _utc_now(),
+            }
+        )
+        entity_counts: dict[str, int] = {}
+        relation_counts: dict[str, int] = {}
+        for entity in entities:
+            entity_type = str(entity.get("type") or "Unknown")
+            entity_counts[entity_type] = entity_counts.get(entity_type, 0) + 1
+        for relation in relations:
+            relation_type = str(relation.get("relation") or "UNKNOWN")
+            relation_counts[relation_type] = relation_counts.get(relation_type, 0) + 1
+        self.stats_path.write_text(
+            json.dumps(
+                {
+                    "total_entities": len(entities),
+                    "total_relations": len(relations),
+                    "entity_counts": entity_counts,
+                    "relation_type_counts": relation_counts,
+                    "updated_at": _utc_now(),
+                },
+                ensure_ascii=False,
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
+        steps = [
+            PipelineStep(STEP_PARSE, "success" if documents else "warning", f"复用 {len(documents)} 份已解析资料"),
+            PipelineStep(STEP_CHUNK, "success" if chunks else "warning", f"复用 {len(chunks)} 个去重文本块", f"去重 {duplicate_chunk_count} 个重复文本块"),
+            PipelineStep(
+                STEP_VECTOR,
+                str(vector_stats.get("status") or "warning"),
+                str(vector_stats.get("message") or "向量索引状态未知"),
+                str(vector_stats.get("detail") or ""),
+            ),
+            PipelineStep(STEP_KG, "success" if relations else "warning", f"重建 {len(entities)} 个实体、{len(relations)} 条关系"),
+            PipelineStep(
+                STEP_RETRIEVAL,
+                str(verification.get("status") or "warning"),
+                str(verification.get("message") or ""),
+                str(verification.get("detail") or ""),
+            ),
+        ]
+        self._write_manifest()
+        manifest = self._load_manifest()
+        manifest["pipeline"] = [asdict(step) for step in steps]
+        manifest["last_reindex"] = {
+            "updated_at": _utc_now(),
+            "document_count": len(documents),
+            "rag_chunk_count": len(chunks),
+            "duplicate_chunk_count": duplicate_chunk_count,
+            "kg_entity_count": len(entities),
+            "kg_relation_count": len(relations),
+            "vector_status": vector_stats,
+            "retrieval_verification": verification,
+        }
+        manifest["last_retrieval_verification"] = verification
+        self.manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
+        return manifest
+
+    def export_snapshot(self, output_path: str | Path | None = None) -> Path:
+        """导出当前项目知识库快照，包含文档、文本块、实体、关系、统计和 manifest。"""
+
+        self.ensure_dirs()
+        if output_path is None:
+            output_dir = self.base_dir / "snapshots"
+            output_dir.mkdir(parents=True, exist_ok=True)
+            output_path = output_dir / f"knowledge_snapshot_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+        target = Path(output_path)
+        if not target.is_absolute():
+            target = self.base_dir / target
+        target.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "schema": "csagent_project_knowledge_snapshot_v1",
+            "exported_at": _utc_now(),
+            "manifest": self._load_manifest(),
+            "documents": _read_jsonl(self.documents_path),
+            "blocks": _read_jsonl(self.blocks_path),
+            "chunks": _read_jsonl(self.chunks_path),
+            "entities": _read_jsonl(self.entities_path),
+            "relations": _read_jsonl(self.relations_path),
+            "kg_stats": self._load_json_file(self.stats_path),
+        }
+        target.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        return target
+
+    def _load_json_file(self, path: Path) -> dict[str, Any]:
+        if not path.exists():
+            return {}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError):
+            return {}
+        return payload if isinstance(payload, dict) else {}
+
     def _sync_vector_index(self, chunks: list[dict[str, Any]]) -> dict[str, Any]:
         if not self.vector_enabled:
             return {

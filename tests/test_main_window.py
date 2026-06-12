@@ -6,7 +6,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QPushButton
 
 from core.task_parser import TaskParser
 from gui.main_window import MainWindow
@@ -368,6 +368,43 @@ def test_main_window_shell_layout_keeps_reference_workbench_structure(monkeypatc
             assert window.stack.currentWidget().width() > 0
             assert window.left_stack.currentWidget().width() > 0
             assert window.right_stack.currentWidget().width() > 0
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_visible_workbench_buttons_keep_text_inside_layout(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window.resize(1680, 980)
+        window.show()
+        app.processEvents()
+
+        checked_buttons: set[int] = set()
+        for index in range(len(window.nav_buttons)):
+            window._switch_workspace_page(index)
+            app.processEvents()
+            visible_buttons = [
+                button
+                for button in window.findChildren(QPushButton)
+                if button.isVisible() and button.text().strip()
+            ]
+            assert visible_buttons
+            for button in visible_buttons:
+                checked_buttons.add(id(button))
+                text_width = button.fontMetrics().horizontalAdvance(button.text())
+                assert text_width <= max(0, button.width() - 18), (
+                    button.text(),
+                    button.width(),
+                    text_width,
+                    index,
+                )
+
+        assert id(window.knowledge_widget.batch_button) in checked_buttons
+        assert id(window.knowledge_widget.rebuild_button) in checked_buttons
+        assert id(window.knowledge_widget.export_snapshot_button) in checked_buttons
     finally:
         window.close()
         app.processEvents()

@@ -76,11 +76,28 @@ class FakeKnowledge:
 
 
 class FakeIngestionService:
-    def __init__(self) -> None:
+    def __init__(self, *args, **kwargs) -> None:
         self.documents_path = _DOCS_PATH
 
     def status(self) -> dict:
         return FakeKnowledge().status()
+
+    def rebuild_indexes(self) -> dict:
+        status = FakeKnowledge().status()
+        status["last_reindex"] = {
+            "document_count": status["document_count"],
+            "rag_chunk_count": status["rag_chunk_count"],
+            "kg_relation_count": status["kg_relation_count"],
+        }
+        return status
+
+    def export_snapshot(self):
+        path = _DOCS_PATH.parent / "knowledge_snapshot_test.json"
+        path.write_text(
+            json.dumps({"schema": "csagent_project_knowledge_snapshot_v1", "documents": [1]}, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return path
 
 
 def test_knowledge_widget_renders_runtime_pipeline_and_evidence(monkeypatch, tmp_path) -> None:
@@ -151,6 +168,68 @@ def test_knowledge_widget_updates_pipeline_from_ingest_progress(monkeypatch, tmp
         assert widget.pipeline_widget.steps[1].status == "running"
         assert widget.pipeline_widget.steps[4].name == "检索验证 / 证据引用"
         assert widget.parser_pill.text == "语义分块"
+    finally:
+        widget.close()
+        app.processEvents()
+
+
+def test_knowledge_widget_runs_rebuild_and_snapshot_actions(monkeypatch, tmp_path) -> None:
+    global _DOCS_PATH
+    _DOCS_PATH = tmp_path / "documents.jsonl"
+    _DOCS_PATH.write_text(
+        json.dumps(
+            {
+                "title": "pressure_hull_notes",
+                "parser_backend": "text",
+                "chunk_count": 9,
+                "file_sha256": "abcdef1234567890",
+                "updated_at": "2026-06-12T12:00:00+00:00",
+                "stored_path": "knowledge/runtime/uploads/DOC_1.md",
+            },
+            ensure_ascii=False,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    monkeypatch.setattr("gui.knowledge_widget.DomainKnowledgeBase", FakeKnowledge)
+    monkeypatch.setattr("gui.knowledge_widget.KnowledgeIngestionService", FakeIngestionService)
+
+    app = _app()
+    widget = KnowledgeWidget()
+    try:
+        for button in [
+            widget.upload_button,
+            widget.batch_button,
+            widget.rebuild_button,
+            widget.export_snapshot_button,
+            widget.refresh_button,
+        ]:
+            assert button.isEnabled() is True
+
+        widget._run_maintenance("rebuild")
+        deadline = time.monotonic() + 10
+        while widget._maintenance_thread is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.02)
+        app.processEvents()
+
+        assert widget._maintenance_thread is None
+        assert widget.parser_pill.status == "success"
+        assert widget.parser_pill.text == "索引重建完成"
+        assert widget.pipeline_widget.steps[2].status == "success"
+
+        widget._run_maintenance("export")
+        deadline = time.monotonic() + 10
+        while widget._maintenance_thread is not None and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.02)
+        app.processEvents()
+
+        assert widget.parser_pill.text == "快照已导出"
+        assert "knowledge_snapshot_test.json" in widget.toHtml()
+        assert (_DOCS_PATH.parent / "knowledge_snapshot_test.json").exists()
+        assert widget.export_snapshot_button.isEnabled() is True
     finally:
         widget.close()
         app.processEvents()

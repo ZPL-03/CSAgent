@@ -42,19 +42,66 @@ class KnowledgeIngestWorker(QObject):
     finished = pyqtSignal(dict)
     failed = pyqtSignal(str)
 
-    def __init__(self, path: str) -> None:
+    def __init__(self, paths: str | list[str]) -> None:
         super().__init__()
-        self.path = path
+        if isinstance(paths, str):
+            self.paths = [paths]
+        else:
+            self.paths = [str(path) for path in paths]
+
+    def run(self) -> None:
+        results: list[dict[str, Any]] = []
+        failures: list[dict[str, str]] = []
+        service = KnowledgeIngestionService(progress_callback=self.progress.emit)
+        for path in self.paths:
+            if not path:
+                continue
+            try:
+                result = service.ingest_file(path)
+            except Exception as exc:
+                failures.append({"path": path, "error": str(exc)})
+                continue
+            payload = asdict(result)
+            payload["success"] = result.success
+            results.append(payload)
+        if not results and failures:
+            self.failed.emit("；".join(f"{Path(item['path']).name}: {item['error']}" for item in failures))
+            return
+        self.finished.emit(
+            {
+                "success": not failures,
+                "results": results,
+                "failures": failures,
+                "batch_total": len([path for path in self.paths if path]),
+                "batch_success_count": len(results),
+                "batch_failed_count": len(failures),
+            }
+        )
+
+
+class KnowledgeMaintenanceWorker(QObject):
+    """在后台线程执行知识库维护操作。"""
+
+    finished = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+
+    def __init__(self, operation: str) -> None:
+        super().__init__()
+        self.operation = operation
 
     def run(self) -> None:
         try:
-            result = KnowledgeIngestionService(progress_callback=self.progress.emit).ingest_file(self.path)
+            service = KnowledgeIngestionService()
+            if self.operation == "rebuild":
+                self.finished.emit({"operation": self.operation, "result": service.rebuild_indexes()})
+                return
+            if self.operation == "export":
+                path = service.export_snapshot()
+                self.finished.emit({"operation": self.operation, "path": str(path)})
+                return
+            raise RuntimeError(f"未知知识库维护操作：{self.operation}")
         except Exception as exc:
             self.failed.emit(str(exc))
-            return
-        payload = asdict(result)
-        payload["success"] = result.success
-        self.finished.emit(payload)
 
 
 class KnowledgeWidget(QWidget):
@@ -68,6 +115,8 @@ class KnowledgeWidget(QWidget):
         self._last_task: dict[str, Any] | None = None
         self._ingest_thread: QThread | None = None
         self._ingest_worker: KnowledgeIngestWorker | None = None
+        self._maintenance_thread: QThread | None = None
+        self._maintenance_worker: KnowledgeMaintenanceWorker | None = None
 
         self.store_pill = StatusPill("知识库待入库", "pending")
         self.rag_pill = StatusPill("RAG 0 chunks", "pending")
@@ -79,6 +128,9 @@ class KnowledgeWidget(QWidget):
         self.search_input.setPlaceholderText("搜索知识库：外压圆柱壳 屈曲 缺陷敏感性 制造质量")
         self.search_button = QPushButton("执行混合检索")
         self.upload_button = QPushButton("上传资料并入库")
+        self.batch_button = QPushButton("批量解析")
+        self.rebuild_button = QPushButton("重建索引")
+        self.export_snapshot_button = QPushButton("导出快照")
         self.refresh_button = QPushButton("刷新状态")
 
         self.document_table = QTableWidget(0, 6)
@@ -115,8 +167,15 @@ class KnowledgeWidget(QWidget):
         top_layout.setSpacing(10)
         top_layout.addWidget(self.search_input, 1)
         top_layout.addWidget(self.search_button)
-        top_layout.addWidget(self.upload_button)
-        top_layout.addWidget(self.refresh_button)
+
+        action_layout = QHBoxLayout()
+        action_layout.setSpacing(10)
+        action_layout.addWidget(self.upload_button)
+        action_layout.addWidget(self.batch_button)
+        action_layout.addWidget(self.rebuild_button)
+        action_layout.addWidget(self.export_snapshot_button)
+        action_layout.addWidget(self.refresh_button)
+        action_layout.addStretch(1)
 
         pill_layout = QHBoxLayout()
         pill_layout.setSpacing(10)
@@ -149,6 +208,7 @@ class KnowledgeWidget(QWidget):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.setSpacing(12)
         layout.addLayout(top_layout)
+        layout.addLayout(action_layout)
         layout.addLayout(pill_layout)
         layout.addWidget(splitter, 1)
 
@@ -156,6 +216,9 @@ class KnowledgeWidget(QWidget):
         self.search_button.clicked.connect(self._search_from_input)
         self.search_input.returnPressed.connect(self._search_from_input)
         self.upload_button.clicked.connect(self._select_and_ingest_file)
+        self.batch_button.clicked.connect(self._select_and_ingest_files)
+        self.rebuild_button.clicked.connect(lambda: self._run_maintenance("rebuild"))
+        self.export_snapshot_button.clicked.connect(lambda: self._run_maintenance("export"))
         self.refresh_button.clicked.connect(lambda: self.refresh(load_evidence=False))
 
     def refresh(
@@ -191,11 +254,28 @@ class KnowledgeWidget(QWidget):
         if path:
             self.ingest_path(path)
 
+    def _select_and_ingest_files(self) -> None:
+        paths, _ = QFileDialog.getOpenFileNames(
+            self,
+            "选择需要批量解析入库的资料",
+            "",
+            "知识资料 (*.pdf *.docx *.pptx *.md *.markdown *.txt *.csv *.tsv *.xlsx *.xlsm *.png *.jpg *.jpeg *.inp *.py *.for *.f90 *.log);;所有文件 (*.*)",
+        )
+        if paths:
+            self.ingest_paths(paths)
+
     def ingest_path(self, path: str | Path) -> None:
         """供 GUI 和测试直接触发资料入库。"""
+        self.ingest_paths([path])
+
+    def ingest_paths(self, paths: list[str | Path]) -> None:
+        """批量触发资料入库。"""
         if self._ingest_thread is not None:
             return
-        self.upload_button.setEnabled(False)
+        normalized_paths = [str(path) for path in paths if str(path)]
+        if not normalized_paths:
+            return
+        self._set_operation_buttons_enabled(False)
         self.parser_pill.set_state("解析运行中", "running")
         self.pipeline_widget.set_steps(
             [
@@ -207,7 +287,7 @@ class KnowledgeWidget(QWidget):
             ]
         )
         self._ingest_thread = QThread(self)
-        self._ingest_worker = KnowledgeIngestWorker(str(path))
+        self._ingest_worker = KnowledgeIngestWorker(normalized_paths)
         self._ingest_worker.moveToThread(self._ingest_thread)
         self._ingest_thread.started.connect(self._ingest_worker.run)
         self._ingest_worker.progress.connect(self._on_ingest_progress)
@@ -223,7 +303,18 @@ class KnowledgeWidget(QWidget):
             self._ingest_thread.wait()
         self._ingest_thread = None
         self._ingest_worker = None
-        self.upload_button.setEnabled(True)
+        self._set_operation_buttons_enabled(True)
+
+    def _set_operation_buttons_enabled(self, enabled: bool) -> None:
+        for button in [
+            self.search_button,
+            self.upload_button,
+            self.batch_button,
+            self.rebuild_button,
+            self.export_snapshot_button,
+            self.refresh_button,
+        ]:
+            button.setEnabled(enabled)
 
     def _on_ingest_progress(self, steps: list) -> None:
         self.pipeline_widget.set_steps(steps)
@@ -232,10 +323,23 @@ class KnowledgeWidget(QWidget):
             self.parser_pill.set_state(str(active_step.get("name") or "入库运行中"), "running")
 
     def _on_ingest_finished(self, payload: dict) -> None:
-        steps = payload.get("steps") if isinstance(payload.get("steps"), list) else []
+        results = payload.get("results") if isinstance(payload.get("results"), list) else []
+        last_result = results[-1] if results else payload
+        steps = last_result.get("steps") if isinstance(last_result.get("steps"), list) else []
         self.pipeline_widget.set_steps(steps)
-        self.parser_pill.set_state(f"{payload.get('parser_backend') or '解析'} 完成", "success")
+        success_count = int(payload.get("batch_success_count") or (1 if payload.get("success") else 0))
+        failed_count = int(payload.get("batch_failed_count") or 0)
+        status = "warning" if failed_count else "success"
+        label = f"入库完成 {success_count} / 失败 {failed_count}" if payload.get("batch_total") else f"{payload.get('parser_backend') or '解析'} 完成"
+        self.parser_pill.set_state(label, status)
+        failure_html = ""
+        if failed_count:
+            failures = payload.get("failures") if isinstance(payload.get("failures"), list) else []
+            detail = "<br>".join(escape(f"{Path(str(item.get('path') or '')).name}: {item.get('error') or ''}") for item in failures)
+            failure_html = f"<h3>批量入库部分失败</h3><p>{detail}</p>"
         self.refresh(query_text=self.search_input.text().strip() or DEFAULT_EVIDENCE_QUERY)
+        if failure_html:
+            self.evidence_browser.setHtml(failure_html)
 
     def _on_ingest_failed(self, message: str) -> None:
         self.parser_pill.set_state("解析失败", "failed")
@@ -249,6 +353,61 @@ class KnowledgeWidget(QWidget):
             ]
         )
         self.evidence_browser.setHtml(f"<h3>入库失败</h3><p>{escape(message)}</p>")
+
+    def _run_maintenance(self, operation: str) -> None:
+        if self._maintenance_thread is not None or self._ingest_thread is not None:
+            return
+        self._set_operation_buttons_enabled(False)
+        if operation == "rebuild":
+            self.parser_pill.set_state("重建索引中", "running")
+            self.pipeline_widget.set_steps(
+                [
+                    {"name": "MinerU / Docling 文档解析", "status": "success", "message": "复用已解析资料"},
+                    {"name": "语义分块", "status": "running", "message": "读取并去重文本块"},
+                    {"name": "BGE-M3 向量化索引", "status": "pending", "message": "等待重建"},
+                    {"name": "Neo4j 实体/关系抽取", "status": "pending", "message": "等待重建"},
+                    {"name": "检索验证 / 证据引用", "status": "pending", "message": "等待验证"},
+                ]
+            )
+        else:
+            self.parser_pill.set_state("导出快照中", "running")
+        self._maintenance_thread = QThread(self)
+        self._maintenance_worker = KnowledgeMaintenanceWorker(operation)
+        self._maintenance_worker.moveToThread(self._maintenance_thread)
+        self._maintenance_thread.started.connect(self._maintenance_worker.run)
+        self._maintenance_worker.finished.connect(self._on_maintenance_finished)
+        self._maintenance_worker.failed.connect(self._on_maintenance_failed)
+        self._maintenance_worker.finished.connect(self._cleanup_maintenance_worker)
+        self._maintenance_worker.failed.connect(self._cleanup_maintenance_worker)
+        self._maintenance_thread.start()
+
+    def _cleanup_maintenance_worker(self) -> None:
+        if self._maintenance_thread is not None:
+            self._maintenance_thread.quit()
+            self._maintenance_thread.wait()
+        self._maintenance_thread = None
+        self._maintenance_worker = None
+        self._set_operation_buttons_enabled(True)
+
+    def _on_maintenance_finished(self, payload: dict) -> None:
+        operation = payload.get("operation")
+        if operation == "rebuild":
+            result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
+            steps = result.get("pipeline") if isinstance(result.get("pipeline"), list) else []
+            if steps:
+                self.pipeline_widget.set_steps(steps)
+            self.refresh(query_text=self.search_input.text().strip() or DEFAULT_EVIDENCE_QUERY)
+            self.parser_pill.set_state("索引重建完成", "success")
+            return
+        if operation == "export":
+            path = str(payload.get("path") or "")
+            self.refresh(load_evidence=False)
+            self.parser_pill.set_state("快照已导出", "success")
+            self.evidence_browser.setHtml(f"<h3>知识库快照已导出</h3><p>{escape(path)}</p>")
+
+    def _on_maintenance_failed(self, message: str) -> None:
+        self.parser_pill.set_state("维护失败", "failed")
+        self.evidence_browser.setHtml(f"<h3>知识库维护失败</h3><p>{escape(message)}</p>")
 
     def _search_from_input(self) -> None:
         query = self.search_input.text().strip() or DEFAULT_EVIDENCE_QUERY

@@ -94,3 +94,43 @@ def test_runtime_knowledge_ingestion_emits_step_progress(tmp_path, monkeypatch) 
     assert progress_events[-1][3]["status"] in {"success", "warning"}
     assert progress_events[-1][4]["name"] == "检索验证 / 证据引用"
     assert progress_events[-1][4]["status"] == "success"
+
+
+def test_runtime_knowledge_rebuild_and_snapshot_export(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_USE_HASH_EMBEDDING", "1")
+    source = tmp_path / "pressure_hull_rebuild.md"
+    source.write_text(
+        "\n\n".join(
+            [
+                "# 外压耐压壳知识入库",
+                "composite pressure hull 在 external pressure 下需要结合 ASME RD-1172、PBIPF 与 Abaqus 校核。",
+                "buckling、postbuckling、initial imperfection 与 filament winding 质量控制都需要进入证据链。",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    service = KnowledgeIngestionService(base_dir=tmp_path / "knowledge", chunk_token_size=42, chunk_overlap_tokens=6)
+    result = service.ingest_file(source)
+    assert result.success
+
+    rebuilt = service.rebuild_indexes()
+
+    assert rebuilt["document_count"] == 1
+    assert rebuilt["rag_chunk_count"] >= 1
+    assert rebuilt["kg_entity_count"] >= 1
+    assert rebuilt["kg_relation_count"] >= 1
+    assert rebuilt["last_reindex"]["duplicate_chunk_count"] == 0
+    assert rebuilt["last_retrieval_verification"]["hit_count"] >= 1
+    assert rebuilt["pipeline"][0]["name"] == "MinerU / Docling 文档解析"
+    assert rebuilt["pipeline"][2]["name"] == "BGE-M3 向量化索引"
+
+    snapshot_path = service.export_snapshot()
+    payload = json.loads(snapshot_path.read_text(encoding="utf-8"))
+
+    assert payload["schema"] == "csagent_project_knowledge_snapshot_v1"
+    assert payload["manifest"]["document_count"] == 1
+    assert len(payload["documents"]) == 1
+    assert len(payload["chunks"]) == rebuilt["rag_chunk_count"]
+    assert len(payload["entities"]) == rebuilt["kg_entity_count"]
+    assert len(payload["relations"]) == rebuilt["kg_relation_count"]
