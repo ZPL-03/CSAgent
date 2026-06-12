@@ -15,6 +15,7 @@ from core.task_contract import (
     task_payload_from_request,
 )
 from workflow.runtime import DesignWorkflowRuntime
+from workflow.event_store import WorkflowEventStore
 
 
 ConversationEventCallback = Optional[Callable[[str, str, Dict], None]]
@@ -47,9 +48,15 @@ class ConversationState:
 class ConversationFlowController:
     """把主流程组织成带关键确认节点的对话状态机。"""
 
-    def __init__(self, orchestrator: OrchestratorAgent, event_callback: ConversationEventCallback = None) -> None:
+    def __init__(
+        self,
+        orchestrator: OrchestratorAgent,
+        event_callback: ConversationEventCallback = None,
+        event_store: WorkflowEventStore | None = None,
+    ) -> None:
         self.orchestrator = orchestrator
         self.event_callback = event_callback
+        self.event_store = event_store
 
     def _emit(self, event_type: str, message: str, payload: Dict | None = None) -> None:
         if self.event_callback:
@@ -89,8 +96,25 @@ class ConversationFlowController:
         if commentary:
             self._emit("assistant_commentary", commentary, {"stage": stage, **payload})
 
+    def _emit_runtime_event(self, event_type: str, message: str, payload: Dict | None = None) -> None:
+        record = payload or {}
+        self._emit(
+            "workflow_runtime_event",
+            message,
+            {
+                "runtime_event_type": event_type,
+                "runtime_agent": record.get("agent") or "WorkflowRuntime",
+                "runtime_stage": record.get("stage") or "",
+                "record": record,
+            },
+        )
+
     def _runtime(self) -> DesignWorkflowRuntime:
-        return DesignWorkflowRuntime(orchestrator=self.orchestrator)
+        return DesignWorkflowRuntime(
+            orchestrator=self.orchestrator,
+            event_store=self.event_store,
+            event_callback=self._emit_runtime_event,
+        )
 
     def start(self, instruction: str, overrides: Dict | None = None) -> ConversationState:
         state = ConversationState(instruction=instruction, stage="parsing")

@@ -330,6 +330,31 @@ def test_main_window_updates_model_pill_for_fallback_llm_trace(monkeypatch) -> N
         app.processEvents()
 
 
+def test_main_window_routes_runtime_events_to_logs_without_chat_noise(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        before_chat = window.chat_widget.toPlainText()
+        event = {
+            "event_type": "workflow_runtime_event",
+            "payload": {
+                "runtime_event_type": "node_started",
+                "runtime_agent": "parse_task",
+                "runtime_stage": "parse_task",
+            },
+        }
+
+        window._handle_message("FLOW", "节点开始：parse_task", event)
+
+        assert "node_started @ parse_task" in window.log_widget.toPlainText()
+        assert "节点开始：parse_task" not in window.chat_widget.toPlainText()
+        assert window.chat_widget.toPlainText() == before_chat
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_main_window_shell_layout_keeps_reference_workbench_structure(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()

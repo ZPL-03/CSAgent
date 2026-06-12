@@ -141,7 +141,13 @@ class PipelineWorker(QObject):
     def run(self) -> None:
         try:
             orchestrator = OrchestratorAgent(progress_callback=self._emit_agent)
-            controller = ConversationFlowController(orchestrator, event_callback=self._emit_flow)
+            workflow_db_path = self.payload.get("workflow_db_path")
+            event_store = WorkflowEventStore(Path(str(workflow_db_path))) if workflow_db_path else None
+            controller = ConversationFlowController(
+                orchestrator,
+                event_callback=self._emit_flow,
+                event_store=event_store,
+            )
 
             if self.action == "conversation_start":
                 state = controller.start(self.payload["instruction"], overrides=self.payload.get("overrides"))
@@ -1330,7 +1336,9 @@ class MainWindow(QMainWindow):
     def _run_action(self, action: str, payload: dict, status_text: str) -> None:
         self._set_busy(True, status_text)
         self.worker_thread = QThread(self)
-        self.worker = PipelineWorker(action, payload)
+        worker_payload = dict(payload)
+        worker_payload.setdefault("workflow_db_path", str(self.workflow_event_store.db_path))
+        self.worker = PipelineWorker(action, worker_payload)
         self.worker.moveToThread(self.worker_thread)
         self.worker_thread.started.connect(self.worker.run)
         self.worker.message.connect(self._handle_message)
@@ -1784,6 +1792,17 @@ class MainWindow(QMainWindow):
             sender_label = "助手"
         else:
             sender_label = sender
+
+        if event_type == "workflow_runtime_event":
+            runtime_agent = str(payload.get("runtime_agent") or sender_label)
+            runtime_type = str(payload.get("runtime_event_type") or "runtime")
+            runtime_stage = str(payload.get("runtime_stage") or "")
+            suffix = f" @ {runtime_stage}" if runtime_stage else ""
+            self.log_widget.append_log(runtime_agent, f"[{runtime_type}{suffix}] {message}")
+            self.monitor_log_widget.append_log(runtime_agent, f"[{runtime_type}{suffix}] {message}")
+            self._refresh_run_selector()
+            return
+
         self.chat_widget.add_message(sender_label, message)
         self.log_widget.append_log(sender_label, f"[{event_type}] {message}")
         self.monitor_log_widget.append_log(sender_label, f"[{event_type}] {message}")
