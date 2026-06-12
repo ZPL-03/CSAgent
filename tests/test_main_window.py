@@ -568,6 +568,25 @@ def test_chat_short_messages_do_not_expand_to_panel_width() -> None:
         app.processEvents()
 
 
+def test_chat_bubble_width_tracks_rendered_text_width() -> None:
+    app = _app()
+    widget = ChatWidget()
+    try:
+        widget.resize(1120, 420)
+        widget.show()
+        app.processEvents()
+
+        text = "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，生成 12 个候选。"
+        target_max, target_min = widget._responsive_width(920, 220)
+        rendered_width = widget._text_metrics(13).horizontalAdvance(text)
+        expected_width = min(target_max, max(target_min, rendered_width + 28))
+
+        assert widget._content_width(text, target_max, target_min) == expected_width
+    finally:
+        widget.close()
+        app.processEvents()
+
+
 def test_light_theme_uses_light_log_and_sidebar_surfaces() -> None:
     stylesheet = application_stylesheet("Microsoft YaHei UI", "light")
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from PyQt6.QtCore import QRect, Qt
+from PyQt6.QtGui import QFont, QFontMetrics
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
 from gui.theme import resolve_theme
@@ -145,8 +146,8 @@ class ChatWidget(QWidget):
         label.setWordWrap(True)
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        weight = "700" if bold else "400"
-        label.setStyleSheet(f"color:{color};font-size:{size}px;font-weight:{weight};background:transparent;")
+        label.setFont(self._text_font(size, bold))
+        label.setStyleSheet(f"color:{color};background:transparent;")
         return label
 
     def _single_line_label(self, text: str, color: str, size: int = 13, bold: bool = False) -> QLabel:
@@ -154,6 +155,15 @@ class ChatWidget(QWidget):
         label.setWordWrap(False)
         label.setFixedHeight(max(22, label.fontMetrics().height() + 8))
         return label
+
+    def _text_font(self, size: int = 13, bold: bool = False) -> QFont:
+        font = QFont(self.font())
+        font.setPixelSize(size)
+        font.setWeight(QFont.Weight.Bold if bold else QFont.Weight.Normal)
+        return font
+
+    def _text_metrics(self, size: int = 13, bold: bool = False) -> QFontMetrics:
+        return QFontMetrics(self._text_font(size, bold))
 
     def _responsive_width(self, max_width: int, min_width: int) -> tuple[int, int]:
         viewport_width = max(self.scroll_area.viewport().width(), self.width())
@@ -166,51 +176,17 @@ class ChatWidget(QWidget):
         target_min = min(max(min_width, 180), target_max)
         return target_max, target_min
 
-    @staticmethod
-    def _is_cjk(char: str) -> bool:
-        return "\u3400" <= char <= "\u9fff"
-
-    def _display_units(self, text: str) -> float:
-        units = 0.0
-        for char in text:
-            if char.isspace():
-                units += 0.25
-            elif self._is_cjk(char):
-                units += 1.0
-            elif char.isascii():
-                units += 0.58
-            else:
-                units += 0.85
-        return units
-
-    def _token_width(self, token: str) -> int:
-        metrics = self.fontMetrics()
-        if any(self._is_cjk(char) for char in token):
-            cjk_unit = max(metrics.horizontalAdvance("汉"), metrics.averageCharWidth())
-            return min(metrics.horizontalAdvance(token), int(cjk_unit * 10))
-        return metrics.horizontalAdvance(token)
-
     def _content_width(self, text: str, target_max: int, target_min: int) -> int:
-        metrics = self.fontMetrics()
+        metrics = self._text_metrics(13)
         value = str(text)
-        separators = "，。；;、,，：:（）()[]【】"
-        token_source = value
-        for separator in separators:
-            token_source = token_source.replace(separator, " ")
-        tokens = [item for item in token_source.split() if item]
-        longest_token = max((self._token_width(item) for item in tokens), default=0)
-        units_by_line = [self._display_units(line) for line in value.splitlines() if line.strip()]
-        display_units = max(units_by_line, default=self._display_units(value))
-        cjk_unit = max(metrics.horizontalAdvance("汉"), metrics.averageCharWidth())
-        line_units = min(76, max(14, int(display_units * 1.14)))
-        estimated_line = int(line_units * cjk_unit + 30)
-        natural = max(estimated_line, longest_token + 30)
+        line_widths = [metrics.horizontalAdvance(line.rstrip()) for line in value.splitlines() if line.strip()]
+        natural = max(line_widths, default=0) + 28
         if natural >= target_max:
             return target_max
         return max(target_min, min(target_max, natural))
 
     def _wrapped_text_height(self, text: str, width: int) -> int:
-        metrics = self.fontMetrics()
+        metrics = self._text_metrics(13)
         rect = metrics.boundingRect(
             QRect(0, 0, max(120, width), 4000),
             Qt.TextFlag.TextWordWrap,
