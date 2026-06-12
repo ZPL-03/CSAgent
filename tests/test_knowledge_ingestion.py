@@ -30,7 +30,7 @@ def test_runtime_knowledge_empty_status_exposes_pipeline_contract(tmp_path) -> N
         "MinerU / Docling 文档解析",
         "语义分块",
         "BGE-M3 向量化索引",
-        "Neo4j 实体/关系抽取",
+        "KG 实体/关系抽取",
         "检索验证 / 证据引用",
     ]
 

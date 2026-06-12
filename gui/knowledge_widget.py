@@ -494,7 +494,7 @@ class KnowledgeWidget(QWidget):
                 {"name": "MinerU / Docling 文档解析", "status": "running", "message": "正在解析上传资料"},
                 {"name": "语义分块", "status": "pending", "message": "等待解析输出"},
                 {"name": "BGE-M3 向量化索引", "status": "pending", "message": "等待文本块"},
-                {"name": "Neo4j 实体/关系抽取", "status": "pending", "message": "等待文本块"},
+                {"name": "KG 实体/关系抽取", "status": "pending", "message": "等待文本块"},
                 {"name": "检索验证 / 证据引用", "status": "pending", "message": "等待索引和关系写入"},
             ]
         )
@@ -560,7 +560,7 @@ class KnowledgeWidget(QWidget):
                 {"name": "MinerU / Docling 文档解析", "status": "failed", "message": message},
                 {"name": "语义分块", "status": "pending", "message": "解析失败，未生成文本块"},
                 {"name": "BGE-M3 向量化索引", "status": "pending", "message": "解析失败，未更新索引"},
-                {"name": "Neo4j 实体/关系抽取", "status": "pending", "message": "解析失败，未抽取关系"},
+                {"name": "KG 实体/关系抽取", "status": "pending", "message": "解析失败，未抽取关系"},
                 {"name": "检索验证 / 证据引用", "status": "pending", "message": "解析失败，未生成证据"},
             ]
         )
@@ -577,7 +577,7 @@ class KnowledgeWidget(QWidget):
                     {"name": "MinerU / Docling 文档解析", "status": "success", "message": "复用已解析资料"},
                     {"name": "语义分块", "status": "running", "message": "读取并去重文本块"},
                     {"name": "BGE-M3 向量化索引", "status": "pending", "message": "等待重建"},
-                    {"name": "Neo4j 实体/关系抽取", "status": "pending", "message": "等待重建"},
+                    {"name": "KG 实体/关系抽取", "status": "pending", "message": "等待重建"},
                     {"name": "检索验证 / 证据引用", "status": "pending", "message": "等待验证"},
                 ]
             )
@@ -797,7 +797,7 @@ class KnowledgeWidget(QWidget):
                 {"name": "MinerU / Docling 文档解析", "status": "pending", "message": "等待用户上传资料"},
                 {"name": "语义分块", "status": "pending", "message": "chunk_token_size / overlap 由配置控制"},
                 {"name": "BGE-M3 向量化索引", "status": "pending", "message": "等待文本块写入索引"},
-                {"name": "Neo4j 实体/关系抽取", "status": "pending", "message": "等待实体关系抽取"},
+                {"name": "KG 实体/关系抽取", "status": "pending", "message": "等待实体关系抽取"},
                 {"name": "检索验证 / 证据引用", "status": "pending", "message": "等待可引用证据"},
             ]
         )

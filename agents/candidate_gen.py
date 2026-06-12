@@ -165,7 +165,7 @@ class CandidateGenAgent(BaseAgent):
         return lines
 
     def _knowledge_guidance(self, task: Dict[str, Any], top_k: int) -> List[str]:
-        """仅为 LLM 路径检索外部知识库/知识图谱片段，避免与历史案例迁移职责混用。"""
+        """仅为 LLM 路径检索项目知识库/知识图谱片段，避免与历史案例迁移职责混用。"""
         return self.knowledge_base.format_snippets(task, top_k=max(1, min(3, top_k)))
 
     def _build_prompt(
@@ -184,7 +184,7 @@ class CandidateGenAgent(BaseAgent):
         knowledge_text = (
             "\n\n".join(knowledge_guidance)
             if knowledge_guidance
-            else "当前没有可用外部知识库/知识图谱片段，请仅依据任务约束生成。"
+            else "当前没有可用项目知识库/知识图谱片段，请仅依据任务约束生成。"
         )
         system_prompt = (
             "你是 csllm 领域微调模型中的复合材料耐压壳候选方案生成助手。"
@@ -202,7 +202,7 @@ class CandidateGenAgent(BaseAgent):
             f"需要生成的 LLM 来源候选数量：{desired_count}\n\n"
             f"用户已给信息：\n{fact_text if fact_text else '- 仅给出候选数量和初筛数量'}\n\n"
             f"系统候选字段约束（用于保证候选可解析和可校核，不代表用户已给事实）：\n{constraint_text}\n\n"
-            f"外部知识库/知识图谱依据：\n{knowledge_text}\n\n"
+            f"项目知识库/知识图谱依据：\n{knowledge_text}\n\n"
             "回答要求：\n"
             f"1. 候选表给出 {desired_count} 行；每行必须包含可解析的材料、长度、半径、厚度、alpha、beta、缺陷比、铺层形式。\n"
             "2. 表格列使用：编号 | 材料 | 长度(mm) | 半径(mm) | 厚度(mm) | alpha(deg) | beta(deg) | 缺陷比 | 铺层形式 | 推荐理由。\n"

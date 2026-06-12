@@ -42,6 +42,8 @@ FORBIDDEN_TEXT = [
     "VerdDict",
     "CSDM_cph 运行审计报告",
     "CSDM_cph 耐压壳设计报告",
+    "Neo4j",
+    "外部知识库",
 ]
 
 TEXT_SUFFIXES = {

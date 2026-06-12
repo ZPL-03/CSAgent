@@ -40,7 +40,7 @@ class FakeKnowledge:
                 {"name": "MinerU / Docling 文档解析", "status": "success", "message": "解析完成"},
                 {"name": "语义分块", "status": "success", "message": "生成 9 个 RAG 文本块"},
                 {"name": "BGE-M3 向量化索引", "status": "success", "message": "向量索引写入 9 个文本块"},
-                {"name": "Neo4j 实体/关系抽取", "status": "success", "message": "抽取 12 条关系"},
+                {"name": "KG 实体/关系抽取", "status": "success", "message": "抽取 12 条关系"},
                 {"name": "检索验证 / 证据引用", "status": "success", "message": "检索命中 3 个当前文档证据"},
             ],
             "last_retrieval_verification": {"message": "检索命中 3 个当前文档证据"},
@@ -194,7 +194,7 @@ def test_knowledge_widget_updates_pipeline_from_ingest_progress(monkeypatch, tmp
                 {"name": "MinerU / Docling 文档解析", "status": "success", "message": "解析完成"},
                 {"name": "语义分块", "status": "running", "message": "正在生成文本块"},
                 {"name": "BGE-M3 向量化索引", "status": "pending", "message": "等待文本块"},
-                {"name": "Neo4j 实体/关系抽取", "status": "pending", "message": "等待文本块"},
+                {"name": "KG 实体/关系抽取", "status": "pending", "message": "等待文本块"},
                 {"name": "检索验证 / 证据引用", "status": "pending", "message": "等待索引和关系写入"},
             ]
         )
