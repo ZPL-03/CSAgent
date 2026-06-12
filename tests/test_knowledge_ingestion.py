@@ -31,6 +31,8 @@ def test_runtime_knowledge_ingestion_builds_chunks_kg_vector_index_and_dedupes(t
     assert first.chunk_count >= 1
     assert first.entity_count >= 3
     assert first.relation_count >= 1
+    assert first.retrieval_verification["status"] == "success"
+    assert first.retrieval_verification["evidence_chunks"]
 
     manifest = json.loads(service.manifest_path.read_text(encoding="utf-8"))
     assert manifest["document_count"] == 1
@@ -41,6 +43,10 @@ def test_runtime_knowledge_ingestion_builds_chunks_kg_vector_index_and_dedupes(t
     assert manifest["vector_chunk_count"] == first.chunk_count
     assert manifest["vector_collection_name"] == "csdm_cph_project_knowledge"
     assert manifest["last_ingestion"]["steps"][2]["status"] == "success"
+    assert manifest["last_ingestion"]["steps"][4]["name"] == "检索验证 / 证据引用"
+    assert manifest["last_ingestion"]["steps"][4]["status"] == "success"
+    assert manifest["last_ingestion"]["retrieval_verification"]["hit_count"] >= 1
+    assert manifest["last_retrieval_verification"]["evidence_chunks"]
 
     chunks = [json.loads(line) for line in service.chunks_path.read_text(encoding="utf-8").splitlines() if line.strip()]
     assert len(chunks) == first.chunk_count
@@ -86,3 +92,5 @@ def test_runtime_knowledge_ingestion_emits_step_progress(tmp_path, monkeypatch) 
     assert progress_events[-1][1]["status"] == "success"
     assert progress_events[-1][2]["status"] == "success"
     assert progress_events[-1][3]["status"] in {"success", "warning"}
+    assert progress_events[-1][4]["name"] == "检索验证 / 证据引用"
+    assert progress_events[-1][4]["status"] == "success"

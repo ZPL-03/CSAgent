@@ -92,8 +92,9 @@ class PipelineStatusWidget(QWidget):
             PipelineStepView("语义分块", "512 token · 10% 重叠", "pending"),
             PipelineStepView("BGE-M3 向量化索引", "本地向量库 / 关键词兼容检索", "pending"),
             PipelineStepView("Neo4j 实体/关系抽取", "规则抽取 · 可接入图数据库", "pending"),
+            PipelineStepView("检索验证 / 证据引用", "Top-k 命中 · chunk/关系可追溯", "pending"),
         ]
-        self.setMinimumHeight(220)
+        self.setMinimumHeight(260)
 
     def set_theme(self, theme: str) -> None:
         self.theme = resolve_theme(theme)

@@ -40,6 +40,7 @@ STEP_PARSE = "MinerU / Docling 文档解析"
 STEP_CHUNK = "语义分块"
 STEP_VECTOR = "BGE-M3 向量化索引"
 STEP_KG = "Neo4j 实体/关系抽取"
+STEP_RETRIEVAL = "检索验证 / 证据引用"
 _TIKTOKEN_ENCODING: Any | None = None
 _TIKTOKEN_READY = False
 
@@ -118,6 +119,7 @@ class IngestionResult:
     entity_count: int
     relation_count: int
     duplicate_chunk_count: int
+    retrieval_verification: dict[str, Any]
     steps: list[PipelineStep]
 
     @property
@@ -328,6 +330,7 @@ class KnowledgeIngestionService:
             PipelineStep(STEP_CHUNK),
             PipelineStep(STEP_VECTOR),
             PipelineStep(STEP_KG),
+            PipelineStep(STEP_RETRIEVAL),
         ]
         self._notify_progress(steps)
 
@@ -347,6 +350,7 @@ class KnowledgeIngestionService:
                 entity_count=0,
                 relation_count=0,
                 duplicate_chunk_count=0,
+                retrieval_verification={},
                 steps=steps,
             )
             self._write_manifest(last_result=result)
@@ -367,6 +371,7 @@ class KnowledgeIngestionService:
                 entity_count=0,
                 relation_count=0,
                 duplicate_chunk_count=0,
+                retrieval_verification={},
                 steps=steps,
             )
             self._write_manifest(last_result=result)
@@ -394,6 +399,7 @@ class KnowledgeIngestionService:
         )
         steps[2] = PipelineStep(STEP_VECTOR, "running", "正在写入向量索引", self.vector_collection_name)
         steps[3] = PipelineStep(STEP_KG, "running", "正在整理实体/关系", f"候选实体 {len(entities)} 个，候选关系 {len(relations)} 条")
+        steps[4] = PipelineStep(STEP_RETRIEVAL, "pending", "等待索引和关系写入")
         self._notify_progress(steps)
 
         write_stats = self._replace_document_records(
@@ -427,6 +433,13 @@ class KnowledgeIngestionService:
             f"抽取 {write_stats['entity_count']} 个实体、{write_stats['relation_count']} 条关系",
             "规则词典抽取；后续可接入 LLM/Neo4j 在线抽取",
         )
+        retrieval_verification = dict(write_stats.get("retrieval_verification") or {})
+        steps[4] = PipelineStep(
+            STEP_RETRIEVAL,
+            str(write_stats.get("retrieval_status") or "warning"),
+            str(write_stats.get("retrieval_message") or "检索验证状态未知"),
+            str(write_stats.get("retrieval_detail") or ""),
+        )
         self._notify_progress(steps)
         result = IngestionResult(
             document_id=document_id,
@@ -439,6 +452,7 @@ class KnowledgeIngestionService:
             entity_count=write_stats["entity_count"],
             relation_count=write_stats["relation_count"],
             duplicate_chunk_count=write_stats["duplicate_chunk_count"],
+            retrieval_verification=retrieval_verification,
             steps=steps,
         )
         self._write_manifest(last_result=result)
@@ -1026,6 +1040,7 @@ class KnowledgeIngestionService:
         _write_jsonl(self.entities_path, all_entities)
         _write_jsonl(self.relations_path, all_relations)
         vector_stats = self._sync_vector_index(all_chunks)
+        retrieval_verification = self._verify_retrieval_evidence(document_id, source.stem, all_chunks, all_relations)
 
         entity_counts: dict[str, int] = {}
         relation_counts: dict[str, int] = {}
@@ -1057,7 +1072,134 @@ class KnowledgeIngestionService:
             "vector_message": str(vector_stats.get("message") or "向量索引状态未知"),
             "vector_detail": str(vector_stats.get("detail") or ""),
             "vector_backend": str(vector_stats.get("backend") or ""),
+            "retrieval_status": str(retrieval_verification.get("status") or "warning"),
+            "retrieval_message": str(retrieval_verification.get("message") or ""),
+            "retrieval_detail": str(retrieval_verification.get("detail") or ""),
+            "retrieval_verification": retrieval_verification,
         }
+
+    def _verify_retrieval_evidence(
+        self,
+        document_id: str,
+        title: str,
+        chunks: list[dict[str, Any]],
+        relations: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        document_chunks = [row for row in chunks if row.get("source_id") == document_id]
+        document_relations = [row for row in relations if row.get("record_id") == document_id]
+        chunk_ids = {str(row.get("chunk_id") or "") for row in chunks}
+        invalid_relations = [
+            str(row.get("evidence_chunk_id") or "")
+            for row in document_relations
+            if str(row.get("evidence_chunk_id") or "") not in chunk_ids
+        ]
+        query_terms = self._verification_query_terms(title, document_chunks, document_relations)
+        scored_chunks = self._score_chunks_for_verification(query_terms, chunks)
+        top_hits = scored_chunks[:5]
+        own_hits = [row for row in top_hits if row.get("source_id") == document_id]
+        evidence_chunks = [
+            {
+                "chunk_id": row.get("chunk_id"),
+                "source_id": row.get("source_id"),
+                "document_title": row.get("document_title") or row.get("title"),
+                "score": row.get("verification_score"),
+                "text": trim_text(str(row.get("content_plain") or row.get("content_markdown") or row.get("text") or ""), 220),
+            }
+            for row in own_hits[:3]
+        ]
+        evidence_relations = [
+            {
+                "source": row.get("source"),
+                "relation": row.get("relation"),
+                "target": row.get("target"),
+                "evidence_chunk_id": row.get("evidence_chunk_id"),
+            }
+            for row in document_relations[:3]
+        ]
+        status = "success"
+        if not document_chunks or not own_hits or invalid_relations:
+            status = "failed"
+        elif not document_relations:
+            status = "warning"
+        message = (
+            f"检索命中 {len(own_hits)} 个当前文档证据，引用 {len(document_relations)} 条图谱关系"
+            if status != "failed"
+            else "检索验证失败"
+        )
+        detail_parts = [
+            f"query_terms={', '.join(query_terms[:8]) or '-'}",
+            f"evidence_chunks={len(evidence_chunks)}",
+            f"evidence_relations={len(evidence_relations)}",
+        ]
+        if invalid_relations:
+            detail_parts.append(f"invalid_relation_refs={len(invalid_relations)}")
+        return {
+            "status": status,
+            "message": message,
+            "detail": "；".join(detail_parts),
+            "query_terms": query_terms,
+            "hit_count": len(own_hits),
+            "relation_hit_count": len(document_relations),
+            "invalid_relation_refs": invalid_relations,
+            "evidence_chunks": evidence_chunks,
+            "evidence_relations": evidence_relations,
+            "verified_at": _utc_now(),
+        }
+
+    def _verification_query_terms(
+        self,
+        title: str,
+        chunks: list[dict[str, Any]],
+        relations: list[dict[str, Any]],
+    ) -> list[str]:
+        terms: list[str] = []
+        for part in re.split(r"[\s_\-:：/\\|,，.。;；]+", title):
+            item = part.strip()
+            if len(item) >= 2:
+                terms.append(item)
+        for relation in relations[:12]:
+            for key in ["source", "target"]:
+                item = str(relation.get(key) or "").strip()
+                if item and item not in terms:
+                    terms.append(item)
+        domain_terms = [
+            "耐压壳",
+            "外压",
+            "圆柱壳",
+            "pressure hull",
+            "external pressure",
+            "buckling",
+            "PBIPF",
+            "ASME",
+            "Abaqus",
+        ]
+        text = "\n".join(str(row.get("content_plain") or row.get("content_markdown") or "") for row in chunks[:6]).lower()
+        for term in domain_terms:
+            if term.lower() in text and term not in terms:
+                terms.append(term)
+        return terms[:16]
+
+    def _score_chunks_for_verification(self, query_terms: list[str], chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        scored: list[dict[str, Any]] = []
+        for chunk in chunks:
+            content = " ".join(
+                [
+                    str(chunk.get("document_title") or chunk.get("title") or ""),
+                    str(chunk.get("section_title") or ""),
+                    str(chunk.get("content_plain") or chunk.get("content_markdown") or chunk.get("text") or ""),
+                ]
+            ).lower()
+            score = 0.0
+            for term in query_terms:
+                normalized = term.lower()
+                if normalized and normalized in content:
+                    score += 1.0
+            if score <= 0:
+                continue
+            item = dict(chunk)
+            item["verification_score"] = round(score, 3)
+            scored.append(item)
+        return sorted(scored, key=lambda item: (float(item.get("verification_score") or 0.0), str(item.get("source_id") or "")), reverse=True)
 
     def _dedupe_chunks(self, chunks: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int]:
         result: list[dict[str, Any]] = []
@@ -1150,10 +1292,12 @@ class KnowledgeIngestionService:
                 "entity_count": last_result.entity_count,
                 "relation_count": last_result.relation_count,
                 "duplicate_chunk_count": last_result.duplicate_chunk_count,
+                "retrieval_verification": last_result.retrieval_verification,
                 "vector_collection_name": self.vector_collection_name,
                 "vector_chroma_dir": str(self.vector_chroma_dir),
                 "steps": [asdict(step) for step in last_result.steps],
             }
+            manifest["last_retrieval_verification"] = last_result.retrieval_verification
             manifest["pipeline"] = [asdict(step) for step in last_result.steps]
         else:
             manifest.setdefault("pipeline", [])

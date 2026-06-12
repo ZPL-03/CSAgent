@@ -31,5 +31,6 @@ def test_release_audit_passes_without_network() -> None:
     assert result.returncode == 0, result.stdout + result.stderr
     assert "[PASS] 旧残留关键词" in result.stdout
     assert "[PASS] 产品身份配置" in result.stdout
+    assert "[PASS] 知识流水线契约" in result.stdout
     assert "[PASS] 案例库编号" in result.stdout
     assert "[PASS] UI 展示资产" in result.stdout

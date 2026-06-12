@@ -100,6 +100,7 @@ class ReleaseAudit:
         self.check_env_ignored()
         self.check_product_identity()
         self.check_runtime_knowledge_paths()
+        self.check_knowledge_pipeline_contract()
         self.check_ui_assets()
         self.check_cases()
         self.check_latest_report()
@@ -188,6 +189,25 @@ class ReleaseAudit:
         passed = not mismatches and not external_exists
         detail = "知识库运行事实源为 knowledge/runtime + knowledge/chroma_db" if passed else "; ".join([*mismatches, f"knowledge/external exists={external_exists}"])
         self.add("知识库运行时路径", passed, detail)
+
+    def check_knowledge_pipeline_contract(self) -> None:
+        required_files = [
+            ROOT / "core/knowledge_ingestion.py",
+            ROOT / "gui/knowledge_widget.py",
+            ROOT / "gui/workbench_widgets.py",
+            ROOT / "docs/接口约定.md",
+            ROOT / "docs/项目全流程梳理.md",
+        ]
+        missing: list[str] = []
+        for path in required_files:
+            text = path.read_text(encoding="utf-8")
+            if "检索验证 / 证据引用" not in text:
+                missing.append(path.relative_to(ROOT).as_posix())
+        self.add(
+            "知识流水线契约",
+            not missing,
+            "入库流水线包含解析、分块、向量、KG 和检索验证五阶段" if not missing else ", ".join(missing),
+        )
 
     def check_ui_assets(self) -> None:
         missing = [asset for asset in REQUIRED_UI_ASSETS if not (ROOT / asset).is_file()]

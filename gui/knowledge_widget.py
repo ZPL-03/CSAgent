@@ -194,6 +194,7 @@ class KnowledgeWidget(QWidget):
                 {"name": "语义分块", "status": "pending", "message": "等待解析输出"},
                 {"name": "BGE-M3 向量化索引", "status": "pending", "message": "等待文本块"},
                 {"name": "Neo4j 实体/关系抽取", "status": "pending", "message": "等待文本块"},
+                {"name": "检索验证 / 证据引用", "status": "pending", "message": "等待索引和关系写入"},
             ]
         )
         self._ingest_thread = QThread(self)
@@ -235,6 +236,7 @@ class KnowledgeWidget(QWidget):
                 {"name": "语义分块", "status": "pending", "message": "解析失败，未生成文本块"},
                 {"name": "BGE-M3 向量化索引", "status": "pending", "message": "解析失败，未更新索引"},
                 {"name": "Neo4j 实体/关系抽取", "status": "pending", "message": "解析失败，未抽取关系"},
+                {"name": "检索验证 / 证据引用", "status": "pending", "message": "解析失败，未生成证据"},
             ]
         )
         self.evidence_browser.setHtml(f"<h3>入库失败</h3><p>{escape(message)}</p>")
@@ -278,9 +280,10 @@ class KnowledgeWidget(QWidget):
         chunk_size = status.get("chunk_token_size", "-")
         overlap = status.get("chunk_overlap_tokens", "-")
         last = status.get("last_ingestion") if isinstance(status.get("last_ingestion"), dict) else {}
+        verification = status.get("last_retrieval_verification") if isinstance(status.get("last_retrieval_verification"), dict) else {}
         html = [
             "<h2>项目知识库状态</h2>",
-            "<p>知识库由本项目运行时维护，用户上传资料后进入解析、分块、索引和实体关系抽取流程；检索证据用于 LLM 工程上下文和人工审计，不替代代理公式或 FEM 结果。</p>",
+            "<p>知识库由本项目运行时维护，用户上传资料后进入解析、分块、索引、实体关系抽取和检索验证流程；检索证据用于 LLM 工程上下文和人工审计，不替代代理公式或 FEM 结果。</p>",
             "<div style='display:grid;grid-template-columns:repeat(2,1fr);gap:8px;'>",
             self._summary_card("资料", f"{status.get('document_count', 0)} 文档"),
             self._summary_card("RAG", f"{status.get('rag_chunk_count', 0)} 文本块"),
@@ -291,6 +294,7 @@ class KnowledgeWidget(QWidget):
             self._summary_card("FEM", f"ODB {odb_count} / 云图 {vis_count}"),
             "</div>",
             f"<p><b>最后入库：</b>{escape(str(last.get('title') or '-'))}；<b>解析器：</b>{escape(str(last.get('parser_backend') or '-'))}</p>",
+            f"<p><b>检索验证：</b>{escape(str(verification.get('message') or '-'))}</p>",
             f"<p><b>Manifest：</b>{escape(str(status.get('manifest_path') or '-'))}</p>",
         ]
         if metrics:
@@ -347,6 +351,7 @@ class KnowledgeWidget(QWidget):
                 {"name": "语义分块", "status": "pending", "message": "chunk_token_size / overlap 由配置控制"},
                 {"name": "BGE-M3 向量化索引", "status": "pending", "message": "等待文本块写入索引"},
                 {"name": "Neo4j 实体/关系抽取", "status": "pending", "message": "等待实体关系抽取"},
+                {"name": "检索验证 / 证据引用", "status": "pending", "message": "等待可引用证据"},
             ]
         )
 
