@@ -146,7 +146,7 @@ class TaskConfigWidget(QWidget):
             header=(self._label("title"), self._label("empty")),
             groups=groups,
             note=False,
-            columns=5,
+            columns=2,
         )
 
     def update_task(self, task: dict[str, Any] | None) -> None:
@@ -212,15 +212,16 @@ class TaskConfigWidget(QWidget):
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(10)
-        columns = columns or (2 if len(groups) <= 2 else 3)
+        columns = columns or 2
         for index, (group_title, rows) in enumerate(groups):
             card = self._card_widget(group_title, rows)
             grid.addWidget(card, index // columns, index % columns)
+        for column in range(columns):
+            grid.setColumnStretch(column, 1)
         self.content_layout.addLayout(grid)
 
         if note:
             self.content_layout.addWidget(self._fact_boundary_widget())
-        self.content_layout.addStretch(1)
         self._plain_text = self._compose_plain_text(title, subtitle, groups, note)
 
     def _header_widget(self, title: str, subtitle: str) -> QWidget:
@@ -250,7 +251,11 @@ class TaskConfigWidget(QWidget):
         title_label.setObjectName("configCardTitle")
         layout.addWidget(title_label)
 
-        for label, value in rows:
+        row_grid = QGridLayout()
+        row_grid.setContentsMargins(0, 0, 0, 0)
+        row_grid.setHorizontalSpacing(10)
+        row_grid.setVerticalSpacing(6)
+        for row, (label, value) in enumerate(rows):
             key_label = QLabel(str(label))
             key_label.setObjectName("configKey")
             key_label.setWordWrap(True)
@@ -258,8 +263,11 @@ class TaskConfigWidget(QWidget):
             value_label.setObjectName("configValue")
             value_label.setWordWrap(True)
             value_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
-            layout.addWidget(key_label)
-            layout.addWidget(value_label)
+            row_grid.addWidget(key_label, row, 0, Qt.AlignmentFlag.AlignTop)
+            row_grid.addWidget(value_label, row, 1, Qt.AlignmentFlag.AlignTop)
+        row_grid.setColumnStretch(0, 0)
+        row_grid.setColumnStretch(1, 1)
+        layout.addLayout(row_grid)
         return card
 
     def _fact_boundary_widget(self) -> QFrame:

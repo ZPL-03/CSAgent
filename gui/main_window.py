@@ -884,7 +884,10 @@ class MainWindow(QMainWindow):
             ),
         ]
         for index, card in enumerate(cards):
-            grid.addWidget(card, index // 2, index % 2)
+            if len(cards) % 2 == 1 and index == len(cards) - 1:
+                grid.addWidget(card, index // 2, 0, 1, 2)
+            else:
+                grid.addWidget(card, index // 2, index % 2)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
         content_layout.addLayout(grid)
