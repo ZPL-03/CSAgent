@@ -6,7 +6,8 @@ import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QPointF
+from PyQt6.QtCore import QPoint, QPointF, Qt
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
 from gui.knowledge_widget import KnowledgeGraphView, KnowledgeWidget
@@ -180,6 +181,33 @@ def test_knowledge_graph_view_filters_and_resets_interactive_state() -> None:
         assert graph._scale == 1.0
         assert graph._pan.x() == 0.0
         assert graph._pan.y() == 0.0
+    finally:
+        graph.close()
+        app.processEvents()
+
+
+def test_knowledge_graph_view_pans_with_mouse_drag() -> None:
+    app = _app()
+    graph = KnowledgeGraphView()
+    try:
+        graph.resize(420, 260)
+        graph.set_graph(
+            entities=[
+                {"name": "ASME RD-1172", "type": "DesignFormula"},
+                {"name": "Buckling", "type": "FailureMode"},
+            ],
+            relations=[{"source": "ASME RD-1172", "relation": "PREDICTS", "target": "Buckling"}],
+        )
+        graph.show()
+        app.processEvents()
+
+        QTest.mousePress(graph, Qt.MouseButton.LeftButton, pos=QPoint(120, 120))
+        QTest.mouseMove(graph, QPoint(170, 146))
+        QTest.mouseRelease(graph, Qt.MouseButton.LeftButton, pos=QPoint(170, 146))
+        app.processEvents()
+
+        assert graph._pan.x() != 0.0
+        assert graph._pan.y() != 0.0
     finally:
         graph.close()
         app.processEvents()
