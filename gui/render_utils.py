@@ -198,11 +198,11 @@ def render_candidate_png_bytes(
             except Exception:
                 pass
             try:
-                axis.set_box_aspect((max(length, 1.0), max(radius * 2.0, 1.0), max(radius * 2.0, 1.0)), zoom=1.14)
+                axis.set_box_aspect((max(length, 1.0), max(radius * 2.0, 1.0), max(radius * 2.0, 1.0)), zoom=1.2)
             except TypeError:
                 axis.set_box_aspect((max(length, 1.0), max(radius * 2.0, 1.0), max(radius * 2.0, 1.0)))
-            radial_limit = radius * 1.1
-            axial_limit = length * 0.56
+            radial_limit = radius * 1.08
+            axial_limit = length * 0.58
             axis.set_xlim(-axial_limit, axial_limit)
             axis.set_ylim(-radial_limit, radial_limit)
             axis.set_zlim(-radial_limit, radial_limit)
