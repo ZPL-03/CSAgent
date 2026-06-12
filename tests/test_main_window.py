@@ -7,7 +7,7 @@ import os
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtGui import QFont, QFontMetrics
-from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QPushButton
+from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QLineEdit, QPushButton
 
 from core.task_parser import TaskParser
 from gui.chat_widget import ChatWidget
@@ -613,4 +613,26 @@ def test_agent_status_card_aligns_dot_and_labels_without_rich_text_blocks() -> N
         assert card.title.text() == "ORCHESTRATOR"
     finally:
         card.close()
+        app.processEvents()
+
+
+def test_settings_page_exposes_editable_runtime_configuration(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window.resize(1680, 980)
+        window.show()
+        window._switch_workspace_page(4)
+        app.processEvents()
+
+        assert "llm.primary.model" in window.settings_fields
+        assert "abaqus.command" in window.settings_fields
+        assert "knowledge.chunk_token_size" in window.settings_fields
+        assert isinstance(window.settings_fields["llm.primary.model"], QLineEdit)
+        assert window.settings_save_button.isVisible() is True
+        assert window.settings_reload_button.isVisible() is True
+        assert window.settings_status_label.text()
+    finally:
+        window.close()
         app.processEvents()

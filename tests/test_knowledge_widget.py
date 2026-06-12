@@ -6,9 +6,10 @@ import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtCore import QPointF
 from PyQt6.QtWidgets import QApplication
 
-from gui.knowledge_widget import KnowledgeWidget
+from gui.knowledge_widget import KnowledgeGraphView, KnowledgeWidget
 
 
 def _app() -> QApplication:
@@ -145,6 +146,42 @@ def test_knowledge_widget_renders_runtime_pipeline_and_evidence(monkeypatch, tmp
         assert widget.graph_view.relations[0]["source"] == "Initial Imperfection"
     finally:
         widget.close()
+        app.processEvents()
+
+
+def test_knowledge_graph_view_filters_and_resets_interactive_state() -> None:
+    app = _app()
+    _ = app
+    graph = KnowledgeGraphView()
+    try:
+        graph.set_graph(
+            entities=[
+                {"name": "ASME RD-1172", "type": "DesignFormula"},
+                {"name": "Buckling", "type": "FailureMode"},
+                {"name": "Manufacturing Quality", "type": "ManufacturingProcess"},
+            ],
+            relations=[
+                {"source": "ASME RD-1172", "relation": "PREDICTS", "target": "Buckling"},
+                {"source": "Manufacturing Quality", "relation": "AFFECTS", "target": "Buckling"},
+            ],
+        )
+        all_nodes, all_relations, _, _ = graph._node_payload()
+        assert len(all_nodes) == 3
+        assert len(all_relations) == 2
+
+        graph.set_filter_text("ASME")
+        filtered_nodes, filtered_relations, _, _ = graph._node_payload()
+        assert {name for name, _type in filtered_nodes} == {"ASME RD-1172", "Buckling"}
+        assert len(filtered_relations) == 1
+
+        graph._scale = 1.8
+        graph._pan = QPointF(24.0, -12.0)
+        graph.reset_view()
+        assert graph._scale == 1.0
+        assert graph._pan.x() == 0.0
+        assert graph._pan.y() == 0.0
+    finally:
+        graph.close()
         app.processEvents()
 
 

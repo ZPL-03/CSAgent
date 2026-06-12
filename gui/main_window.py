@@ -9,6 +9,8 @@ from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 
+import yaml
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
@@ -23,6 +25,7 @@ from PyQt6.QtWidgets import (
     QButtonGroup,
     QComboBox,
     QFrame,
+    QFormLayout,
     QGridLayout,
     QHBoxLayout,
     QLabel,
@@ -30,6 +33,7 @@ from PyQt6.QtWidgets import (
     QMainWindow,
     QProgressBar,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSplitter,
     QStackedWidget,
@@ -40,8 +44,9 @@ from PyQt6.QtWidgets import (
 )
 
 from agents.orchestrator import OrchestratorAgent
+from core.config_loader import load_app_config, load_llm_config
 from core.conversation_flow import ConversationFlowController, ConversationState
-from core.paths import ASSETS_DIR, RESULTS_DIR, ensure_project_dirs
+from core.paths import ASSETS_DIR, CONFIG_DIR, RESULTS_DIR, ensure_project_dirs
 from core.task_contract import (
     describe_boundary_conditions,
     describe_load_conditions,
@@ -778,107 +783,306 @@ class MainWindow(QMainWindow):
         self.left_stack.setCurrentIndex(index)
         self.right_stack.setCurrentIndex(index)
 
-    def _settings_label_card(self, title: str, body: str, footer: str = "") -> QLabel:
-        footer_html = f"<p style='color:#94a3b8;'>{footer}</p>" if footer else ""
-        card = QLabel(f"<h2>{title}</h2><p>{body}</p>{footer_html}")
-        card.setObjectName("settingsCard")
-        card.setWordWrap(True)
-        card.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        card.setMinimumHeight(130)
-        card.setMaximumHeight(170)
-        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        return card
-
     def _build_settings_page(self) -> QWidget:
         page = QWidget()
         page.setObjectName("centerWorkbench")
-        layout = QVBoxLayout(page)
-        layout.setContentsMargins(18, 18, 18, 18)
-        layout.setSpacing(14)
+        self.settings_fields: dict[str, QLineEdit | QComboBox] = {}
+        self.settings_status_label = QLabel("配置来自本项目 YAML 文件；API 密钥继续由 .env 管理。")
+        self.settings_status_label.setObjectName("chatStatus")
+        self.settings_status_label.setWordWrap(True)
+        self.settings_save_button = QPushButton("保存设置")
+        self.settings_reload_button = QPushButton("重新载入")
+        self._set_button_variant(self.settings_save_button, "primary")
+        self._set_button_variant(self.settings_reload_button, "secondary")
 
-        model_card = self._settings_label_card(
-            "模型与 API",
-            "主模型和回退模型读取本项目 .env 与 config/llm_config.yaml。候选提案、工程解释和报告补充调用 LLM；代理初筛、FEM、案例回流不调用 LLM。",
-            "模型状态灯来自真实调用轨迹，主模型不可用时显示回退模型。",
-        )
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        solver_card = self._settings_label_card(
-            "求解器集成 · ABAQUS",
-            "求解器路径、工作目录、用户子程序开关读取 config/app_config.yaml。真实校核包含线性屈曲和 Static Riks 两阶段流程。",
-            "有限元队列、作业状态、云图路径和失败诊断写入运行审计。",
-        )
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(18, 18, 18, 18)
+        content_layout.setSpacing(14)
 
-        graph_card = self._settings_label_card(
-            "智能体编排 · LangGraph",
-            "状态图节点覆盖任务解析、候选生成、代理初筛、有限元校核、知识回流和报告导出，人工确认点由 GUI 恢复推进。",
-            "SQLite checkpoint 保存运行状态，支持中断后继续和审计复核。",
-        )
+        header = QLabel("设置")
+        header.setObjectName("configTitle")
+        subtitle = QLabel("这里调整本地运行参数。密钥和私密凭据不写入 YAML，仍由 .env 和系统环境变量提供。")
+        subtitle.setObjectName("configSubtitle")
+        subtitle.setWordWrap(True)
+        content_layout.addWidget(header)
+        content_layout.addWidget(subtitle)
 
-        rag_card = self._settings_label_card(
-            "知识库 / RAG / KG",
-            "知识库由本项目运行时维护，支持上传资料、解析、token 分块、overlap、内容去重、检索和实体关系抽取。",
-            "检索证据用于上下文和审计，不替代代理公式或 FEM 结果。",
-        )
-
-        parsing_card = self._settings_label_card(
-            "解析与切块",
-            "资料解析优先使用可用的 MinerU / Docling 能力，分块 token 数、overlap 和去重策略由知识库运行配置控制。",
-            "入库流水线显示解析、分块、向量索引、KG 抽取和检索验证状态。",
-        )
-
-        audit_card = self._settings_label_card(
-            "运行审计与恢复",
-            "运行事件、工具调用、候选来源、去重、LLM 调用、有限元队列和案例回流结果均写入审计记录。",
-            "监控页可检测 LLM 后端、导出运行审计并恢复历史状态。",
-        )
-
-        report_card = self._settings_label_card(
-            "报告与导出",
-            "阶段报告和最终报告读取真实任务、候选、初筛、FEM、知识证据与 LLM 工程解释生成。",
-            "会话导出包含 JSON 快照和 TMP-C-CASE 追踪 CSV。",
-        )
-
-        ui_card = QWidget()
-        ui_card.setObjectName("settingsCard")
-        ui_card.setMinimumHeight(130)
-        ui_card.setMaximumHeight(170)
-        ui_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        ui_layout = QVBoxLayout(ui_card)
-        ui_layout.setContentsMargins(14, 12, 14, 12)
-        ui_layout.setSpacing(10)
-        title = QLabel("界面语言与主题")
-        title.setObjectName("sectionTitle")
-        title.setFixedHeight(26)
-        description = QLabel("界面语言与主题只影响本地工作台显示，不改变任务、候选、FEM 或报告数据。")
-        description.setWordWrap(True)
-        description.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
-        controls = QGridLayout()
-        controls.setContentsMargins(0, 0, 0, 0)
-        controls.setHorizontalSpacing(14)
-        controls.setVerticalSpacing(8)
-        controls.addWidget(self.language_label, 0, 0)
-        controls.addWidget(self.language_selector, 0, 1)
-        controls.addWidget(self.theme_label, 0, 2)
-        controls.addWidget(self.theme_selector, 0, 3)
-        ui_layout.addWidget(title)
-        ui_layout.addWidget(description)
-        ui_layout.addLayout(controls)
+        app_config = load_app_config()
+        llm_config = load_llm_config()
+        backends = llm_config.get("backends") if isinstance(llm_config.get("backends"), list) else []
+        primary = backends[0] if backends else {}
+        fallback = backends[1] if len(backends) > 1 else {}
+        abaqus = app_config.get("abaqus") if isinstance(app_config.get("abaqus"), dict) else {}
+        pipeline = app_config.get("pipeline") if isinstance(app_config.get("pipeline"), dict) else {}
+        ratio = pipeline.get("candidate_source_ratio") if isinstance(pipeline.get("candidate_source_ratio"), dict) else {}
+        knowledge = app_config.get("project_knowledge") if isinstance(app_config.get("project_knowledge"), dict) else {}
+        conversation = app_config.get("conversation") if isinstance(app_config.get("conversation"), dict) else {}
 
         grid = QGridLayout()
         grid.setContentsMargins(0, 0, 0, 0)
         grid.setHorizontalSpacing(14)
         grid.setVerticalSpacing(14)
-        cards = [model_card, solver_card, graph_card, rag_card, parsing_card, audit_card, report_card, ui_card]
+        cards = [
+            self._settings_form_card(
+                "模型与 API",
+                [
+                    ("主模型名称", self._settings_line("llm.primary.model", primary.get("model", ""))),
+                    ("主模型 URL 环境变量", self._settings_line("llm.primary.base_url_env", primary.get("base_url_env", ""))),
+                    ("主模型名称环境变量", self._settings_line("llm.primary.model_env", primary.get("model_env", ""))),
+                    ("回退模型 URL 环境变量", self._settings_line("llm.fallback.base_url_env", fallback.get("base_url_env", ""))),
+                    ("回退模型名称环境变量", self._settings_line("llm.fallback.model_env", fallback.get("model_env", ""))),
+                    ("温度", self._settings_line("llm.temperature", primary.get("temperature", 0.2))),
+                    ("最大输出 token", self._settings_line("llm.max_tokens", primary.get("max_tokens", 1800))),
+                    ("超时秒数", self._settings_line("llm.timeout_seconds", primary.get("timeout_seconds", 180))),
+                ],
+            ),
+            self._settings_form_card(
+                "求解器集成 · ABAQUS",
+                [
+                    ("命令", self._settings_line("abaqus.command", abaqus.get("command", "abaqus"))),
+                    ("用户子程序", self._settings_line("abaqus.user_subroutine", abaqus.get("user_subroutine", ""))),
+                    ("启用用户子程序", self._settings_combo("abaqus.use_user_subroutine", abaqus.get("use_user_subroutine", False), [("否", "false"), ("是", "true")])),
+                    ("作业超时秒数", self._settings_line("abaqus.job_timeout_seconds", abaqus.get("job_timeout_seconds", 3600))),
+                    ("最大重试", self._settings_line("abaqus.max_retries", abaqus.get("max_retries", 3))),
+                    ("轮询间隔秒数", self._settings_line("abaqus.poll_interval_seconds", abaqus.get("poll_interval_seconds", 5))),
+                ],
+            ),
+            self._settings_form_card(
+                "智能体编排",
+                [
+                    ("LLM 来源比例", self._settings_line("pipeline.ratio.llm", ratio.get("llm", 2))),
+                    ("案例迁移比例", self._settings_line("pipeline.ratio.case_transfer", ratio.get("case_transfer", 1))),
+                    ("DOE 比例", self._settings_line("pipeline.ratio.doe", ratio.get("doe", 1))),
+                    ("随机种子", self._settings_line("pipeline.random_seed", pipeline.get("random_seed", 42))),
+                    ("确认节点", self._settings_line("conversation.confirmation_steps", ", ".join(conversation.get("confirmation_steps", [])))),
+                ],
+            ),
+            self._settings_form_card(
+                "知识库 / RAG / KG",
+                [
+                    ("RAG top_k", self._settings_line("knowledge.top_k", knowledge.get("top_k", 5))),
+                    ("KG top_k", self._settings_line("knowledge.kg_top_k", knowledge.get("kg_top_k", 8))),
+                    ("Chunk token", self._settings_line("knowledge.chunk_token_size", knowledge.get("chunk_token_size", 512))),
+                    ("Overlap token", self._settings_line("knowledge.chunk_overlap_tokens", knowledge.get("chunk_overlap_tokens", 64))),
+                    ("最小 chunk token", self._settings_line("knowledge.min_chunk_tokens", knowledge.get("min_chunk_tokens", 80))),
+                    ("向量索引", self._settings_combo("knowledge.vector_enabled", knowledge.get("vector_enabled", True), [("启用", "true"), ("关闭", "false")])),
+                    ("向量集合", self._settings_line("knowledge.vector_collection_name", knowledge.get("vector_collection_name", ""))),
+                ],
+            ),
+            self._settings_form_card(
+                "界面语言与主题",
+                [
+                    (self.locale.text("section.language"), self.language_selector),
+                    (self.locale.text("section.theme"), self.theme_selector),
+                ],
+            ),
+        ]
         for index, card in enumerate(cards):
-            row = index // 2
-            column = index % 2
-            grid.addWidget(card, row, column)
-            grid.setRowStretch(row, 0)
+            grid.addWidget(card, index // 2, index % 2)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
-        layout.addLayout(grid, 0)
-        layout.addStretch(1)
+        content_layout.addLayout(grid)
+
+        actions = QHBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(10)
+        actions.addWidget(self.settings_status_label, 1)
+        actions.addWidget(self.settings_reload_button)
+        actions.addWidget(self.settings_save_button)
+        content_layout.addLayout(actions)
+        content_layout.addStretch(1)
+
+        scroll_area.setWidget(content)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(scroll_area)
+        self.settings_save_button.clicked.connect(self._save_settings_from_page)
+        self.settings_reload_button.clicked.connect(self._reload_settings_page)
         return page
+
+    def _settings_line(self, key: str, value: object) -> QLineEdit:
+        field = QLineEdit(str(value if value is not None else ""))
+        field.setObjectName("settingsInput")
+        self.settings_fields[key] = field
+        return field
+
+    def _settings_combo(self, key: str, value: object, options: list[tuple[str, str]]) -> QComboBox:
+        combo = QComboBox()
+        combo.setObjectName("settingsInput")
+        for label, data in options:
+            combo.addItem(label, data)
+        target = str(value).lower()
+        index = combo.findData(target)
+        if index >= 0:
+            combo.setCurrentIndex(index)
+        self.settings_fields[key] = combo
+        return combo
+
+    def _settings_form_card(self, title: str, rows: list[tuple[str, QWidget]]) -> QFrame:
+        card = QFrame()
+        card.setObjectName("configCard")
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(14, 12, 14, 12)
+        layout.setSpacing(10)
+        title_label = QLabel(title)
+        title_label.setObjectName("configCardTitle")
+        layout.addWidget(title_label)
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        form.setHorizontalSpacing(12)
+        form.setVerticalSpacing(8)
+        form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        for label, widget in rows:
+            key_label = QLabel(label)
+            key_label.setObjectName("configKey")
+            form.addRow(key_label, widget)
+        layout.addLayout(form)
+        return card
+
+    def _settings_value(self, key: str) -> str:
+        widget = self.settings_fields.get(key)
+        if isinstance(widget, QComboBox):
+            return str(widget.currentData())
+        if isinstance(widget, QLineEdit):
+            return widget.text().strip()
+        return ""
+
+    def _set_settings_value(self, key: str, value: object) -> None:
+        widget = self.settings_fields.get(key)
+        if isinstance(widget, QComboBox):
+            index = widget.findData(str(value).lower())
+            if index >= 0:
+                widget.setCurrentIndex(index)
+            return
+        if isinstance(widget, QLineEdit):
+            widget.setText(str(value if value is not None else ""))
+
+    def _settings_int(self, key: str, default: int) -> int:
+        try:
+            return int(float(self._settings_value(key)))
+        except ValueError:
+            return default
+
+    def _settings_float(self, key: str, default: float) -> float:
+        try:
+            return float(self._settings_value(key))
+        except ValueError:
+            return default
+
+    def _settings_bool(self, key: str, default: bool) -> bool:
+        value = self._settings_value(key).lower()
+        if value in {"true", "1", "yes", "on"}:
+            return True
+        if value in {"false", "0", "no", "off"}:
+            return False
+        return default
+
+    def _reload_settings_page(self) -> None:
+        load_app_config.cache_clear()
+        load_llm_config.cache_clear()
+        app_config = load_app_config()
+        llm_config = load_llm_config()
+        backends = llm_config.get("backends") if isinstance(llm_config.get("backends"), list) else []
+        primary = backends[0] if backends else {}
+        fallback = backends[1] if len(backends) > 1 else {}
+        abaqus = app_config.get("abaqus") if isinstance(app_config.get("abaqus"), dict) else {}
+        pipeline = app_config.get("pipeline") if isinstance(app_config.get("pipeline"), dict) else {}
+        ratio = pipeline.get("candidate_source_ratio") if isinstance(pipeline.get("candidate_source_ratio"), dict) else {}
+        knowledge = app_config.get("project_knowledge") if isinstance(app_config.get("project_knowledge"), dict) else {}
+        conversation = app_config.get("conversation") if isinstance(app_config.get("conversation"), dict) else {}
+        values = {
+            "llm.primary.model": primary.get("model", ""),
+            "llm.primary.base_url_env": primary.get("base_url_env", ""),
+            "llm.primary.model_env": primary.get("model_env", ""),
+            "llm.fallback.base_url_env": fallback.get("base_url_env", ""),
+            "llm.fallback.model_env": fallback.get("model_env", ""),
+            "llm.temperature": primary.get("temperature", 0.2),
+            "llm.max_tokens": primary.get("max_tokens", 1800),
+            "llm.timeout_seconds": primary.get("timeout_seconds", 180),
+            "abaqus.command": abaqus.get("command", "abaqus"),
+            "abaqus.user_subroutine": abaqus.get("user_subroutine", ""),
+            "abaqus.use_user_subroutine": abaqus.get("use_user_subroutine", False),
+            "abaqus.job_timeout_seconds": abaqus.get("job_timeout_seconds", 3600),
+            "abaqus.max_retries": abaqus.get("max_retries", 3),
+            "abaqus.poll_interval_seconds": abaqus.get("poll_interval_seconds", 5),
+            "pipeline.ratio.llm": ratio.get("llm", 2),
+            "pipeline.ratio.case_transfer": ratio.get("case_transfer", 1),
+            "pipeline.ratio.doe": ratio.get("doe", 1),
+            "pipeline.random_seed": pipeline.get("random_seed", 42),
+            "conversation.confirmation_steps": ", ".join(conversation.get("confirmation_steps", [])),
+            "knowledge.top_k": knowledge.get("top_k", 5),
+            "knowledge.kg_top_k": knowledge.get("kg_top_k", 8),
+            "knowledge.chunk_token_size": knowledge.get("chunk_token_size", 512),
+            "knowledge.chunk_overlap_tokens": knowledge.get("chunk_overlap_tokens", 64),
+            "knowledge.min_chunk_tokens": knowledge.get("min_chunk_tokens", 80),
+            "knowledge.vector_enabled": knowledge.get("vector_enabled", True),
+            "knowledge.vector_collection_name": knowledge.get("vector_collection_name", ""),
+        }
+        for key, value in values.items():
+            self._set_settings_value(key, value)
+        self.settings_status_label.setText("配置已从本项目 YAML 文件重新载入。")
+
+    def _save_settings_from_page(self) -> None:
+        app_config = load_app_config()
+        llm_config = load_llm_config()
+        app_config.setdefault("abaqus", {})
+        app_config.setdefault("pipeline", {}).setdefault("candidate_source_ratio", {})
+        app_config.setdefault("project_knowledge", {})
+        app_config.setdefault("conversation", {})
+        backends = llm_config.setdefault("backends", [])
+        while len(backends) < 2:
+            backends.append({})
+        primary, fallback = backends[0], backends[1]
+
+        primary["model"] = self._settings_value("llm.primary.model") or primary.get("model", "csllm")
+        primary["base_url_env"] = self._settings_value("llm.primary.base_url_env") or primary.get("base_url_env", "LLM_PRIMARY_URL")
+        primary["model_env"] = self._settings_value("llm.primary.model_env") or primary.get("model_env", "LLM_PRIMARY_MODEL_NAME")
+        fallback["base_url_env"] = self._settings_value("llm.fallback.base_url_env") or fallback.get("base_url_env", "URL")
+        fallback["model_env"] = self._settings_value("llm.fallback.model_env") or fallback.get("model_env", "MODEL_NAME")
+        for backend in backends:
+            backend["temperature"] = self._settings_float("llm.temperature", float(backend.get("temperature", 0.2) or 0.2))
+            backend["max_tokens"] = self._settings_int("llm.max_tokens", int(backend.get("max_tokens", 1800) or 1800))
+            backend["timeout_seconds"] = self._settings_int("llm.timeout_seconds", int(backend.get("timeout_seconds", 180) or 180))
+
+        abaqus = app_config["abaqus"]
+        abaqus["command"] = self._settings_value("abaqus.command") or "abaqus"
+        abaqus["user_subroutine"] = self._settings_value("abaqus.user_subroutine")
+        abaqus["use_user_subroutine"] = self._settings_bool("abaqus.use_user_subroutine", bool(abaqus.get("use_user_subroutine", False)))
+        abaqus["job_timeout_seconds"] = self._settings_int("abaqus.job_timeout_seconds", int(abaqus.get("job_timeout_seconds", 3600) or 3600))
+        abaqus["max_retries"] = self._settings_int("abaqus.max_retries", int(abaqus.get("max_retries", 3) or 3))
+        abaqus["poll_interval_seconds"] = self._settings_int("abaqus.poll_interval_seconds", int(abaqus.get("poll_interval_seconds", 5) or 5))
+
+        ratio = app_config["pipeline"]["candidate_source_ratio"]
+        ratio["llm"] = max(0, self._settings_int("pipeline.ratio.llm", int(ratio.get("llm", 2) or 2)))
+        ratio["case_transfer"] = max(0, self._settings_int("pipeline.ratio.case_transfer", int(ratio.get("case_transfer", 1) or 1)))
+        ratio["doe"] = max(0, self._settings_int("pipeline.ratio.doe", int(ratio.get("doe", 1) or 1)))
+        app_config["pipeline"]["random_seed"] = self._settings_int("pipeline.random_seed", int(app_config["pipeline"].get("random_seed", 42) or 42))
+        steps = [item.strip() for item in self._settings_value("conversation.confirmation_steps").split(",") if item.strip()]
+        app_config["conversation"]["confirmation_steps"] = steps
+
+        knowledge = app_config["project_knowledge"]
+        knowledge["top_k"] = max(1, self._settings_int("knowledge.top_k", int(knowledge.get("top_k", 5) or 5)))
+        knowledge["kg_top_k"] = max(1, self._settings_int("knowledge.kg_top_k", int(knowledge.get("kg_top_k", 8) or 8)))
+        knowledge["chunk_token_size"] = max(32, self._settings_int("knowledge.chunk_token_size", int(knowledge.get("chunk_token_size", 512) or 512)))
+        knowledge["chunk_overlap_tokens"] = max(0, self._settings_int("knowledge.chunk_overlap_tokens", int(knowledge.get("chunk_overlap_tokens", 64) or 64)))
+        knowledge["min_chunk_tokens"] = max(1, self._settings_int("knowledge.min_chunk_tokens", int(knowledge.get("min_chunk_tokens", 80) or 80)))
+        knowledge["vector_enabled"] = self._settings_bool("knowledge.vector_enabled", bool(knowledge.get("vector_enabled", True)))
+        collection_name = self._settings_value("knowledge.vector_collection_name")
+        if collection_name:
+            knowledge["vector_collection_name"] = collection_name
+
+        (CONFIG_DIR / "app_config.yaml").write_text(yaml.safe_dump(app_config, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        (CONFIG_DIR / "llm_config.yaml").write_text(yaml.safe_dump(llm_config, allow_unicode=True, sort_keys=False), encoding="utf-8")
+        load_app_config.cache_clear()
+        load_llm_config.cache_clear()
+        self.settings_status_label.setText("设置已保存，新启动的流程会读取当前配置。")
 
     def _build_monitor_page(self) -> QWidget:
         page = QWidget()

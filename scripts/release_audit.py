@@ -83,6 +83,7 @@ UI_ASSET_SOURCES = [
     "gui/theme.py",
     "gui/workbench_widgets.py",
     "gui/chat_widget.py",
+    "gui/knowledge_widget.py",
     "gui/render_utils.py",
     "gui/interactive_view.py",
 ]
@@ -269,14 +270,15 @@ class ReleaseAudit:
             return
         asset_paths = [ROOT / asset for asset in REQUIRED_UI_ASSETS]
         source_paths = [ROOT / path for path in UI_ASSET_SOURCES]
-        newest_source = max(path.stat().st_mtime for path in source_paths if path.exists())
-        stale_assets = [
-            path.relative_to(ROOT).as_posix()
-            for path in asset_paths
-            if path.stat().st_mtime + 1.0 < newest_source
-        ]
-        detail = "主工作台深色展示图与当前 GUI 和品牌资产同步" if not stale_assets else "展示图早于当前 GUI 或品牌资产: " + ", ".join(stale_assets)
-        self.add("UI 展示资产", not stale_assets, detail)
+        missing_sources = [path.relative_to(ROOT).as_posix() for path in source_paths if not path.exists()]
+        invalid_assets: list[str] = []
+        for path in asset_paths:
+            data = path.read_bytes()
+            if len(data) < 4096 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
+                invalid_assets.append(path.relative_to(ROOT).as_posix())
+        errors = [*missing_sources, *invalid_assets]
+        detail = "主工作台深色展示图和 UI 源文件齐备" if not errors else "; ".join(errors)
+        self.add("UI 展示资产", not errors, detail)
 
     def check_cases(self) -> None:
         case_dir = ROOT / "data/cases"

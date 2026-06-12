@@ -423,6 +423,10 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         padding: 8px 12px;
         color: {color["field_text"]};
     }}
+    QLineEdit#settingsInput, QComboBox#settingsInput {{
+        min-height: 30px;
+        padding: 5px 10px;
+    }}
     QTableWidget {{
         gridline-color: {color["border_soft"]};
         alternate-background-color: {color["surface_alt"]};
@@ -613,5 +617,27 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
     }}
     QSplitter::handle {{
         background: {color["app_bg"]};
+    }}
+    QScrollBar:vertical {{
+        background: {color["app_bg"]};
+        width: 10px;
+        margin: 2px 2px 2px 2px;
+        border: 0;
+    }}
+    QScrollBar::handle:vertical {{
+        background: {color["border_soft"]};
+        min-height: 34px;
+        border-radius: 4px;
+    }}
+    QScrollBar::handle:vertical:hover {{
+        background: {color["accent"]};
+    }}
+    QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+        height: 0;
+        border: 0;
+        background: transparent;
+    }}
+    QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+        background: transparent;
     }}
     """

@@ -48,11 +48,18 @@ class KnowledgeGraphView(QWidget):
         self.entities: list[dict[str, Any]] = []
         self.relations: list[dict[str, Any]] = []
         self.highlight_relations: list[dict[str, Any]] = []
-        self.setMinimumHeight(228)
+        self.filter_text = ""
+        self._scale = 1.0
+        self._pan = QPointF(0.0, 0.0)
+        self._drag_start: QPointF | None = None
+        self._drag_pan_start = QPointF(0.0, 0.0)
+        self._last_node_positions: dict[str, QPointF] = {}
+        self.setMinimumHeight(190)
         self.setSizePolicy(self.sizePolicy().horizontalPolicy(), self.sizePolicy().verticalPolicy())
+        self.setMouseTracking(True)
 
     def sizeHint(self) -> QSize:
-        return QSize(380, 248)
+        return QSize(380, 214)
 
     def set_theme(self, theme: str) -> None:
         self.theme = resolve_theme(theme)
@@ -67,6 +74,19 @@ class KnowledgeGraphView(QWidget):
         self.entities = list(entities)
         self.relations = list(relations)
         self.highlight_relations = list(highlight_relations or [])
+        self.update()
+
+    def set_filter_text(self, value: str) -> None:
+        """设置图谱节点过滤词。"""
+
+        self.filter_text = str(value or "").strip().lower()
+        self.update()
+
+    def reset_view(self) -> None:
+        """恢复图谱默认视角。"""
+
+        self._scale = 1.0
+        self._pan = QPointF(0.0, 0.0)
         self.update()
 
     def _colors(self) -> dict[str, QColor]:
@@ -123,6 +143,23 @@ class KnowledgeGraphView(QWidget):
             if target in degree:
                 degree[target] += 1
         sorted_nodes = sorted(node_types.items(), key=lambda item: (-degree.get(item[0], 0), item[1], item[0]))
+        if self.filter_text:
+            seed_names = {
+                name
+                for name, entity_type in sorted_nodes
+                if self.filter_text in name.lower() or self.filter_text in entity_type.lower()
+            }
+            neighbor_names: set[str] = set(seed_names)
+            for relation in self.relations:
+                source = str(relation.get("source") or "").strip()
+                target = str(relation.get("target") or "").strip()
+                relation_name = str(relation.get("relation") or "").strip().lower()
+                if source in seed_names or target in seed_names or self.filter_text in relation_name:
+                    if source:
+                        neighbor_names.add(source)
+                    if target:
+                        neighbor_names.add(target)
+            sorted_nodes = [item for item in sorted_nodes if item[0] in neighbor_names]
         max_nodes = 26
         visible_nodes = sorted_nodes[:max_nodes]
         visible_names = {name for name, _ in visible_nodes}
@@ -169,14 +206,15 @@ class KnowledgeGraphView(QWidget):
             )
             return
 
-        center = QPointF(self.width() / 2.0, self.height() / 2.0 + 18)
-        radius_x = max(80.0, (self.width() - 88) / 2.0)
-        radius_y = max(54.0, (self.height() - 120) / 2.0)
+        center = QPointF(self.width() / 2.0 + self._pan.x(), self.height() / 2.0 + 18 + self._pan.y())
+        radius_x = max(80.0, (self.width() - 88) / 2.0) * self._scale
+        radius_y = max(54.0, (self.height() - 120) / 2.0) * self._scale
         positions: dict[str, QPointF] = {}
         count = len(visible_nodes)
         for index, (name, _entity_type) in enumerate(visible_nodes):
             angle = -math.pi / 2.0 + 2.0 * math.pi * index / max(1, count)
             positions[name] = QPointF(center.x() + radius_x * math.cos(angle), center.y() + radius_y * math.sin(angle))
+        self._last_node_positions = positions
 
         highlighted = {
             (
@@ -207,12 +245,74 @@ class KnowledgeGraphView(QWidget):
             color = self._type_color(entity_type)
             painter.setBrush(QBrush(color))
             painter.setPen(QPen(colors["panel"], 1.5))
-            painter.drawEllipse(point, 8, 8)
+            radius = 10 if self.filter_text and self.filter_text in name.lower() else 8
+            painter.drawEllipse(point, radius, radius)
             label = label_metrics.elidedText(name, Qt.TextElideMode.ElideRight, 92)
             label_rect = QRectF(point.x() - 48, point.y() + 11, 96, 18)
             painter.setFont(label_font)
             painter.setPen(colors["text"])
             painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
+
+    def wheelEvent(self, event) -> None:
+        old_scale = self._scale
+        factor = 1.12 if event.angleDelta().y() > 0 else 1 / 1.12
+        self._scale = max(0.55, min(2.4, self._scale * factor))
+        if self._scale != old_scale:
+            cursor = event.position()
+            center = QPointF(self.width() / 2.0, self.height() / 2.0 + 18)
+            before = QPointF(
+                (cursor.x() - center.x() - self._pan.x()) / old_scale,
+                (cursor.y() - center.y() - self._pan.y()) / old_scale,
+            )
+            self._pan = QPointF(
+                cursor.x() - center.x() - before.x() * self._scale,
+                cursor.y() - center.y() - before.y() * self._scale,
+            )
+            self.update()
+        event.accept()
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start = event.position()
+            self._drag_pan_start = QPointF(self._pan)
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._drag_start is not None:
+            delta = event.position() - self._drag_start
+            self._pan = QPointF(self._drag_pan_start.x() + delta.x(), self._drag_pan_start.y() + delta.y())
+            self.update()
+            event.accept()
+            return
+        hovered = self._hovered_node(event.position())
+        self.setToolTip(hovered or "")
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._drag_start is not None:
+            self._drag_start = None
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.reset_view()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def _hovered_node(self, point: QPointF) -> str:
+        for name, position in self._last_node_positions.items():
+            dx = point.x() - position.x()
+            dy = point.y() - position.y()
+            if dx * dx + dy * dy <= 18 * 18:
+                return name
+        return ""
 
 
 class KnowledgeIngestWorker(QObject):
@@ -351,11 +451,15 @@ class KnowledgeWidget(QWidget):
 
         self.pipeline_widget = PipelineStatusWidget()
         self.graph_view = KnowledgeGraphView()
+        self.graph_search_input = QLineEdit()
+        self.graph_search_input.setPlaceholderText("搜索图谱节点或关系")
+        self.graph_reset_button = QPushButton("适配图谱")
         self.evidence_browser = QTextBrowser()
         self.evidence_browser.setOpenExternalLinks(True)
         self.evidence_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.evidence_browser.setMinimumHeight(150)
         self.summary_browser = QTextBrowser()
-        self.summary_browser.setMaximumHeight(210)
+        self.summary_browser.setMaximumHeight(190)
         self.summary_browser.setOpenExternalLinks(True)
         self.summary_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.summary_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -406,7 +510,13 @@ class KnowledgeWidget(QWidget):
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(12)
         right_layout.addWidget(self.pipeline_widget)
-        right_layout.addWidget(QLabel("知识图谱 · GRAPH"))
+        graph_header = QHBoxLayout()
+        graph_header.setContentsMargins(0, 0, 0, 0)
+        graph_header.setSpacing(8)
+        graph_header.addWidget(QLabel("知识图谱 · GRAPH"))
+        graph_header.addWidget(self.graph_search_input, 1)
+        graph_header.addWidget(self.graph_reset_button)
+        right_layout.addLayout(graph_header)
         right_layout.addWidget(self.graph_view)
         right_layout.addWidget(QLabel("检索证据 · EVIDENCE"))
         right_layout.addWidget(self.evidence_browser, 1)
@@ -432,6 +542,9 @@ class KnowledgeWidget(QWidget):
         self.rebuild_button.clicked.connect(lambda: self._run_maintenance("rebuild"))
         self.export_snapshot_button.clicked.connect(lambda: self._run_maintenance("export"))
         self.refresh_button.clicked.connect(lambda: self.refresh(load_evidence=False))
+        self.graph_search_input.returnPressed.connect(self._filter_graph_from_input)
+        self.graph_search_input.textChanged.connect(lambda value: self.graph_view.set_filter_text(value))
+        self.graph_reset_button.clicked.connect(self.graph_view.reset_view)
 
     def refresh(
         self,
@@ -526,8 +639,12 @@ class KnowledgeWidget(QWidget):
             self.rebuild_button,
             self.export_snapshot_button,
             self.refresh_button,
+            self.graph_reset_button,
         ]:
             button.setEnabled(enabled)
+
+    def _filter_graph_from_input(self) -> None:
+        self.graph_view.set_filter_text(self.graph_search_input.text())
 
     def _on_ingest_progress(self, steps: list) -> None:
         self.pipeline_widget.set_steps(steps)
