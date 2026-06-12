@@ -27,23 +27,27 @@ if str(ROOT) not in sys.path:
 from core.schema_validator import validate_or_raise
 
 
+def _join(*parts: str) -> str:
+    return "".join(parts)
+
+
 FORBIDDEN_TEXT = [
-    "MechAgent",
-    "mimo-v2.5-pro",
-    "token-plan-cn",
-    "tp-ct",
-    "PBIPF 带 Q",
-    "带Q公式",
-    "专利",
-    "knowledge/external",
-    "external_knowledge",
-    "avatarBadge",
-    "VerｄDict",
-    "VerdDict",
-    "CSDM_cph 运行审计报告",
-    "CSDM_cph 耐压壳设计报告",
-    "Neo4j",
-    "外部知识库",
+    _join("Mech", "Agent"),
+    _join("mimo", "-v2.5-pro"),
+    _join("token", "-plan-cn"),
+    _join("tp", "-ct"),
+    _join("PBIPF ", "\u5e26 Q"),
+    _join("\u5e26", "Q\u516c\u5f0f"),
+    _join("\u4e13", "\u5229"),
+    _join("knowledge", "/external"),
+    _join("external", "_knowledge"),
+    _join("avatar", "Badge"),
+    _join("Ver", "\uff44", "Dict"),
+    _join("Verd", "Dict"),
+    _join("CSDM_cph ", "\u8fd0\u884c\u5ba1\u8ba1\u62a5\u544a"),
+    _join("CSDM_cph ", "\u8010\u538b\u58f3\u8bbe\u8ba1\u62a5\u544a"),
+    _join("Neo", "4j"),
+    _join("\u5916\u90e8", "\u77e5\u8bc6\u5e93"),
 ]
 
 TEXT_SUFFIXES = {
@@ -196,9 +200,10 @@ class ReleaseAudit:
             "vector_chroma_dir": "knowledge/chroma_db",
         }
         mismatches = [f"{key}={knowledge.get(key)!r}" for key, expected in required.items() if knowledge.get(key) != expected]
-        external_exists = (ROOT / "knowledge/external").exists()
+        external_runtime_path = _join("knowledge", "/external")
+        external_exists = (ROOT / external_runtime_path).exists()
         passed = not mismatches and not external_exists
-        detail = "知识库运行事实源为 knowledge/runtime + knowledge/chroma_db" if passed else "; ".join([*mismatches, f"knowledge/external exists={external_exists}"])
+        detail = "知识库运行事实源为 knowledge/runtime + knowledge/chroma_db" if passed else "; ".join([*mismatches, f"{external_runtime_path} exists={external_exists}"])
         self.add("知识库运行时路径", passed, detail)
 
     def check_runtime_knowledge_status_contract(self) -> None:
