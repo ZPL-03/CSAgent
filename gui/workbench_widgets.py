@@ -421,6 +421,13 @@ class FlowDagWidget(QWidget):
             return "失败"
         return {"done": "完成", "active": "运行中"}.get(state, "等待")
 
+    def _node_status_text(self, node: DagNode, state: str, accent: str | None = None) -> str:
+        """返回 DAG 节点的职责与状态合成文本。"""
+
+        if accent == "rag":
+            return node.subtitle
+        return f"{node.subtitle} · {self._status_text(state)}"
+
     def paintEvent(self, event) -> None:
         colors = self._colors()
         painter = QPainter(self)
@@ -537,7 +544,7 @@ class FlowDagWidget(QWidget):
         body_font = QFont(self.font())
         body_font.setPointSize(7 if rect.width() < 136 else 8)
         body_metrics = QFontMetrics(body_font)
-        status_text = self._status_text(state) if accent is None else node.subtitle
+        status_text = self._node_status_text(node, state, accent)
         side_margin = 14.0 if accent == "rag" else 10.0
         dot_diameter = 8.0
         dot_gap = 7.0

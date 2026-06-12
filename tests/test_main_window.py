@@ -441,10 +441,16 @@ def test_status_pill_centers_status_dot_and_text_group() -> None:
 
 
 def test_flow_dag_merges_requirement_parsing_into_orchestrator() -> None:
+    app = _app()
+    _ = app
     names = [node.name for node in FlowDagWidget.MAIN_NODES]
     assert names == ["ORCHESTRATOR", "CANDIDATE_GEN", "SCREENER", "FEM_AGENT", "REPORT_GEN"]
     assert FlowDagWidget.MAIN_NODES[0].subtitle == "需求解析 / 编排"
     assert FlowDagWidget.KNOWLEDGE_NODE.agent == "KNOWLEDGE_AGENT"
+    widget = FlowDagWidget()
+    assert widget._node_status_text(FlowDagWidget.MAIN_NODES[0], "waiting") == "需求解析 / 编排 · 等待"
+    assert widget._node_status_text(FlowDagWidget.MAIN_NODES[0], "active") == "需求解析 / 编排 · 运行中"
+    assert widget._node_status_text(FlowDagWidget.KNOWLEDGE_NODE, "active", "rag") == "检索证据 / RAG-KG"
 
 
 def test_visible_workbench_buttons_keep_text_inside_layout(monkeypatch) -> None:
