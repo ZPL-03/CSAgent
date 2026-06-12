@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 import csv
+import copy
 import json
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import yaml
 from PyQt6.QtGui import QFont, QFontMetrics
 from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QLineEdit, QPushButton
 
 from core.task_parser import TaskParser
 from gui.chat_widget import ChatWidget
+import gui.main_window as main_window_module
 from gui.main_window import MainWindow
 from gui.theme import application_stylesheet
 from gui.workbench_widgets import AgentStatusCard
@@ -36,6 +39,14 @@ def _candidate(candidate_id: str) -> dict:
         "layup": {},
         "material_system": {},
     }
+
+
+def _config_loader(payload: dict):
+    def loader() -> dict:
+        return copy.deepcopy(payload)
+
+    loader.cache_clear = lambda: None
+    return loader
 
 
 class FakeKnowledge:
@@ -633,6 +644,130 @@ def test_settings_page_exposes_editable_runtime_configuration(monkeypatch) -> No
         assert window.settings_save_button.isVisible() is True
         assert window.settings_reload_button.isVisible() is True
         assert window.settings_status_label.text()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_settings_page_persists_editable_runtime_configuration(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app_config = {
+        "abaqus": {
+            "command": "abaqus",
+            "user_subroutine": "",
+            "use_user_subroutine": False,
+            "job_timeout_seconds": 3600,
+            "max_retries": 3,
+            "poll_interval_seconds": 5,
+        },
+        "pipeline": {
+            "candidate_source_ratio": {"llm": 2, "case_transfer": 1, "doe": 1},
+            "random_seed": 42,
+        },
+        "project_knowledge": {
+            "top_k": 5,
+            "kg_top_k": 8,
+            "chunk_token_size": 512,
+            "chunk_overlap_tokens": 64,
+            "min_chunk_tokens": 80,
+            "vector_enabled": True,
+            "vector_collection_name": "csdm_cph_project_knowledge",
+        },
+        "conversation": {"confirmation_steps": ["screening", "fem"]},
+    }
+    llm_config = {
+        "backends": [
+            {
+                "name": "domain_finetuned_primary",
+                "model": "csllm",
+                "base_url_env": "LLM_PRIMARY_URL",
+                "model_env": "LLM_PRIMARY_MODEL_NAME",
+                "temperature": 0.2,
+                "max_tokens": 1800,
+                "timeout_seconds": 180,
+            },
+            {
+                "name": "fallback_openai_compatible",
+                "base_url_env": "URL",
+                "model_env": "MODEL_NAME",
+                "temperature": 0.2,
+                "max_tokens": 1800,
+                "timeout_seconds": 180,
+            },
+        ]
+    }
+    monkeypatch.setattr(main_window_module, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(main_window_module, "load_app_config", _config_loader(app_config))
+    monkeypatch.setattr(main_window_module, "load_llm_config", _config_loader(llm_config))
+    app = _app()
+    window = MainWindow()
+    try:
+        window.settings_fields["llm.primary.model"].setText("csllm-check")
+        window.settings_fields["abaqus.command"].setText("D:/Abaqus/Commands/abaqus.bat")
+        window.settings_fields["pipeline.ratio.llm"].setText("3")
+        window.settings_fields["pipeline.ratio.case_transfer"].setText("2")
+        window.settings_fields["pipeline.ratio.doe"].setText("1")
+        window.settings_fields["knowledge.chunk_token_size"].setText("256")
+        window.settings_fields["knowledge.chunk_overlap_tokens"].setText("32")
+        window.settings_fields["knowledge.min_chunk_tokens"].setText("64")
+
+        window._save_settings_from_page()
+
+        saved_app = yaml.safe_load((tmp_path / "app_config.yaml").read_text(encoding="utf-8"))
+        saved_llm = yaml.safe_load((tmp_path / "llm_config.yaml").read_text(encoding="utf-8"))
+        assert saved_app["abaqus"]["command"] == "D:/Abaqus/Commands/abaqus.bat"
+        assert saved_app["pipeline"]["candidate_source_ratio"] == {"llm": 3, "case_transfer": 2, "doe": 1}
+        assert saved_app["project_knowledge"]["chunk_token_size"] == 256
+        assert saved_app["project_knowledge"]["chunk_overlap_tokens"] == 32
+        assert saved_app["project_knowledge"]["min_chunk_tokens"] == 64
+        assert saved_llm["backends"][0]["model"] == "csllm-check"
+        assert window.settings_status_label.text()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_settings_page_rejects_invalid_ratio_and_chunk_contract(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app_config = {
+        "abaqus": {},
+        "pipeline": {
+            "candidate_source_ratio": {"llm": 2, "case_transfer": 1, "doe": 1},
+            "random_seed": 42,
+        },
+        "project_knowledge": {
+            "top_k": 5,
+            "kg_top_k": 8,
+            "chunk_token_size": 512,
+            "chunk_overlap_tokens": 64,
+            "min_chunk_tokens": 80,
+            "vector_enabled": True,
+            "vector_collection_name": "csdm_cph_project_knowledge",
+        },
+        "conversation": {"confirmation_steps": ["screening", "fem"]},
+    }
+    llm_config = {"backends": [{"model": "csllm"}, {"model_env": "MODEL_NAME"}]}
+    monkeypatch.setattr(main_window_module, "CONFIG_DIR", tmp_path)
+    monkeypatch.setattr(main_window_module, "load_app_config", _config_loader(app_config))
+    monkeypatch.setattr(main_window_module, "load_llm_config", _config_loader(llm_config))
+    app = _app()
+    window = MainWindow()
+    try:
+        window.settings_fields["pipeline.ratio.llm"].setText("0")
+        window.settings_fields["pipeline.ratio.case_transfer"].setText("0")
+        window.settings_fields["pipeline.ratio.doe"].setText("0")
+        window._save_settings_from_page()
+
+        assert not (tmp_path / "app_config.yaml").exists()
+        assert "至少需要一路" in window.settings_status_label.text()
+
+        window.settings_fields["pipeline.ratio.doe"].setText("1")
+        window.settings_fields["knowledge.chunk_token_size"].setText("128")
+        window.settings_fields["knowledge.chunk_overlap_tokens"].setText("128")
+        window._save_settings_from_page()
+
+        assert not (tmp_path / "app_config.yaml").exists()
+        assert "Overlap token" in window.settings_status_label.text()
     finally:
         window.close()
         app.processEvents()

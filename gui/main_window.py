@@ -1138,10 +1138,27 @@ class MainWindow(QMainWindow):
         abaqus["max_retries"] = self._settings_int("abaqus.max_retries", int(abaqus.get("max_retries", 3) or 3))
         abaqus["poll_interval_seconds"] = self._settings_int("abaqus.poll_interval_seconds", int(abaqus.get("poll_interval_seconds", 5) or 5))
 
+        ratio_values = {
+            "llm": max(0, self._settings_int("pipeline.ratio.llm", 0)),
+            "case_transfer": max(0, self._settings_int("pipeline.ratio.case_transfer", 0)),
+            "doe": max(0, self._settings_int("pipeline.ratio.doe", 0)),
+        }
+        if sum(ratio_values.values()) <= 0:
+            self.settings_status_label.setText("设置未保存：候选来源比例至少需要一路大于 0。")
+            return
+
+        chunk_token_size = max(32, self._settings_int("knowledge.chunk_token_size", int(app_config["project_knowledge"].get("chunk_token_size", 512) or 512)))
+        chunk_overlap_tokens = max(0, self._settings_int("knowledge.chunk_overlap_tokens", int(app_config["project_knowledge"].get("chunk_overlap_tokens", 64) or 64)))
+        min_chunk_tokens = max(1, self._settings_int("knowledge.min_chunk_tokens", int(app_config["project_knowledge"].get("min_chunk_tokens", 80) or 80)))
+        if chunk_overlap_tokens >= chunk_token_size:
+            self.settings_status_label.setText("设置未保存：Overlap token 必须小于 Chunk token。")
+            return
+        if min_chunk_tokens > chunk_token_size:
+            self.settings_status_label.setText("设置未保存：最小 chunk token 不能大于 Chunk token。")
+            return
+
         ratio = app_config["pipeline"]["candidate_source_ratio"]
-        ratio["llm"] = max(0, self._settings_int("pipeline.ratio.llm", int(ratio.get("llm", 2) or 2)))
-        ratio["case_transfer"] = max(0, self._settings_int("pipeline.ratio.case_transfer", int(ratio.get("case_transfer", 1) or 1)))
-        ratio["doe"] = max(0, self._settings_int("pipeline.ratio.doe", int(ratio.get("doe", 1) or 1)))
+        ratio.update(ratio_values)
         app_config["pipeline"]["random_seed"] = self._settings_int("pipeline.random_seed", int(app_config["pipeline"].get("random_seed", 42) or 42))
         steps = [item.strip() for item in self._settings_value("conversation.confirmation_steps").split(",") if item.strip()]
         app_config["conversation"]["confirmation_steps"] = steps
@@ -1149,9 +1166,9 @@ class MainWindow(QMainWindow):
         knowledge = app_config["project_knowledge"]
         knowledge["top_k"] = max(1, self._settings_int("knowledge.top_k", int(knowledge.get("top_k", 5) or 5)))
         knowledge["kg_top_k"] = max(1, self._settings_int("knowledge.kg_top_k", int(knowledge.get("kg_top_k", 8) or 8)))
-        knowledge["chunk_token_size"] = max(32, self._settings_int("knowledge.chunk_token_size", int(knowledge.get("chunk_token_size", 512) or 512)))
-        knowledge["chunk_overlap_tokens"] = max(0, self._settings_int("knowledge.chunk_overlap_tokens", int(knowledge.get("chunk_overlap_tokens", 64) or 64)))
-        knowledge["min_chunk_tokens"] = max(1, self._settings_int("knowledge.min_chunk_tokens", int(knowledge.get("min_chunk_tokens", 80) or 80)))
+        knowledge["chunk_token_size"] = chunk_token_size
+        knowledge["chunk_overlap_tokens"] = chunk_overlap_tokens
+        knowledge["min_chunk_tokens"] = min_chunk_tokens
         knowledge["vector_enabled"] = self._settings_bool("knowledge.vector_enabled", bool(knowledge.get("vector_enabled", True)))
         collection_name = self._settings_value("knowledge.vector_collection_name")
         if collection_name:
