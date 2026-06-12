@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import csv
+import json
 import sys
+from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -298,6 +301,7 @@ class MainWindow(QMainWindow):
         self.example_button.setToolTip(self.locale.text("button.example"))
         self.refresh_button = QPushButton(self.locale.text("button.refresh_knowledge"))
         self.open_report_button = QPushButton(self.locale.text("button.open_report"))
+        self.export_data_button = QPushButton(self.locale.text("button.export_data"))
         self.run_selector = QComboBox()
         self.run_selector.setMinimumHeight(42)
         self.refresh_runs_button = QPushButton(self.locale.text("button.refresh_runs"))
@@ -466,6 +470,7 @@ class MainWindow(QMainWindow):
         right_layout.addWidget(self.log_header)
         right_layout.addWidget(self.log_widget, 2)
         right_layout.addWidget(self.report_button)
+        right_layout.addWidget(self.export_data_button)
         right_layout.addWidget(self.open_report_button)
 
         top_bar = QFrame()
@@ -786,6 +791,7 @@ class MainWindow(QMainWindow):
         self._set_button_variant(self.example_button)
         self._set_button_variant(self.refresh_button)
         self._set_button_variant(self.open_report_button, "secondary")
+        self._set_button_variant(self.export_data_button, "secondary")
         self._set_button_variant(self.refresh_runs_button)
         self._set_button_variant(self.restore_run_button, "secondary")
         self._set_button_variant(self.screen_button)
@@ -828,6 +834,7 @@ class MainWindow(QMainWindow):
         self.example_button.clicked.connect(self._load_example_prompt)
         self.refresh_button.clicked.connect(self._refresh_knowledge_view)
         self.open_report_button.clicked.connect(self._open_latest_report)
+        self.export_data_button.clicked.connect(self._export_session_data)
         self.refresh_runs_button.clicked.connect(self._refresh_run_selector)
         self.restore_run_button.clicked.connect(self._restore_selected_run)
         self.run_selector.currentIndexChanged.connect(lambda: self._update_button_states())
@@ -883,6 +890,7 @@ class MainWindow(QMainWindow):
         self.example_button.setToolTip(self.locale.text("button.example"))
         self.refresh_button.setText(self.locale.text("button.refresh_knowledge"))
         self.open_report_button.setText(self.locale.text("button.open_report"))
+        self.export_data_button.setText(self.locale.text("button.export_data"))
         self.refresh_runs_button.setText(self.locale.text("button.refresh_runs"))
         self.restore_run_button.setText(self.locale.text("button.restore_run"))
         self.restore_run_button.setToolTip(self.locale.text("tooltip.restore_run"))
@@ -930,6 +938,7 @@ class MainWindow(QMainWindow):
             self.example_button,
             self.refresh_button,
             self.open_report_button,
+            self.export_data_button,
             self.refresh_runs_button,
             self.restore_run_button,
             self.screen_button,
@@ -957,6 +966,9 @@ class MainWindow(QMainWindow):
         self.example_button.setEnabled(self.session.pending_confirmation is None)
         self.refresh_button.setEnabled(True)
         self.open_report_button.setEnabled((RESULTS_DIR / "latest_report.md").exists() or (RESULTS_DIR / "latest_report.pdf").exists())
+        self.export_data_button.setEnabled(
+            bool(self.session.task or self.session.candidates or self.session.results_by_session_id or self.session.report)
+        )
         self.refresh_runs_button.setEnabled(True)
         self.restore_run_button.setEnabled(bool(self.run_selector.currentData()))
         self._update_overview_cards()
@@ -1300,6 +1312,110 @@ class MainWindow(QMainWindow):
                 self.chat_widget.add_message("SYSTEM", self.locale.text("message.open_report", path=path))
                 return
         self.chat_widget.add_message("SYSTEM", self.locale.text("message.no_report"))
+
+    def _export_session_data(self) -> None:
+        if not (self.session.task or self.session.candidates or self.session.results_by_session_id or self.session.report):
+            self.chat_widget.add_message("SYSTEM", self.locale.text("message.no_export_data"))
+            return
+        json_path, csv_path = self._write_session_export()
+        self.chat_widget.add_message(
+            "SYSTEM",
+            self.locale.text("message.export_data", json_path=json_path, csv_path=csv_path),
+        )
+        self.log_widget.append_log("SYSTEM", f"数据导出完成：{json_path} / {csv_path}")
+        self.monitor_log_widget.append_log("SYSTEM", f"数据导出完成：{json_path} / {csv_path}")
+        self._update_button_states()
+
+    def _session_export_id(self) -> str:
+        raw = self.session.workflow_run_id or (self.session.task or {}).get("task_id") or "manual"
+        safe = "".join(char if char.isalnum() or char in {"_", "-"} else "_" for char in str(raw))
+        return safe or "manual"
+
+    def _session_export_payload(self) -> dict:
+        return {
+            "exported_at": datetime.utcnow().isoformat(),
+            "workflow_run_id": self.session.workflow_run_id,
+            "instruction": self.session.instruction,
+            "stage": self.session.stage,
+            "pending_confirmation": self.session.pending_confirmation,
+            "task": self.session.task,
+            "candidates": self.session.candidates,
+            "screened_candidates": self.session.screened_candidates,
+            "evaluated_candidates": self.session.evaluated_candidates,
+            "results": list(self.session.results_by_session_id.values()),
+            "knowledge_updates": self.session.knowledge_updates,
+            "report": self.session.report,
+        }
+
+    def _trace_export_rows(self) -> list[dict]:
+        results_by_session = {
+            str(result.get("session_candidate_id") or result.get("candidate_id") or ""): result
+            for result in self.session.results_by_session_id.values()
+        }
+        updates_by_session: dict[str, dict] = {}
+        updates_by_candidate: dict[str, dict] = {}
+        for update in self.session.knowledge_updates:
+            if update.get("session_candidate_id"):
+                updates_by_session[str(update.get("session_candidate_id"))] = update
+            if update.get("candidate_id"):
+                updates_by_candidate[str(update.get("candidate_id"))] = update
+
+        rows: list[dict] = []
+        candidate_pool = self.session.candidates or self.session.current_candidates
+        for candidate in candidate_pool:
+            session_id = str(candidate.get("candidate_id") or "")
+            result = results_by_session.get(session_id) or {}
+            formal_id = str(result.get("candidate_id") or candidate.get("persistent_candidate_id") or "")
+            update = updates_by_session.get(session_id) or updates_by_candidate.get(formal_id) or {}
+            rows.append(
+                {
+                    "session_candidate_id": session_id,
+                    "formal_candidate_id": formal_id,
+                    "display_name": candidate.get("display_name") or session_id,
+                    "source": candidate.get("source") or "",
+                    "surrogate_ultimate_pressure_MPa": candidate.get("surrogate_ultimate_pressure_MPa"),
+                    "asme_linear_buckling_pressure_MPa": candidate.get("asme_linear_buckling_pressure_MPa"),
+                    "surrogate_PBIPF_MPa": candidate.get("surrogate_PBIPF_MPa"),
+                    "rank_score": candidate.get("rank_score"),
+                    "fem_ultimate_pressure_MPa": result.get("ultimate_pressure_MPa"),
+                    "fem_linear_buckling_pressure_MPa": result.get("linear_buckling_pressure_MPa"),
+                    "fem_status": result.get("status") or "",
+                    "verdict": result.get("verdict") or "",
+                    "case_id": update.get("case_id") or "",
+                    "knowledge_status": update.get("status") or "",
+                }
+            )
+        return rows
+
+    def _write_session_export(self) -> tuple[Path, Path]:
+        RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+        export_id = self._session_export_id()
+        json_path = RESULTS_DIR / f"session_export_{export_id}.json"
+        csv_path = RESULTS_DIR / f"session_trace_{export_id}.csv"
+        payload = self._session_export_payload()
+        json_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+        rows = self._trace_export_rows()
+        fieldnames = [
+            "session_candidate_id",
+            "formal_candidate_id",
+            "display_name",
+            "source",
+            "surrogate_ultimate_pressure_MPa",
+            "asme_linear_buckling_pressure_MPa",
+            "surrogate_PBIPF_MPa",
+            "rank_score",
+            "fem_ultimate_pressure_MPa",
+            "fem_linear_buckling_pressure_MPa",
+            "fem_status",
+            "verdict",
+            "case_id",
+            "knowledge_status",
+        ]
+        with csv_path.open("w", encoding="utf-8-sig", newline="") as handle:
+            writer = csv.DictWriter(handle, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(rows)
+        return json_path, csv_path
 
     def _respond_confirmation(self, approved: bool) -> None:
         if self.session.pending_confirmation is None:

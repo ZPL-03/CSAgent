@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import csv
+import json
 import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -88,6 +90,74 @@ def test_report_completion_updates_preview_tab(monkeypatch) -> None:
         assert window.tabs.currentWidget() is window.report_widget
         assert "预览内容" in window.report_widget.preview_browser.toPlainText()
         assert "LLM 工程解释：否" in window.report_widget.summary_label.text()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_session_data_export_writes_json_and_trace_csv(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    monkeypatch.setattr("gui.main_window.RESULTS_DIR", tmp_path)
+    app = _app()
+    window = MainWindow()
+    try:
+        window.session.workflow_run_id = "RUN_EXPORT"
+        window.session.instruction = "导出测试需求"
+        window.session.task = TaskParser().parse_instruction("外压 30 MPa，生成 2 个候选，初筛保留 1 个候选")
+        candidate = {
+            **_candidate("TMP_1"),
+            "source": "LLM",
+            "surrogate_ultimate_pressure_MPa": 45.5,
+            "asme_linear_buckling_pressure_MPa": 30.1,
+            "surrogate_PBIPF_MPa": 45.5,
+            "rank_score": 41.2,
+        }
+        window.session.candidates = [candidate]
+        window.session.evaluated_candidates = [candidate]
+        window.session.results_by_session_id = {
+            "TMP_1": {
+                "candidate_id": "C1",
+                "session_candidate_id": "TMP_1",
+                "ultimate_pressure_MPa": 43.2,
+                "linear_buckling_pressure_MPa": 32.0,
+                "status": "success",
+                "verdict": "通过",
+            }
+        }
+        window.session.knowledge_updates = [
+            {"candidate_id": "C1", "session_candidate_id": "TMP_1", "case_id": "CASE_1", "status": "stored"}
+        ]
+        window.session.report = {"markdown_path": "data/results/latest_report.md"}
+
+        window._update_button_states()
+        assert window.export_data_button.isEnabled() is True
+
+        json_path, csv_path = window._write_session_export()
+
+        payload = json.loads(json_path.read_text(encoding="utf-8"))
+        assert payload["workflow_run_id"] == "RUN_EXPORT"
+        assert payload["instruction"] == "导出测试需求"
+        assert payload["results"][0]["candidate_id"] == "C1"
+
+        with csv_path.open("r", encoding="utf-8-sig", newline="") as handle:
+            rows = list(csv.DictReader(handle))
+        assert rows[0]["session_candidate_id"] == "TMP_1"
+        assert rows[0]["formal_candidate_id"] == "C1"
+        assert rows[0]["case_id"] == "CASE_1"
+        assert rows[0]["fem_ultimate_pressure_MPa"] == "43.2"
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_session_data_export_button_disabled_for_empty_session(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    monkeypatch.setattr("gui.main_window.RESULTS_DIR", tmp_path)
+    app = _app()
+    window = MainWindow()
+    try:
+        window._update_button_states()
+        assert window.export_data_button.isEnabled() is False
     finally:
         window.close()
         app.processEvents()
