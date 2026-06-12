@@ -350,6 +350,15 @@ def test_main_window_routes_runtime_events_to_logs_without_chat_noise(monkeypatc
         assert "node_started @ parse_task" in window.log_widget.toPlainText()
         assert "节点开始：parse_task" not in window.chat_widget.toPlainText()
         assert window.chat_widget.toPlainText() == before_chat
+        assert window.runtime_agent_states["ORCHESTRATOR"] == "active"
+        assert window.flow_dag_widget.agent_states["ORCHESTRATOR"] == "active"
+        assert window.flow_dag_widget.stage_text == "运行中 · parse_task"
+
+        event["payload"]["runtime_event_type"] = "node_completed"
+        window._handle_message("FLOW", "节点完成：parse_task", event)
+
+        assert window.runtime_agent_states["ORCHESTRATOR"] == "done"
+        assert window.flow_dag_widget.agent_states["ORCHESTRATOR"] == "done"
     finally:
         window.close()
         app.processEvents()
