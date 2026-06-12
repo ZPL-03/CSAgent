@@ -269,3 +269,58 @@ def test_main_window_restores_workflow_snapshot(monkeypatch, tmp_path) -> None:
     finally:
         window.close()
         app.processEvents()
+
+
+def test_main_window_updates_model_pill_for_primary_llm_trace(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        event = {
+            "event_type": "llm_call_trace",
+            "payload": {
+                "selected_backend": "domain_finetuned_primary",
+                "selected_model": "csllm",
+                "fallback_used": False,
+                "trace": [{"backend": "domain_finetuned_primary", "status": "success"}],
+            },
+        }
+
+        window._handle_message("CANDIDATE_GEN", "LLM call completed", event)
+
+        assert window.model_status_label.status == "success"
+        assert "csllm" in window.model_status_label.text
+        assert "csllm" in window.log_widget.toPlainText()
+        assert window.last_llm_trace_payload["selected_backend"] == "domain_finetuned_primary"
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_main_window_updates_model_pill_for_fallback_llm_trace(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        event = {
+            "event_type": "llm_call_trace",
+            "payload": {
+                "selected_backend": "configured_fallback",
+                "selected_model": "deepseek-v4-pro",
+                "fallback_used": True,
+                "trace": [
+                    {"backend": "domain_finetuned_primary", "status": "failed"},
+                    {"backend": "configured_fallback", "status": "success"},
+                ],
+            },
+        }
+
+        window._handle_message("CANDIDATE_GEN", "LLM call completed", event)
+
+        assert window.model_status_label.status == "warning"
+        assert "deepseek-v4-pro" in window.model_status_label.text
+        assert "configured_fallback" in window.log_widget.toPlainText()
+        assert window.last_llm_trace_payload["fallback_used"] is True
+    finally:
+        window.close()
+        app.processEvents()

@@ -238,6 +238,7 @@ class MainWindow(QMainWindow):
         self.worker_thread: QThread | None = None
         self.worker: PipelineWorker | None = None
         self.workflow_event_store = WorkflowEventStore()
+        self.last_llm_trace_payload: dict | None = None
 
         self.app_title_label = QLabel(self.locale.text("app.title"))
         self.app_title_label.setObjectName("appTitle")
@@ -869,7 +870,10 @@ class MainWindow(QMainWindow):
         self.app_subtitle_label.setText(self.locale.text("app.subtitle"))
         self.language_label.setText(self.locale.text("section.language"))
         self.theme_label.setText(self.locale.text("section.theme"))
-        self.model_status_label.set_state(self.locale.text("model.current"), "success")
+        if self.last_llm_trace_payload:
+            self._update_model_status_from_llm_trace(self.last_llm_trace_payload, emit_log=False)
+        else:
+            self.model_status_label.set_state(self.locale.text("model.current"), "success")
         self.theme_selector.blockSignals(True)
         for index in range(self.theme_selector.count()):
             theme = str(self.theme_selector.itemData(index) or "")
@@ -1534,6 +1538,7 @@ class MainWindow(QMainWindow):
 
     def _reset_session(self) -> None:
         self.session = PipelineSession()
+        self.last_llm_trace_payload = None
         self.chat_widget.clear()
         self.log_widget.clear()
         self.task_browser.setHtml(self._initial_task_html())
@@ -1548,12 +1553,52 @@ class MainWindow(QMainWindow):
         self.report_widget.reset_view()
         self.task_config_widget.reset_view()
         self.workflow_widget.reset_view()
+        self.model_status_label.set_state(self.locale.text("model.current"), "success")
         self.flow_dag_widget.update_state(self._agent_state_map(), self.locale.text("queue.idle"))
         self.knowledge_widget.refresh(load_evidence=False)
         self.status_label.setText(self.locale.text("status.waiting"))
         self.input_line.clear()
         self._update_overview_cards()
         self._update_button_states()
+
+    def _update_model_status_from_llm_trace(self, payload: dict, emit_log: bool = True) -> None:
+        selected_model = str(payload.get("selected_model") or "").strip()
+        selected_backend = str(payload.get("selected_backend") or "").strip()
+        fallback_used = bool(payload.get("fallback_used"))
+        trace = payload.get("trace")
+        attempts = len(trace) if isinstance(trace, list) else 0
+        backend_label = selected_backend or "-"
+
+        if selected_model:
+            if fallback_used:
+                self.model_status_label.set_state(
+                    self.locale.text("model.fallback_active", model=selected_model),
+                    "warning",
+                )
+                log_text = self.locale.text(
+                    "model.fallback_log",
+                    model=selected_model,
+                    backend=backend_label,
+                    attempts=attempts,
+                )
+            else:
+                self.model_status_label.set_state(
+                    self.locale.text("model.primary_active", model=selected_model),
+                    "success",
+                )
+                log_text = self.locale.text(
+                    "model.primary_log",
+                    model=selected_model,
+                    backend=backend_label,
+                    attempts=attempts,
+                )
+        else:
+            self.model_status_label.set_state(self.locale.text("model.failed"), "failed")
+            log_text = self.locale.text("model.failed_log", attempts=attempts)
+
+        if emit_log:
+            self.log_widget.append_log("LLM", log_text)
+            self.monitor_log_widget.append_log("LLM", log_text)
 
     def _handle_message(self, sender: str, message: str, event: object) -> None:
         event_payload = event if isinstance(event, dict) else {}
@@ -1570,6 +1615,10 @@ class MainWindow(QMainWindow):
         self.chat_widget.add_message(sender_label, message)
         self.log_widget.append_log(sender_label, f"[{event_type}] {message}")
         self.monitor_log_widget.append_log(sender_label, f"[{event_type}] {message}")
+
+        if event_type == "llm_call_trace":
+            self.last_llm_trace_payload = dict(payload)
+            self._update_model_status_from_llm_trace(payload)
 
         if sender == "FLOW" and event_type == "task_summary":
             task = payload.get("task")

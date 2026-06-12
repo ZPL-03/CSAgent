@@ -45,15 +45,20 @@ class StatusPill(QWidget):
         self.theme = "dark"
         self.setMinimumSize(128, 32)
         self.setMaximumHeight(34)
+        self._sync_width()
 
     def set_state(self, text: str, status: str) -> None:
         self.text = text
         self.status = status
+        self._sync_width()
         self.update()
 
     def set_theme(self, theme: str) -> None:
         self.theme = resolve_theme(theme)
         self.update()
+
+    def _sync_width(self) -> None:
+        self.setMinimumWidth(max(128, min(300, self.fontMetrics().horizontalAdvance(self.text) + 64)))
 
     def paintEvent(self, event) -> None:
         painter = QPainter(self)

@@ -25,7 +25,7 @@ CSAgent 多智能体智能设计平台面向复合材料外压圆柱耐压壳智
 
 PyQt6 桌面端默认为简体中文界面，顶部语言选择器支持切换为 English，主题选择器支持跟随系统、深色工程和亮色工程。界面语言和主题写入 `data/runtime/ui_settings.json`，属于本地运行偏好，不进入 Git。桌面端启动时优先加载 `HarmonyOS Sans SC`、`Noto Sans SC` 和 Windows 中文字体，避免中文标签、状态栏和可视化图注显示为方块。
 
-主界面采用 `QMainWindow + QSplitter + QStackedWidget` 工程工作台布局。顶部为系统身份栏、工作台/项目/知识库/监控/设置导航和当前模型标识；语言和主题配置位于“设置”页。工作台左栏展示 `ORCHESTRATOR`、`CANDIDATE_GEN`、`SCREENER`、`FEM_AGENT`、`KNOWLEDGE_AGENT`、`REPORT_GEN` 的状态点、实时状态和任务队列；中部上方为自绘 LangGraph DAG，下方为对话优先的多智能体协作区；右栏展示实时三维视口、会话指标、运行日志、阶段报告、会话数据导出和报告打开入口。项目页承载任务契约、候选、FEM、追踪和报告详情；知识库页承载检索与证据预览；监控页承载工作流审计面板、运行日志和状态恢复入口。界面层只显示和触发流程，不改变任务解析、候选生成、代理初筛、有限元校核、知识回流和报告生成的业务契约。会话数据导出写入 `data/results/session_export_<RUN_ID>.json` 和 `data/results/session_trace_<RUN_ID>.csv`，分别保存当前任务快照与 TMP-C-CASE 追踪表。
+主界面采用 `QMainWindow + QSplitter + QStackedWidget` 工程工作台布局。顶部为系统身份栏、工作台/项目/知识库/监控/设置导航和当前模型标识；语言和主题配置位于“设置”页。当前模型标识读取 `llm_call_trace` 事件，显示本次调用实际使用的领域主模型、回退模型或失败状态，并同步写入运行日志。工作台左栏展示 `ORCHESTRATOR`、`CANDIDATE_GEN`、`SCREENER`、`FEM_AGENT`、`KNOWLEDGE_AGENT`、`REPORT_GEN` 的状态点、实时状态和任务队列；中部上方为自绘 LangGraph DAG，下方为对话优先的多智能体协作区；右栏展示实时三维视口、会话指标、运行日志、阶段报告、会话数据导出和报告打开入口。项目页承载任务契约、候选、FEM、追踪和报告详情；知识库页承载检索与证据预览；监控页承载工作流审计面板、运行日志和状态恢复入口。界面层只显示和触发流程，不改变任务解析、候选生成、代理初筛、有限元校核、知识回流和报告生成的业务契约。会话数据导出写入 `data/results/session_export_<RUN_ID>.json` 和 `data/results/session_trace_<RUN_ID>.csv`，分别保存当前任务快照与 TMP-C-CASE 追踪表。
 
 ![深色工程工作台](docs/assets/ui_workbench_dark.png)
 ![亮色工程工作台](docs/assets/ui_workbench_light.png)
