@@ -437,9 +437,9 @@ class KnowledgeWidget(QWidget):
         self._maintenance_worker: KnowledgeMaintenanceWorker | None = None
 
         self.store_pill = StatusPill("知识库待入库", "pending")
-        self.rag_pill = StatusPill("RAG 0 chunks", "pending")
-        self.vector_pill = StatusPill("Vector 0 chunks", "pending")
-        self.kg_pill = StatusPill("KG 0 relations", "pending")
+        self.rag_pill = StatusPill("RAG 0 文本块", "pending")
+        self.vector_pill = StatusPill("Vector 0 向量块", "pending")
+        self.kg_pill = StatusPill("KG 0 关系", "pending")
         self.parser_pill = StatusPill("解析器待调用", "pending")
 
         self.search_input = QLineEdit()
@@ -854,38 +854,44 @@ class KnowledgeWidget(QWidget):
     def _update_graph_view(self, evidence_payload: dict[str, Any]) -> None:
         entities_path = getattr(self.ingestion_service, "entities_path", None)
         relations_path = getattr(self.ingestion_service, "relations_path", None)
-        entities = self._load_jsonl_rows(entities_path)
-        relations = self._load_jsonl_rows(relations_path)
+        runtime_entities = self._load_jsonl_rows(entities_path)
+        runtime_relations = self._load_jsonl_rows(relations_path)
         evidence_relations = evidence_payload.get("relations") if isinstance(evidence_payload.get("relations"), list) else []
-        if not relations and evidence_relations:
-            relations = list(evidence_relations)
-            entity_seen: set[tuple[str, str]] = set()
-            entities = []
-            for relation in relations:
-                for name_key, type_key in [("source", "source_type"), ("target", "target_type")]:
-                    name = str(relation.get(name_key) or "").strip()
-                    entity_type = str(relation.get(type_key) or "Entity")
-                    if not name or (entity_type, name) in entity_seen:
-                        continue
-                    entity_seen.add((entity_type, name))
-                    entities.append({"type": entity_type, "name": name})
+        relations = [*evidence_relations, *runtime_relations[:80]] if evidence_relations else runtime_relations[:160]
+        entity_seen: set[tuple[str, str]] = set()
+        entities = []
+        for entity in runtime_entities:
+            entity_type = str(entity.get("type") or "Entity")
+            name = str(entity.get("name") or "").strip()
+            if not name or (entity_type, name) in entity_seen:
+                continue
+            entity_seen.add((entity_type, name))
+            entities.append(entity)
+        for relation in relations:
+            for name_key, type_key in [("source", "source_type"), ("target", "target_type")]:
+                name = str(relation.get(name_key) or "").strip()
+                entity_type = str(relation.get(type_key) or "Entity")
+                if not name or (entity_type, name) in entity_seen:
+                    continue
+                entity_seen.add((entity_type, name))
+                entities.append({"type": entity_type, "name": name})
         self.graph_view.set_graph(entities, relations, evidence_relations)
 
     def _update_status_pills(self, status: dict[str, Any]) -> None:
         ready = bool(status.get("ready"))
-        doc_count = int(status.get("document_count", 0) or status.get("structured_document_count", 0) or 0)
+        doc_count = int(status.get("runtime_document_count", status.get("document_count", 0)) or 0)
         chunk_count = int(status.get("rag_chunk_count", 0) or 0)
         vector_count = int(status.get("vector_chunk_count", 0) or 0)
         vector_status = str(status.get("vector_status") or "")
         vector_ready = bool(status.get("vector_ready")) and vector_status == "success"
         relation_count = int(status.get("kg_relation_count", 0) or 0)
         parser = (status.get("last_ingestion") or {}).get("parser_backend") if isinstance(status.get("last_ingestion"), dict) else ""
-        self.store_pill.set_state(f"知识库 {doc_count} 文档", "success" if ready else "pending")
-        self.rag_pill.set_state(f"RAG {chunk_count} chunks", "success" if chunk_count else "pending")
-        vector_label = f"Vector {vector_count} chunks" if vector_count else f"Vector {vector_status or 'pending'}"
+        self.store_pill.set_state(f"合并 RAG {chunk_count} 文本块", "success" if ready else "pending")
+        self.rag_pill.set_state(f"RAG {chunk_count} 文本块", "success" if chunk_count else "pending")
+        vector_label = f"Vector {vector_count} 向量块" if vector_count else f"Vector {vector_status or 'pending'}"
         vector_state = "success" if vector_ready else ("warning" if vector_status in {"warning", "failed"} else "pending")
         self.vector_pill.set_state(vector_label, vector_state)
-        self.kg_pill.set_state(f"KG {relation_count} relations", "success" if relation_count else "pending")
+        self.kg_pill.set_state(f"KG {relation_count} 关系", "success" if relation_count else "pending")
         self.parser_pill.set_state(str(parser or "解析器待调用"), "success" if parser else "pending")
 
     def _update_summary(self, status: dict[str, Any]) -> None:
@@ -897,18 +903,24 @@ class KnowledgeWidget(QWidget):
         overlap = status.get("chunk_overlap_tokens", "-")
         last = status.get("last_ingestion") if isinstance(status.get("last_ingestion"), dict) else {}
         verification = status.get("last_retrieval_verification") if isinstance(status.get("last_retrieval_verification"), dict) else {}
+        doc_count = int(status.get("runtime_document_count", status.get("document_count", 0)) or 0)
+        builtin_chunks = int(status.get("builtin_rag_chunk_count", 0) or 0)
+        runtime_chunks = int(status.get("runtime_rag_chunk_count", 0) or 0)
+        builtin_relations = int(status.get("builtin_kg_relation_count", 0) or 0)
+        runtime_relations = int(status.get("runtime_kg_relation_count", 0) or 0)
         html = [
             "<h2>项目知识库状态</h2>",
-            "<p>知识库由本项目运行时维护，用户上传资料后进入解析、分块、索引、实体关系抽取和检索验证流程；检索证据用于 LLM 工程上下文和人工审计，不替代代理公式或 FEM 结果。</p>",
+            "<p>项目知识库由内置数据和用户增量组成。用户上传资料后进入解析、分块、索引、实体关系抽取和检索验证流程，最终检索入口读取合并后的总 RAG/KG。检索证据用于 LLM 工程上下文和人工审计，不替代代理公式或 FEM 结果。</p>",
             "<div style='display:grid;grid-template-columns:repeat(2,1fr);gap:8px;'>",
-            self._summary_card("资料", f"{status.get('document_count', 0)} 文档"),
-            self._summary_card("RAG", f"{status.get('rag_chunk_count', 0)} 文本块"),
+            self._summary_card("内置数据", f"{builtin_chunks} 文本块", f"{status.get('builtin_kg_entity_count', 0)} 实体 / {builtin_relations} 关系"),
+            self._summary_card("用户增量", f"{doc_count} 文档", f"{runtime_chunks} 文本块 / {runtime_relations} 关系"),
+            self._summary_card("合并 RAG", f"{status.get('rag_chunk_count', 0)} 文本块"),
             self._summary_card(
                 "Vector",
                 f"{status.get('vector_chunk_count', 0)} 向量块",
                 f"后端 {status.get('vector_backend') or '-'}；状态 {status.get('vector_status') or '-'}",
             ),
-            self._summary_card("KG", f"{status.get('kg_entity_count', 0)} 实体 / {status.get('kg_relation_count', 0)} 关系"),
+            self._summary_card("合并 KG", f"{status.get('kg_entity_count', 0)} 实体 / {status.get('kg_relation_count', 0)} 关系"),
             self._summary_card("分块", f"{chunk_size} token / overlap {overlap}"),
             self._summary_card("案例", f"会话 {len(archive_cases)} / 正式 {len(formal_cases)}"),
             self._summary_card("FEM", f"ODB {odb_count} / 云图 {vis_count}"),
@@ -916,7 +928,8 @@ class KnowledgeWidget(QWidget):
             f"<p><b>最后入库：</b>{escape(str(last.get('title') or '-'))}；<b>解析器：</b>{escape(str(last.get('parser_backend') or '-'))}</p>",
             f"<p><b>向量索引：</b>{escape(str(status.get('vector_status') or '-'))}；{escape(str(status.get('vector_message') or '-'))}</p>",
             f"<p><b>检索验证：</b>{escape(str(verification.get('message') or '-'))}</p>",
-            f"<p><b>Manifest：</b>{escape(str(status.get('manifest_path') or '-'))}</p>",
+            f"<p><b>用户增量清单：</b>{escape(str(status.get('manifest_path') or '-'))}</p>",
+            f"<p><b>内置数据清单：</b>{escape(str(status.get('builtin_manifest_path') or '-'))}</p>",
         ]
         if metrics:
             html.append(

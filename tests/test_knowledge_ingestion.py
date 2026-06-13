@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import gzip
 
 from core.knowledge_ingestion import KnowledgeIngestionService, SUPPORTED_INGEST_SUFFIXES, SUPPORTED_QT_FILE_FILTER
 
@@ -10,18 +11,26 @@ def test_runtime_knowledge_empty_status_exposes_pipeline_contract(tmp_path) -> N
 
     status = service.status()
 
-    assert status["ready"] is False
+    assert status["ready"] is True
+    assert status["builtin_ready"] is True
     assert status["store_type"] == "project_runtime_knowledge"
     assert status["document_count"] == 0
-    assert status["rag_chunk_count"] == 0
+    assert status["runtime_document_count"] == 0
+    assert status["runtime_rag_chunk_count"] == 0
+    assert status["runtime_kg_entity_count"] == 0
+    assert status["runtime_kg_relation_count"] == 0
+    assert status["builtin_rag_chunk_count"] > 0
+    assert status["builtin_kg_entity_count"] > 0
+    assert status["builtin_kg_relation_count"] > 0
+    assert status["rag_chunk_count"] == status["builtin_rag_chunk_count"]
     assert status["vector_chunk_count"] == 0
     assert status["vector_ready"] is False
     assert status["vector_status"] == "pending"
     assert status["vector_message"] == "等待写入向量索引"
     assert status["vector_detail"] == ""
     assert status["vector_backend"] == ""
-    assert status["kg_entity_count"] == 0
-    assert status["kg_relation_count"] == 0
+    assert status["kg_entity_count"] == status["builtin_kg_entity_count"]
+    assert status["kg_relation_count"] == status["builtin_kg_relation_count"]
     assert status["chunk_token_size"] == 64
     assert status["chunk_overlap_tokens"] == 12
     assert status["dedupe_key"] == "content_hash"
@@ -247,6 +256,87 @@ def test_runtime_knowledge_ingestion_merges_new_document_with_existing_rag_and_k
     assert manifest["rag_chunk_count"] == len(chunks)
     assert manifest["kg_entity_count"] == len(entities)
     assert manifest["kg_relation_count"] == len(relations)
+
+
+def test_runtime_knowledge_status_reports_builtin_runtime_and_merged_counts(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_USE_HASH_EMBEDDING", "1")
+    builtin_dir = tmp_path / "csllm"
+    builtin_rag_path = builtin_dir / "rag" / "rag_chunks.compact.jsonl.gz"
+    builtin_kg_dir = builtin_dir / "kg"
+    builtin_manifest_path = builtin_dir / "provenance" / "manifest.json"
+    builtin_rag_path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(builtin_rag_path, "wt", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "chunk_id": "BASE_CHUNK_1",
+                    "record_id": "BASE_DOC_1",
+                    "source_id": "BASE_DOC_1",
+                    "retrieval_scope": "main",
+                    "document_title": "Built pressure hull reference",
+                    "content_plain": "composite pressure hull ASME RD-1172 buckling",
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+    builtin_kg_dir.mkdir(parents=True, exist_ok=True)
+    (builtin_kg_dir / "entities.jsonl").write_text(
+        json.dumps({"type": "DesignFormula", "name": "ASME RD-1172"}, ensure_ascii=False) + "\n",
+        encoding="utf-8",
+    )
+    with gzip.open(builtin_kg_dir / "relations.compact.jsonl.gz", "wt", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "source_type": "DesignFormula",
+                    "source": "ASME RD-1172",
+                    "target_type": "FailureMode",
+                    "target": "Buckling",
+                    "relation": "PREDICTED_BY",
+                    "record_id": "BASE_DOC_1",
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+    (builtin_kg_dir / "kg_stats.json").write_text(
+        json.dumps({"total_entities": 1, "total_relations": 1}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    builtin_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    builtin_manifest_path.write_text(
+        json.dumps({"record_counts": {"rag_chunks": 1, "entities": 1, "relations": 1}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    service = KnowledgeIngestionService(base_dir=tmp_path / "knowledge", chunk_token_size=42, chunk_overlap_tokens=6)
+    service.builtin_dir = builtin_dir
+    service.builtin_rag_chunks_path = builtin_rag_path
+    service.builtin_kg_dir = builtin_kg_dir
+    service.builtin_manifest_path = builtin_manifest_path
+
+    source = tmp_path / "uploaded_pressure_hull.md"
+    source.write_text(
+        "# uploaded pressure hull\n\nT700 composite pressure hull under external pressure uses PBIPF and Abaqus Riks.",
+        encoding="utf-8",
+    )
+    result = service.ingest_file(source)
+    status = service.status()
+    snapshot_path = service.export_snapshot()
+    snapshot = json.loads(snapshot_path.read_text(encoding="utf-8"))
+
+    assert result.success
+    assert status["ready"] is True
+    assert status["builtin_ready"] is True
+    assert status["builtin_rag_chunk_count"] == 1
+    assert status["runtime_document_count"] == 1
+    assert status["runtime_rag_chunk_count"] == result.chunk_count
+    assert status["rag_chunk_count"] == result.chunk_count + 1
+    assert status["kg_relation_count"] == result.relation_count + 1
+    assert len(snapshot["documents"]) == 1
+    assert len(snapshot["chunks"]) == result.chunk_count
+    assert all(chunk.get("source_id") == result.document_id for chunk in snapshot["chunks"])
 
 
 def test_runtime_knowledge_ingestion_accepts_engineering_text_and_binary_metadata(tmp_path, monkeypatch) -> None:

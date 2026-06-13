@@ -254,16 +254,33 @@ class ReleaseAudit:
         config = yaml.safe_load((ROOT / "config/app_config.yaml").read_text(encoding="utf-8"))
         knowledge = dict((config or {}).get("project_knowledge", {}))
         required = {
+            "builtin_dir": "knowledge/csllm",
+            "builtin_rag_chunks_path": "knowledge/csllm/rag/rag_chunks.compact.jsonl.gz",
+            "builtin_kg_dir": "knowledge/csllm/kg",
+            "builtin_manifest_path": "knowledge/csllm/provenance/manifest.json",
             "base_dir": "knowledge/runtime",
             "upload_dir": "knowledge/runtime/uploads",
             "rag_chunks_path": "knowledge/runtime/rag/rag_chunks.jsonl",
             "vector_chroma_dir": "knowledge/chroma_db",
         }
         mismatches = [f"{key}={knowledge.get(key)!r}" for key, expected in required.items() if knowledge.get(key) != expected]
+        builtin_files = [
+            ROOT / "knowledge/csllm/rag/rag_chunks.compact.jsonl.gz",
+            ROOT / "knowledge/csllm/kg/entities.jsonl",
+            ROOT / "knowledge/csllm/kg/relations.compact.jsonl.gz",
+            ROOT / "knowledge/csllm/kg/kg_stats.json",
+            ROOT / "knowledge/csllm/provenance/manifest.json",
+            ROOT / "knowledge/csllm/provenance/file_manifest.jsonl",
+        ]
+        missing_builtin = [path.relative_to(ROOT).as_posix() for path in builtin_files if not path.exists()]
         external_runtime_path = _join("knowledge", "/external")
         external_exists = (ROOT / external_runtime_path).exists()
-        passed = not mismatches and not external_exists
-        detail = "知识库运行事实源为 knowledge/runtime + knowledge/chroma_db" if passed else "; ".join([*mismatches, f"{external_runtime_path} exists={external_exists}"])
+        passed = not mismatches and not missing_builtin and not external_exists
+        detail = (
+            "知识库事实源为内置数据、用户增量运行区、合并检索入口和向量索引"
+            if passed
+            else "; ".join([*mismatches, *(f"missing:{item}" for item in missing_builtin), f"{external_runtime_path} exists={external_exists}"])
+        )
         self.add("知识库运行时路径", passed, detail)
 
     def check_runtime_knowledge_status_contract(self) -> None:
@@ -279,6 +296,14 @@ class ReleaseAudit:
         status = KnowledgeIngestionService().status()
         required_keys = {
             "store_type",
+            "builtin_ready",
+            "builtin_rag_chunk_count",
+            "builtin_kg_entity_count",
+            "builtin_kg_relation_count",
+            "runtime_document_count",
+            "runtime_rag_chunk_count",
+            "runtime_kg_entity_count",
+            "runtime_kg_relation_count",
             "document_count",
             "rag_chunk_count",
             "vector_chunk_count",
@@ -304,9 +329,15 @@ class ReleaseAudit:
             errors.append(f"store_type={status.get('store_type')!r}")
         if status.get("dedupe_key") != "content_hash":
             errors.append(f"dedupe_key={status.get('dedupe_key')!r}")
+        if not status.get("builtin_ready"):
+            errors.append("builtin_ready=False")
+        if int(status.get("builtin_rag_chunk_count", 0) or 0) <= 0:
+            errors.append(f"builtin_rag_chunk_count={status.get('builtin_rag_chunk_count')!r}")
+        if int(status.get("builtin_kg_relation_count", 0) or 0) <= 0:
+            errors.append(f"builtin_kg_relation_count={status.get('builtin_kg_relation_count')!r}")
         if step_names[:5] != expected_steps:
             errors.append(f"pipeline={step_names[:5]!r}")
-        detail = "空库和已有库均暴露分块、去重、RAG/KG 计数和五阶段流水线状态" if not errors else "; ".join(errors[:12])
+        detail = "内置数据、用户增量运行区和合并 RAG/KG 均暴露分块、去重、计数和五阶段流水线状态" if not errors else "; ".join(errors[:12])
         self.add("知识库状态契约", not errors, detail)
 
     def check_knowledge_pipeline_contract(self) -> None:

@@ -74,8 +74,13 @@ P_PBIPF = d1 * lg(Q) * t / R
 
 ## 知识库
 
-运行时读取本项目 `knowledge/runtime` 中的可更新知识库和知识图谱数据，路径配置在 `config/app_config.yaml`。该目录属于本地运行产物，不进入 Git：
+项目知识库由内置 RAG/KG 数据和用户上传增量数据组成，路径配置在 `config/app_config.yaml`。`knowledge/csllm` 保存项目内置数据，进入仓库；`knowledge/runtime` 保存用户上传资料解析后的增量数据，属于本地运行产物，不进入 Git。最终检索入口读取内置数据与用户增量合并后的总 RAG/KG：
 
+- `knowledge/csllm/rag/rag_chunks.compact.jsonl.gz`：内置 RAG 文本块
+- `knowledge/csllm/kg/entities.jsonl`：内置知识图谱实体
+- `knowledge/csllm/kg/relations.compact.jsonl.gz`：内置知识图谱关系
+- `knowledge/csllm/kg/kg_stats.json`：内置知识图谱统计
+- `knowledge/csllm/provenance/manifest.json`：内置数据记录数、字段和文件清单
 - `knowledge/runtime/uploads/`：用户上传并归档的原始资料
 - `knowledge/runtime/structured_text/documents.jsonl`：资料级解析记录
 - `knowledge/runtime/structured_text/blocks.jsonl`：结构化文本块
@@ -84,13 +89,13 @@ P_PBIPF = d1 * lg(Q) * t / R
 - `knowledge/chroma_db`：项目知识向量 collection 和案例记忆向量 collection
 - `knowledge/runtime/kg/entities.jsonl`：知识图谱实体
 - `knowledge/runtime/kg/relations.jsonl`：知识图谱关系
-- `knowledge/runtime/manifest.json`：文档数、chunk 数、向量索引数、实体关系数、检索验证结果、分块参数、去重键和最近一次入库流水线状态
+- `knowledge/runtime/manifest.json`：用户增量文档数、chunk 数、向量索引数、实体关系数、检索验证结果、分块参数、去重键和最近一次入库流水线状态
 
-资料入库流程为“MinerU / Docling 文档解析 -> 语义分块 -> BGE-M3 向量化索引 -> KG 实体/关系抽取 -> 检索验证 / 证据引用”。PDF、DOCX、PPTX 和图片优先调用 MinerU，失败后尝试 Docling；文本、Markdown、CSV、TSV、Excel 和工程文本使用本项目解析器。RAG 分块使用 `chunk_token_size`、`chunk_overlap_tokens` 和 `min_chunk_tokens` 控制 token 窗口、重叠上下文和小块合并；完全相同的 chunk 按 `content_hash` 去重。去重后的 chunk 同步写入 `knowledge/runtime/rag/rag_chunks.jsonl` 和 `knowledge/chroma_db` 中的 `csdm_cph_project_knowledge` collection。向量后端按 `rag.embedding_model=BAAI/bge-m3` 读取本地缓存；本地模型不可用且配置允许时使用哈希嵌入回退并在流水线状态中记录。`vector_ready` 只在向量 collection 实际写入成功且写入数量大于 0 时为真；向量后端不可用时保留 JSONL/BM25 和 KG 检索，GUI 以黄色状态灯显示。KG 写出实体、关系和统计文件；新资料入库时保留其他资料的 RAG chunk、实体和关系，并按文档编号替换同一资料的旧记录。检索验证会确认当前资料的文本块可命中、图谱关系引用有效 chunk，并把证据样本写入 manifest。
+资料入库流程为“MinerU / Docling 文档解析 -> 语义分块 -> BGE-M3 向量化索引 -> KG 实体/关系抽取 -> 检索验证 / 证据引用”。PDF、DOCX、PPTX 和图片优先调用 MinerU，失败后尝试 Docling；文本、Markdown、CSV、TSV、Excel 和工程文本使用本项目解析器。RAG 分块使用 `chunk_token_size`、`chunk_overlap_tokens` 和 `min_chunk_tokens` 控制 token 窗口、重叠上下文和小块合并；完全相同的 chunk 按 `content_hash` 去重。去重后的用户增量 chunk 写入 `knowledge/runtime/rag/rag_chunks.jsonl`，并同步写入 `knowledge/chroma_db` 中的 `csdm_cph_project_knowledge` collection。向量后端按 `rag.embedding_model=BAAI/bge-m3` 读取本地缓存；本地模型不可用且配置允许时使用哈希嵌入回退并在流水线状态中记录。`vector_ready` 只在向量 collection 实际写入成功且写入数量大于 0 时为真；向量后端不可用时保留 JSONL/BM25 和 KG 检索，GUI 以黄色状态灯显示。KG 写出用户增量实体、关系和统计文件；新资料入库时保留其他上传资料的 RAG chunk、实体和关系，并按文档编号替换同一资料的旧记录。检索验证会确认当前资料的文本块可命中、图谱关系引用有效 chunk，并把证据样本写入 manifest。
 
-空知识库也是有效运行状态：GUI 和审计会显示 0 文档、0 chunk、0 实体关系、分块 token、overlap、`content_hash` 去重字段和五阶段待运行流水线。
+用户增量区为空时，项目仍读取 `knowledge/csllm` 中的内置 RAG/KG 数据；GUI 和审计分别显示内置数据、用户增量和合并总数。用户增量区的 0 文档、0 chunk、0 实体关系、分块 token、overlap、`content_hash` 去重字段和五阶段待运行流水线会单独显示。
 
-候选生成 LLM 使用关键词/BM25、向量 collection 和知识图谱关系融合后的证据作为工程提案依据；结构化候选参数仍由系统解析、归一化、规则检查和 Schema 校验确定。GUI 的“知识库”页支持上传资料、批量解析、后台入库、索引重建、知识库快照导出、状态灯、流水线卡片、文档表、人工检索、知识图谱可视化和证据预览，并单独显示 RAG、Vector 和 KG 状态。知识图谱画布按实体和关系绘制核心子图，支持节点/关系搜索、滚轮缩放、鼠标拖动、双击复位和适配图谱。后台入库由 `KnowledgeIngestionService` 发出阶段进度事件，GUI 按文档解析、语义分块、向量化索引、实体/关系抽取、检索验证五个真实阶段实时刷新流水线状态和错误信息；索引重建会复用已解析文档和去重文本块，重建向量 collection、实体关系、统计清单和检索验证状态；快照导出写入当前 manifest、文档、文本块、实体、关系和统计数据。证据用于候选生成 LLM 的工程上下文和人工核查来源，不作为确定性数值来源。
+候选生成 LLM 使用合并后的关键词/BM25、向量 collection 和知识图谱关系证据作为工程提案依据；结构化候选参数仍由系统解析、归一化、规则检查和 Schema 校验确定。GUI 的“知识库”页支持上传资料、批量解析、后台入库、索引重建、知识库快照导出、状态灯、流水线卡片、文档表、人工检索、知识图谱可视化和证据预览，并显示内置数据、用户增量、合并 RAG、Vector 和合并 KG 状态。知识图谱画布按合并后的实体和关系绘制核心子图，支持节点/关系搜索、滚轮缩放、鼠标拖动、双击复位和适配图谱。后台入库由 `KnowledgeIngestionService` 发出阶段进度事件，GUI 按文档解析、语义分块、向量化索引、实体/关系抽取、检索验证五个真实阶段实时刷新流水线状态和错误信息；索引重建会复用已解析文档和去重文本块，重建用户增量向量 collection、实体关系、统计清单和检索验证状态；快照导出写入用户增量 manifest、文档、文本块、实体、关系和统计数据。证据用于候选生成 LLM 的工程上下文和人工核查来源，不作为确定性数值来源。
 
 GUI 的“监控”页提供最近运行记录下拉框、刷新运行记录和“恢复运行状态”按钮。恢复运行状态只读取 `data/runtime/workflow_runtime.sqlite3` 中的最近快照，不重新调用 LLM、代理模型或 Abaqus；恢复后会还原任务、候选、筛选结果、有限元结果、报告和待确认节点。
 

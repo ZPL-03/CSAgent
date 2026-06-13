@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import math
 import re
@@ -134,7 +135,8 @@ def _as_path(value: str | Path) -> Path:
 def _jsonl_rows(path: Path) -> Iterable[dict[str, Any]]:
     if not path.exists():
         return
-    with path.open("r", encoding="utf-8") as handle:
+    opener = gzip.open if path.suffix.lower() == ".gz" else open
+    with opener(path, "rt", encoding="utf-8") as handle:
         for line in handle:
             if not line.strip():
                 continue
@@ -154,6 +156,21 @@ def _load_json(path: Path) -> dict[str, Any]:
     except (json.JSONDecodeError, OSError):
         return {}
     return payload if isinstance(payload, dict) else {}
+
+
+def _count_rows(path: Path) -> int:
+    return sum(1 for _row in _jsonl_rows(path))
+
+
+def _builtin_record_counts(manifest_path: Path, kg_stats_path: Path, rag_path: Path, relations_path: Path, entities_path: Path) -> dict[str, int]:
+    manifest = _load_json(manifest_path)
+    record_counts = manifest.get("record_counts") if isinstance(manifest.get("record_counts"), dict) else {}
+    kg_stats = _load_json(kg_stats_path)
+    return {
+        "rag_chunks": int(record_counts.get("rag_chunks") or (_count_rows(rag_path) if rag_path.exists() else 0)),
+        "relations": int(record_counts.get("relations") or kg_stats.get("total_relations") or (_count_rows(relations_path) if relations_path.exists() else 0)),
+        "entities": int(record_counts.get("entities") or kg_stats.get("total_entities") or (_count_rows(entities_path) if entities_path.exists() else 0)),
+    }
 
 
 def tokenize(text: Any) -> list[str]:
@@ -222,8 +239,15 @@ def _source_line(label: str, source: dict[str, Any]) -> str:
 class RagChunkRetriever:
     """基于知识库 JSONL 的轻量关键词检索器。"""
 
-    def __init__(self, chunks_path: Path, max_snippet_chars: int = 1200) -> None:
+    def __init__(
+        self,
+        chunks_path: Path,
+        max_snippet_chars: int = 1200,
+        *,
+        builtin_chunks_paths: list[Path] | None = None,
+    ) -> None:
         self.chunks_path = chunks_path
+        self.builtin_chunks_paths = list(builtin_chunks_paths or [])
         self.max_snippet_chars = max_snippet_chars
         self.rows: list[dict[str, Any]] = []
         self.idf: dict[str, float] = {}
@@ -231,92 +255,106 @@ class RagChunkRetriever:
 
     @property
     def is_ready(self) -> bool:
-        return self.chunks_path.exists()
+        return any(path.exists() for path in self._chunk_paths())
+
+    def _chunk_paths(self) -> list[Path]:
+        paths: list[Path] = []
+        seen: set[str] = set()
+        for path in [*self.builtin_chunks_paths, self.chunks_path]:
+            key = str(path.resolve()) if path.exists() else str(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            paths.append(path)
+        return paths
 
     def _ensure_loaded(self) -> None:
         if self._loaded:
             return
         self._loaded = True
-        if not self.chunks_path.exists():
-            return
 
         doc_freq: Counter[str] = Counter()
-        for chunk in _jsonl_rows(self.chunks_path):
-            if str(chunk.get("retrieval_scope") or "main") not in {"main", "mixed"}:
+        for path in self._chunk_paths():
+            if not path.exists():
                 continue
-            text = str(
-                chunk.get("content_search")
-                or chunk.get("content_plain")
-                or chunk.get("content_markdown")
-                or chunk.get("text")
-                or ""
-            )
-            title = str(chunk.get("title") or chunk.get("document_title") or _format_path(chunk.get("title_path")) or "")
-            document_title = str(chunk.get("document_title") or title)
-            section_title = str(chunk.get("section_title") or _format_path(chunk.get("section_path")) or "")
-            record_id = str(chunk.get("record_id") or "")
-            source_id = str(chunk.get("source_id") or "")
-            task_categories = _list_values(chunk.get("task_categories"))
-            physics_quantities = _list_values(chunk.get("physics_quantities_mentioned"))
-            combined = " ".join(
-                [
-                    record_id,
-                    source_id,
-                    title,
-                    document_title,
-                    section_title,
-                    str(chunk.get("doi") or ""),
-                    str(chunk.get("year") or ""),
-                    str(chunk.get("venue") or ""),
-                    str(chunk.get("source_url") or ""),
-                    str(chunk.get("chunk_type") or ""),
-                    str(chunk.get("source_type") or ""),
-                    str(chunk.get("primary_category") or ""),
-                    " ".join(task_categories),
-                    str(chunk.get("load_case_tag") or ""),
-                    str(chunk.get("design_platform_scope") or ""),
-                    " ".join(physics_quantities),
-                    text,
-                ]
-            ).lower()
-            token_set = set(tokenize(combined))
-            doc_freq.update(token_set)
-            self.rows.append(
-                {
-                    "metadata": {
-                        "chunk_id": chunk.get("chunk_id"),
-                        "chunk_fingerprint": chunk.get("chunk_fingerprint"),
-                        "record_id": chunk.get("record_id"),
-                        "source_id": chunk.get("source_id"),
-                        "title": title,
-                        "document_title": document_title,
-                        "section_title": section_title,
-                        "doi": chunk.get("doi"),
-                        "source_url": chunk.get("source_url"),
-                        "year": chunk.get("year"),
-                        "venue": chunk.get("venue"),
-                        "chunk_type": chunk.get("chunk_type"),
-                        "source_type": chunk.get("source_type"),
-                        "page_start": chunk.get("page_start"),
-                        "page_end": chunk.get("page_end"),
-                        "section_path": chunk.get("section_path") or [],
-                        "title_path": chunk.get("title_path") or [],
-                        "primary_category": chunk.get("primary_category"),
-                        "task_categories": task_categories,
-                        "load_case_tag": chunk.get("load_case_tag"),
-                        "design_platform_scope": chunk.get("design_platform_scope"),
-                        "physics_quantities_mentioned": physics_quantities,
-                        "source": "KNOWLEDGE_BASE",
-                    },
-                    "content_preview": trim_text(chunk.get("content_markdown") or chunk.get("text") or text, self.max_snippet_chars),
-                    "categories": task_categories,
-                    "primary_category": str(chunk.get("primary_category") or ""),
-                    "search_text": combined,
-                    "title_text": " ".join([title, document_title, section_title]).lower(),
-                    "record_text": record_id.lower(),
-                    "token_set": token_set,
-                }
-            )
+            source_label = "PROJECT_KNOWLEDGE" if path == self.chunks_path else "BUILTIN_KNOWLEDGE"
+            for chunk in _jsonl_rows(path):
+                if str(chunk.get("retrieval_scope") or "main") not in {"main", "mixed"}:
+                    continue
+                text = str(
+                    chunk.get("content_search")
+                    or chunk.get("content_plain")
+                    or chunk.get("content_markdown")
+                    or chunk.get("text")
+                    or ""
+                )
+                title = str(chunk.get("title") or chunk.get("document_title") or _format_path(chunk.get("title_path")) or "")
+                document_title = str(chunk.get("document_title") or title)
+                section_title = str(chunk.get("section_title") or _format_path(chunk.get("section_path")) or "")
+                record_id = str(chunk.get("record_id") or "")
+                source_id = str(chunk.get("source_id") or "")
+                task_categories = _list_values(chunk.get("task_categories"))
+                physics_quantities = _list_values(chunk.get("physics_quantities_mentioned"))
+                combined = " ".join(
+                    [
+                        record_id,
+                        source_id,
+                        title,
+                        document_title,
+                        section_title,
+                        str(chunk.get("doi") or ""),
+                        str(chunk.get("year") or ""),
+                        str(chunk.get("venue") or ""),
+                        str(chunk.get("source_url") or ""),
+                        str(chunk.get("chunk_type") or ""),
+                        str(chunk.get("source_type") or ""),
+                        str(chunk.get("primary_category") or ""),
+                        " ".join(task_categories),
+                        str(chunk.get("load_case_tag") or ""),
+                        str(chunk.get("design_platform_scope") or ""),
+                        " ".join(physics_quantities),
+                        text,
+                    ]
+                ).lower()
+                token_set = set(tokenize(combined))
+                doc_freq.update(token_set)
+                self.rows.append(
+                    {
+                        "metadata": {
+                            "chunk_id": chunk.get("chunk_id"),
+                            "chunk_fingerprint": chunk.get("chunk_fingerprint"),
+                            "record_id": chunk.get("record_id"),
+                            "source_id": chunk.get("source_id"),
+                            "title": title,
+                            "document_title": document_title,
+                            "section_title": section_title,
+                            "doi": chunk.get("doi"),
+                            "source_url": chunk.get("source_url"),
+                            "year": chunk.get("year"),
+                            "venue": chunk.get("venue"),
+                            "chunk_type": chunk.get("chunk_type"),
+                            "source_type": chunk.get("source_type"),
+                            "page_start": chunk.get("page_start"),
+                            "page_end": chunk.get("page_end"),
+                            "section_path": chunk.get("section_path") or [],
+                            "title_path": chunk.get("title_path") or [],
+                            "primary_category": chunk.get("primary_category"),
+                            "task_categories": task_categories,
+                            "load_case_tag": chunk.get("load_case_tag"),
+                            "design_platform_scope": chunk.get("design_platform_scope"),
+                            "physics_quantities_mentioned": physics_quantities,
+                            "source": source_label,
+                            "retrieval_sources": [source_label],
+                        },
+                        "content_preview": trim_text(chunk.get("content_markdown") or chunk.get("content_plain") or chunk.get("text") or text, self.max_snippet_chars),
+                        "categories": task_categories,
+                        "primary_category": str(chunk.get("primary_category") or ""),
+                        "search_text": combined,
+                        "title_text": " ".join([title, document_title, section_title]).lower(),
+                        "record_text": record_id.lower(),
+                        "token_set": token_set,
+                    }
+                )
 
         total = max(len(self.rows), 1)
         self.idf = {token: math.log((total + 1) / (count + 1)) + 1.0 for token, count in doc_freq.items()}
@@ -445,8 +483,9 @@ class VectorChunkRetriever:
 class KnowledgeGraphRetriever:
     """基于知识图谱 JSONL 的文件型关系检索器。"""
 
-    def __init__(self, kg_dir: Path) -> None:
+    def __init__(self, kg_dir: Path, *, builtin_kg_dirs: list[Path] | None = None) -> None:
         self.kg_dir = kg_dir
+        self.builtin_kg_dirs = list(builtin_kg_dirs or [])
         self.entities: list[dict[str, Any]] = []
         self.relations: list[dict[str, Any]] = []
         self.entity_names: list[str] = []
@@ -454,14 +493,30 @@ class KnowledgeGraphRetriever:
 
     @property
     def is_ready(self) -> bool:
-        return (self.kg_dir / "entities.jsonl").exists() and (self.kg_dir / "relations.jsonl").exists()
+        return any((kg_dir / "entities.jsonl").exists() and self._relation_paths(kg_dir) for kg_dir in self._kg_dirs())
+
+    def _kg_dirs(self) -> list[Path]:
+        dirs: list[Path] = []
+        seen: set[str] = set()
+        for kg_dir in [*self.builtin_kg_dirs, self.kg_dir]:
+            key = str(kg_dir.resolve()) if kg_dir.exists() else str(kg_dir)
+            if key in seen:
+                continue
+            seen.add(key)
+            dirs.append(kg_dir)
+        return dirs
+
+    def _relation_paths(self, kg_dir: Path) -> list[Path]:
+        return [path for path in [kg_dir / "relations.jsonl", kg_dir / "relations.compact.jsonl.gz"] if path.exists()]
 
     def _ensure_loaded(self) -> None:
         if self._loaded:
             return
         self._loaded = True
-        self.entities = list(_jsonl_rows(self.kg_dir / "entities.jsonl"))
-        self.relations = list(_jsonl_rows(self.kg_dir / "relations.jsonl"))
+        for kg_dir in self._kg_dirs():
+            self.entities.extend(_jsonl_rows(kg_dir / "entities.jsonl"))
+            for relation_path in self._relation_paths(kg_dir):
+                self.relations.extend(_jsonl_rows(relation_path))
         self.entity_names = [str(item.get("name") or "") for item in self.entities if str(item.get("name") or "")]
 
     def _matched_entities(self, query: str) -> set[str]:
@@ -541,7 +596,8 @@ class DomainKnowledgeBase:
     """面向 CSAgent 的项目知识库/知识图谱运行时入口。"""
 
     def __init__(self, config: Dict[str, Any] | None = None) -> None:
-        app_config = config or load_app_config()
+        using_default_config = config is None
+        app_config = load_app_config() if using_default_config else config
         knowledge_config = dict(app_config.get("project_knowledge", {}))
         self.enabled = bool(knowledge_config.get("enabled", True))
         self.top_k = int(knowledge_config.get("top_k", 5) or 5)
@@ -552,12 +608,30 @@ class DomainKnowledgeBase:
         self.manifest_path = _as_path(str(knowledge_config.get("manifest_path", "knowledge/runtime/manifest.json")))
         rag_path = _as_path(str(knowledge_config.get("rag_chunks_path", "knowledge/runtime/rag/rag_chunks.jsonl")))
         kg_dir = _as_path(str(knowledge_config.get("kg_dir", "knowledge/runtime/kg")))
+        builtin_config_keys = {"builtin_dir", "builtin_rag_chunks_path", "builtin_kg_dir", "builtin_manifest_path"}
+        builtin_enabled = using_default_config or any(key in knowledge_config for key in builtin_config_keys)
+        if builtin_enabled:
+            builtin_dir = _as_path(str(knowledge_config.get("builtin_dir", "knowledge/csllm")))
+            builtin_rag_path = _as_path(str(knowledge_config.get("builtin_rag_chunks_path", builtin_dir / "rag" / "rag_chunks.compact.jsonl.gz")))
+            builtin_kg_dir = _as_path(str(knowledge_config.get("builtin_kg_dir", builtin_dir / "kg")))
+            builtin_manifest_path = _as_path(str(knowledge_config.get("builtin_manifest_path", builtin_dir / "provenance" / "manifest.json")))
+        else:
+            builtin_dir = ROOT_DIR / "knowledge" / "__disabled_builtin__"
+            builtin_rag_path = builtin_dir / "rag" / "rag_chunks.compact.jsonl.gz"
+            builtin_kg_dir = builtin_dir / "kg"
+            builtin_manifest_path = builtin_dir / "provenance" / "manifest.json"
+        self.builtin_dir = builtin_dir
+        self.builtin_manifest_path = builtin_manifest_path
+        self.builtin_rag_chunks_path = builtin_rag_path
+        self.builtin_kg_dir = builtin_kg_dir
         max_snippet_chars = int(knowledge_config.get("max_snippet_chars", 1200) or 1200)
         vector_chroma_dir = _as_path(str(knowledge_config.get("vector_chroma_dir", CHROMA_DIR)))
         vector_collection_name = str(knowledge_config.get("vector_collection_name", "csdm_cph_project_knowledge"))
         vector_enabled = bool(knowledge_config.get("vector_enabled", False))
         vector_top_k_multiplier = int(knowledge_config.get("vector_top_k_multiplier", 2) or 2)
-        self.rag = RagChunkRetriever(rag_path, max_snippet_chars=max_snippet_chars)
+        builtin_rag_paths = [builtin_rag_path] if builtin_rag_path.exists() else []
+        builtin_kg_dirs = [builtin_kg_dir] if builtin_kg_dir.exists() else []
+        self.rag = RagChunkRetriever(rag_path, max_snippet_chars=max_snippet_chars, builtin_chunks_paths=builtin_rag_paths)
         self.vector = VectorChunkRetriever(
             vector_chroma_dir,
             vector_collection_name,
@@ -565,7 +639,7 @@ class DomainKnowledgeBase:
             max_snippet_chars=max_snippet_chars,
         )
         self.vector_top_k_multiplier = max(1, vector_top_k_multiplier)
-        self.kg = KnowledgeGraphRetriever(kg_dir)
+        self.kg = KnowledgeGraphRetriever(kg_dir, builtin_kg_dirs=builtin_kg_dirs)
 
     @property
     def is_ready(self) -> bool:
@@ -725,6 +799,22 @@ class DomainKnowledgeBase:
     def status(self) -> dict[str, Any]:
         manifest = _load_json(self.manifest_path)
         kg_stats = _load_json(self.kg.kg_dir / "kg_stats.json")
+        runtime_rag_count = int(manifest.get("rag_chunk_count", 0) or 0)
+        runtime_entity_count = int(manifest.get("kg_entity_count", 0) or kg_stats.get("total_entities", 0) or 0)
+        runtime_relation_count = int(manifest.get("kg_relation_count", 0) or kg_stats.get("total_relations", 0) or 0)
+        builtin_relation_path = self.builtin_kg_dir / "relations.compact.jsonl.gz"
+        builtin_counts = _builtin_record_counts(
+            self.builtin_manifest_path,
+            self.builtin_kg_dir / "kg_stats.json",
+            self.builtin_rag_chunks_path,
+            builtin_relation_path,
+            self.builtin_kg_dir / "entities.jsonl",
+        )
+        builtin_ready = bool(
+            self.builtin_rag_chunks_path.exists()
+            and (self.builtin_kg_dir / "entities.jsonl").exists()
+            and builtin_relation_path.exists()
+        )
         return {
             "enabled": self.enabled,
             "ready": self.is_ready,
@@ -734,21 +824,25 @@ class DomainKnowledgeBase:
             "manifest_path": str(self.manifest_path),
             "rag_chunks_path": str(self.rag.chunks_path),
             "kg_dir": str(self.kg.kg_dir),
+            "builtin_ready": builtin_ready,
+            "builtin_dir": str(self.builtin_dir),
+            "builtin_manifest_path": str(self.builtin_manifest_path),
+            "builtin_rag_chunks_path": str(self.builtin_rag_chunks_path),
+            "builtin_kg_dir": str(self.builtin_kg_dir),
+            "builtin_rag_chunk_count": builtin_counts["rag_chunks"],
+            "builtin_kg_entity_count": builtin_counts["entities"],
+            "builtin_kg_relation_count": builtin_counts["relations"],
+            "runtime_document_count": int(manifest.get("document_count", 0) or 0),
+            "runtime_rag_chunk_count": runtime_rag_count,
+            "runtime_kg_entity_count": runtime_entity_count,
+            "runtime_kg_relation_count": runtime_relation_count,
             "vector_ready": self.vector.is_ready,
             "vector_chunk_count": self.vector.engine.count() if self.vector.engine is not None else 0,
             "store_type": manifest.get("store_type", "project_runtime_knowledge"),
             "document_count": int(manifest.get("document_count", 0) or 0),
-            "rag_chunk_count": int(manifest.get("rag_chunk_count", 0) or 0),
-            "kg_entity_count": int(
-                manifest.get("kg_entity_count", 0)
-                or kg_stats.get("total_entities", 0)
-                or 0
-            ),
-            "kg_relation_count": int(
-                manifest.get("kg_relation_count", 0)
-                or kg_stats.get("total_relations", 0)
-                or 0
-            ),
+            "rag_chunk_count": runtime_rag_count + builtin_counts["rag_chunks"],
+            "kg_entity_count": runtime_entity_count + builtin_counts["entities"],
+            "kg_relation_count": runtime_relation_count + builtin_counts["relations"],
             "structured_document_count": int(manifest.get("structured_document_count", 0) or 0),
             "structured_block_count": int(manifest.get("structured_block_count", 0) or 0),
             "markdown_document_count": int(manifest.get("markdown_document_count", 0) or 0),

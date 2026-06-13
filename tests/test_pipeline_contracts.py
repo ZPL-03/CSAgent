@@ -92,7 +92,7 @@ def test_parser_accepts_field_level_fixed_geometry_phrasing(monkeypatch):
 
 def test_candidate_prompt_separates_user_facts_from_system_constraints(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    task = TaskParser().parse_instruction("生成 12 个候选，初筛保留 5 个候选")
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 12 个候选，初筛保留 5 个候选")
     agent = CandidateGenAgent()
     knowledge_guidance = ["[项目知识库 1] pressure hull buckling guidance"]
 
@@ -103,7 +103,7 @@ def test_candidate_prompt_separates_user_facts_from_system_constraints(monkeypat
     assert "instruction:" not in user_prompt
     assert "input:" not in user_prompt
     user_fact_section = user_prompt.split("系统候选字段约束", 1)[0]
-    assert "30.0 MPa" not in user_fact_section
+    assert "外压：30.0 MPa" in user_fact_section
     assert "T700/Epoxy" not in user_fact_section
     assert "500.0" not in user_fact_section
     assert "T700/Epoxy" in user_prompt
@@ -245,7 +245,7 @@ def test_llm_backend_uses_fallback_backend_after_primary_unusable_response(monke
 
 def test_count_overrides_keep_ratio_mode(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    instruction = "生成 12 个候选，初筛保留 5 个候选"
+    instruction = "外压 30 MPa，生成 12 个候选，初筛保留 5 个候选"
     task = TaskParser().parse_instruction(
         instruction,
         overrides={
@@ -262,7 +262,7 @@ def test_count_overrides_keep_ratio_mode(monkeypatch):
 
 def test_candidate_source_targets_follow_default_ratio(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    task = TaskParser().parse_instruction("生成 12 个候选，初筛保留 5 个候选")
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 12 个候选，初筛保留 5 个候选")
     targets = CandidateGenAgent()._resolve_source_targets(task)
 
     assert targets == {"total": 12, "llm": 6, "case_transfer": 3, "doe": 3}
@@ -271,8 +271,9 @@ def test_candidate_source_targets_follow_default_ratio(monkeypatch):
 @pytest.mark.parametrize(
     ("instruction", "message"),
     [
-        ("初筛保留 3 个候选", "候选池总数"),
-        ("生成 6 个候选", "初筛保留数量"),
+        ("外压 30 MPa，初筛保留 3 个候选", "候选池总数"),
+        ("外压 30 MPa，生成 6 个候选", "初筛保留数量"),
+        ("生成 6 个候选，初筛保留 3 个候选", "外部静水压力"),
     ],
 )
 def test_parser_requires_pool_and_screen_counts(monkeypatch, instruction, message):
@@ -283,7 +284,7 @@ def test_parser_requires_pool_and_screen_counts(monkeypatch, instruction, messag
 
 def test_candidate_generation_uses_three_initial_sources(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    task = TaskParser().parse_instruction("生成 6 个候选，初筛保留 3 个候选")
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
     agent = CandidateGenAgent()
     requested = {}
 
@@ -320,7 +321,7 @@ def test_candidate_generation_uses_three_initial_sources(monkeypatch):
 
 def test_candidate_generation_changes_actual_source_counts_when_transfer_cases_are_fewer(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    task = TaskParser().parse_instruction("生成 10 个候选，初筛保留 4 个候选")
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 10 个候选，初筛保留 4 个候选")
     messages = []
     agent = CandidateGenAgent(progress_callback=lambda _agent, message, _event=None: messages.append(message))
 
@@ -360,7 +361,7 @@ def test_candidate_generation_changes_actual_source_counts_when_transfer_cases_a
 
 def test_candidate_generation_deduplicates_equivalent_designs(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    task = TaskParser().parse_instruction("生成 4 个候选，初筛保留 2 个候选")
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 4 个候选，初筛保留 2 个候选")
     messages = []
     agent = CandidateGenAgent(progress_callback=lambda _agent, message, _event=None: messages.append(message))
 
@@ -524,7 +525,7 @@ def test_llm_candidate_table_without_material_or_imperfection_is_rejected(monkey
 
 def test_candidate_normalization_rejects_incomplete_source_geometry(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    task = TaskParser().parse_instruction("生成 6 个候选，初筛保留 3 个候选")
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
     agent = CandidateGenAgent()
 
     with pytest.raises(SchemaValidationError, match="缺少必要几何字段"):
@@ -541,7 +542,7 @@ def test_candidate_normalization_rejects_incomplete_source_geometry(monkeypatch)
 
 def test_candidate_schema_requires_non_empty_display_name(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    task = TaskParser().parse_instruction("生成 6 个候选，初筛保留 3 个候选")
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
     candidate = CandidateGenAgent().doe_sampler.sample_candidates(
         task,
         n_samples=1,
@@ -566,7 +567,7 @@ def test_candidate_schema_requires_non_empty_display_name(monkeypatch):
 
 def test_orchestrator_promotes_candidate_to_formal_identity_without_persistent_id(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    task = TaskParser().parse_instruction("生成 6 个候选，初筛保留 3 个候选")
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
     candidate = CandidateGenAgent().doe_sampler.sample_candidates(
         task,
         n_samples=1,
@@ -589,7 +590,7 @@ def test_orchestrator_promotes_candidate_to_formal_identity_without_persistent_i
 
 def test_knowledge_case_record_keeps_only_real_task_trace(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    task_record = TaskParser().parse_instruction("生成 6 个候选，初筛保留 3 个候选")
+    task_record = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
     task_payload = task_payload_from_request(task_record)
     design = {
         "candidate_id": "C999",

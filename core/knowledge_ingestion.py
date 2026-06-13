@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from core.config_loader import load_app_config
-from core.domain_knowledge import trim_text
+from core.domain_knowledge import _builtin_record_counts, trim_text
 from core.paths import (
     CHROMA_DIR,
     KNOWLEDGE_UPLOADS_DIR,
@@ -315,6 +315,21 @@ class KnowledgeIngestionService:
         self.entities_path = self.kg_dir / "entities.jsonl"
         self.relations_path = self.kg_dir / "relations.jsonl"
         self.stats_path = self.kg_dir / "kg_stats.json"
+        configured_builtin_dir = Path(str(knowledge_config.get("builtin_dir", RUNTIME_KNOWLEDGE_DIR.parent / "csllm")))
+        if not configured_builtin_dir.is_absolute():
+            configured_builtin_dir = RUNTIME_KNOWLEDGE_DIR.parent.parent / configured_builtin_dir
+        self.builtin_dir = configured_builtin_dir
+        self.builtin_rag_chunks_path = self._configured_path(
+            knowledge_config,
+            "builtin_rag_chunks_path",
+            self.builtin_dir / "rag" / "rag_chunks.compact.jsonl.gz",
+        )
+        self.builtin_kg_dir = self._configured_path(knowledge_config, "builtin_kg_dir", self.builtin_dir / "kg")
+        self.builtin_manifest_path = self._configured_path(
+            knowledge_config,
+            "builtin_manifest_path",
+            self.builtin_dir / "provenance" / "manifest.json",
+        )
         self.chunk_token_size = int(chunk_token_size or knowledge_config.get("chunk_token_size", 512) or 512)
         self.chunk_overlap_tokens = int(chunk_overlap_tokens or knowledge_config.get("chunk_overlap_tokens", 64) or 64)
         self.min_chunk_tokens = int(min_chunk_tokens or knowledge_config.get("min_chunk_tokens", 80) or 80)
@@ -329,6 +344,11 @@ class KnowledgeIngestionService:
         else:
             self.vector_chroma_dir = CHROMA_DIR
         self.progress_callback = progress_callback
+
+    def _configured_path(self, knowledge_config: dict[str, Any], key: str, default: Path) -> Path:
+        value = knowledge_config.get(key)
+        path = Path(str(value)) if value else default
+        return path if path.is_absolute() else RUNTIME_KNOWLEDGE_DIR.parent.parent / path
 
     def _notify_progress(self, steps: list[PipelineStep]) -> None:
         if self.progress_callback is not None:
@@ -506,14 +526,46 @@ class KnowledgeIngestionService:
 
     def status(self) -> dict[str, Any]:
         manifest = self._load_manifest()
+        runtime_rag_count = int(manifest.get("rag_chunk_count", 0) or 0)
+        runtime_entity_count = int(manifest.get("kg_entity_count", 0) or 0)
+        runtime_relation_count = int(manifest.get("kg_relation_count", 0) or 0)
+        builtin_relation_path = self.builtin_kg_dir / "relations.compact.jsonl.gz"
+        builtin_counts = _builtin_record_counts(
+            self.builtin_manifest_path,
+            self.builtin_kg_dir / "kg_stats.json",
+            self.builtin_rag_chunks_path,
+            builtin_relation_path,
+            self.builtin_kg_dir / "entities.jsonl",
+        )
+        builtin_ready = bool(
+            self.builtin_rag_chunks_path.exists()
+            and (self.builtin_kg_dir / "entities.jsonl").exists()
+            and builtin_relation_path.exists()
+        )
         return {
+            **manifest,
             "base_dir": str(self.base_dir),
             "upload_dir": str(self.uploads_dir),
             "manifest_path": str(self.manifest_path),
             "rag_chunks_path": str(self.chunks_path),
             "kg_dir": str(self.kg_dir),
-            "ready": self.chunks_path.exists() and int(manifest.get("rag_chunk_count", 0) or 0) > 0,
-            **manifest,
+            "builtin_ready": builtin_ready,
+            "builtin_dir": str(self.builtin_dir),
+            "builtin_manifest_path": str(self.builtin_manifest_path),
+            "builtin_rag_chunks_path": str(self.builtin_rag_chunks_path),
+            "builtin_kg_dir": str(self.builtin_kg_dir),
+            "builtin_rag_chunk_count": builtin_counts["rag_chunks"],
+            "builtin_kg_entity_count": builtin_counts["entities"],
+            "builtin_kg_relation_count": builtin_counts["relations"],
+            "runtime_document_count": int(manifest.get("document_count", 0) or 0),
+            "runtime_rag_chunk_count": runtime_rag_count,
+            "runtime_kg_entity_count": runtime_entity_count,
+            "runtime_kg_relation_count": runtime_relation_count,
+            "document_count": int(manifest.get("document_count", 0) or 0),
+            "rag_chunk_count": runtime_rag_count + builtin_counts["rag_chunks"],
+            "kg_entity_count": runtime_entity_count + builtin_counts["entities"],
+            "kg_relation_count": runtime_relation_count + builtin_counts["relations"],
+            "ready": bool((self.chunks_path.exists() and runtime_rag_count > 0) or builtin_ready),
         }
 
     def rebuild_indexes(self) -> dict[str, Any]:

@@ -76,7 +76,9 @@ class TaskParser:
 
     def _extract_load_conditions(self, text: str) -> Dict[str, Any]:
         pressure = self._external_pressure_value(text)
-        return normalize_load_conditions({"type": "external_pressure", "external_pressure_MPa": pressure or 30.0})
+        if pressure is None:
+            raise ValueError("任务缺少外部静水压力，请在自然语言需求中明确指定。")
+        return normalize_load_conditions({"type": "external_pressure", "external_pressure_MPa": pressure})
 
     def _extract_boundary_conditions(self, text: str) -> Dict[str, Any]:
         return normalize_boundary_conditions(text)

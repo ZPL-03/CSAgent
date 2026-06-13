@@ -1,4 +1,5 @@
 import json
+import gzip
 from pathlib import Path
 
 from core.domain_knowledge import DomainKnowledgeBase
@@ -141,3 +142,128 @@ def test_domain_knowledge_retrieves_knowledge_base_and_graph(tmp_path: Path) -> 
     assert snippet_text.count("Pressure Hull(Structure) -[EXPERIENCES]-> Buckling(FailureMode)") == 1
     assert status["rag_chunk_count"] == 2
     assert status["structured_block_count"] == 10
+
+
+def test_domain_knowledge_merges_builtin_and_runtime_rag_kg(tmp_path: Path) -> None:
+    runtime_rag_path = tmp_path / "runtime" / "rag" / "rag_chunks.jsonl"
+    runtime_kg_dir = tmp_path / "runtime" / "kg"
+    manifest_path = tmp_path / "runtime" / "manifest.json"
+    builtin_dir = tmp_path / "csllm"
+    builtin_rag_path = builtin_dir / "rag" / "rag_chunks.compact.jsonl.gz"
+    builtin_kg_dir = builtin_dir / "kg"
+    builtin_manifest_path = builtin_dir / "provenance" / "manifest.json"
+
+    runtime_chunk = {
+        "chunk_id": "RUN_CHUNK_1",
+        "record_id": "RUN_DOC_1",
+        "source_id": "RUN_DOC_1",
+        "retrieval_scope": "main",
+        "title": "Uploaded pressure hull manufacturing note",
+        "document_title": "Uploaded pressure hull manufacturing note",
+        "content_plain": "uploaded composite pressure hull filament winding curing external pressure buckling",
+        "content_markdown": "Uploaded manufacturing evidence.",
+        "task_categories": ["manufacturing_process", "buckling_stability"],
+    }
+    builtin_chunk = {
+        "chunk_id": "BASE_CHUNK_1",
+        "record_id": "BASE_DOC_1",
+        "source_id": "BASE_DOC_1",
+        "retrieval_scope": "main",
+        "title": "Built pressure hull buckling reference",
+        "document_title": "Built pressure hull buckling reference",
+        "content_plain": "built composite pressure hull ASME RD-1172 PBIPF external pressure buckling",
+        "content_markdown": "Built RAG evidence.",
+        "task_categories": ["buckling_stability"],
+    }
+    _write_jsonl(runtime_rag_path, [runtime_chunk])
+    runtime_kg_dir.mkdir(parents=True, exist_ok=True)
+    _write_jsonl(runtime_kg_dir / "entities.jsonl", [{"type": "ManufacturingProcess", "name": "Filament Winding"}])
+    _write_jsonl(
+        runtime_kg_dir / "relations.jsonl",
+        [
+            {
+                "source_type": "ManufacturingProcess",
+                "source": "Filament Winding",
+                "target_type": "FailureMode",
+                "target": "Buckling",
+                "relation": "CONSTRAINS",
+                "record_id": "RUN_DOC_1",
+                "evidence_document_title": "Uploaded pressure hull manufacturing note",
+            }
+        ],
+    )
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest_path.write_text(
+        json.dumps(
+            {
+                "document_count": 1,
+                "rag_chunk_count": 1,
+                "kg_entity_count": 1,
+                "kg_relation_count": 1,
+                "structured_block_count": 1,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    builtin_rag_path.parent.mkdir(parents=True, exist_ok=True)
+    with gzip.open(builtin_rag_path, "wt", encoding="utf-8") as handle:
+        handle.write(json.dumps(builtin_chunk, ensure_ascii=False) + "\n")
+    _write_jsonl(builtin_kg_dir / "entities.jsonl", [{"type": "DesignFormula", "name": "ASME RD-1172"}])
+    with gzip.open(builtin_kg_dir / "relations.compact.jsonl.gz", "wt", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "source_type": "DesignFormula",
+                    "source": "ASME RD-1172",
+                    "target_type": "FailureMode",
+                    "target": "Buckling",
+                    "relation": "PREDICTED_BY",
+                    "record_id": "BASE_DOC_1",
+                    "evidence_document_title": "Built pressure hull buckling reference",
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+    (builtin_kg_dir / "kg_stats.json").write_text(
+        json.dumps({"total_entities": 1, "total_relations": 1}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    builtin_manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    builtin_manifest_path.write_text(
+        json.dumps({"record_counts": {"rag_chunks": 1, "entities": 1, "relations": 1}}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    knowledge = DomainKnowledgeBase(
+        {
+            "project_knowledge": {
+                "enabled": True,
+                "builtin_dir": str(builtin_dir),
+                "builtin_rag_chunks_path": str(builtin_rag_path),
+                "builtin_kg_dir": str(builtin_kg_dir),
+                "builtin_manifest_path": str(builtin_manifest_path),
+                "rag_chunks_path": str(runtime_rag_path),
+                "kg_dir": str(runtime_kg_dir),
+                "manifest_path": str(manifest_path),
+                "top_k": 4,
+                "kg_top_k": 4,
+                "max_snippet_chars": 200,
+            }
+        }
+    )
+
+    result = knowledge.retrieve_by_query("composite pressure hull external pressure buckling ASME filament winding", top_k=4, kg_top_k=4)
+    status = knowledge.status()
+
+    assert status["ready"] is True
+    assert status["builtin_ready"] is True
+    assert status["runtime_document_count"] == 1
+    assert status["runtime_rag_chunk_count"] == 1
+    assert status["builtin_rag_chunk_count"] == 1
+    assert status["rag_chunk_count"] == 2
+    assert status["kg_relation_count"] == 2
+    assert {chunk["source"] for chunk in result["chunks"]} == {"BUILTIN_KNOWLEDGE", "PROJECT_KNOWLEDGE"}
+    assert {relation["record_id"] for relation in result["relations"]} == {"BASE_DOC_1", "RUN_DOC_1"}

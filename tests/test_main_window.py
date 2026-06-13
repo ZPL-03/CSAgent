@@ -65,7 +65,7 @@ def test_report_button_allows_partial_evaluated_results(monkeypatch) -> None:
     app = _app()
     window = MainWindow()
     try:
-        window.session.task = TaskParser().parse_instruction("生成 6 个候选，初筛保留 3 个候选")
+        window.session.task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
         window.session.evaluated_candidates = [_candidate("TMP_1"), _candidate("TMP_2")]
         window.session.results_by_session_id = {"TMP_1": {"candidate_id": "C1", "session_candidate_id": "TMP_1"}}
 

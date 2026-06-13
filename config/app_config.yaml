@@ -58,6 +58,10 @@ case_memory:
 
 project_knowledge:
   enabled: true
+  builtin_dir: knowledge/csllm
+  builtin_rag_chunks_path: knowledge/csllm/rag/rag_chunks.compact.jsonl.gz
+  builtin_kg_dir: knowledge/csllm/kg
+  builtin_manifest_path: knowledge/csllm/provenance/manifest.json
   base_dir: knowledge/runtime
   upload_dir: knowledge/runtime/uploads
   rag_chunks_path: knowledge/runtime/rag/rag_chunks.jsonl
