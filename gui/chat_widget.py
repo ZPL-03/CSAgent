@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QRect, Qt
+from PyQt6.QtCore import QRect, Qt, QTimer
 from PyQt6.QtGui import QFont, QFontMetrics
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
@@ -62,7 +62,7 @@ class ChatWidget(QWidget):
     def add_message(self, sender: str, message: str) -> None:
         self._messages.append((str(sender), str(message)))
         self._render_messages()
-        self.scroll_area.verticalScrollBar().setValue(self.scroll_area.verticalScrollBar().maximum())
+        QTimer.singleShot(0, self._scroll_to_bottom)
 
     def toPlainText(self) -> str:
         if not self._messages:
@@ -140,6 +140,10 @@ class ChatWidget(QWidget):
                 widget.hide()
                 widget.setParent(None)
                 widget.deleteLater()
+
+    def _scroll_to_bottom(self) -> None:
+        scrollbar = self.scroll_area.verticalScrollBar()
+        scrollbar.setValue(scrollbar.maximum())
 
     def _label(self, text: str, color: str, size: int = 13, bold: bool = False) -> QLabel:
         label = QLabel(text)
@@ -383,10 +387,10 @@ class ChatWidget(QWidget):
         self._clear_layout()
         if not self._messages:
             self.content_layout.addWidget(self._empty_widget(), 0, Qt.AlignmentFlag.AlignTop)
+            self.content_layout.addStretch(1)
             return
         for sender, message in self._messages:
             self.content_layout.addWidget(self._message_widget(sender, message))
-        self.content_layout.addStretch(1)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

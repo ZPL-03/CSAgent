@@ -61,7 +61,7 @@ class KnowledgeGraphView(QWidget):
         self._manual_node_offsets: dict[str, QPointF] = {}
         self._last_node_positions: dict[str, QPointF] = {}
         self.setMinimumHeight(190)
-        self.setSizePolicy(self.sizePolicy().horizontalPolicy(), self.sizePolicy().verticalPolicy())
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMouseTracking(True)
 
     def sizeHint(self) -> QSize:
@@ -200,34 +200,28 @@ class KnowledgeGraphView(QWidget):
         painter.setPen(QPen(colors["border"], 1.0))
         painter.drawRoundedRect(panel, 12, 12)
 
-        title_font = QFont(self.font())
-        title_font.setPointSize(10)
-        title_font.setBold(True)
-        painter.setFont(title_font)
-        painter.setPen(colors["text"])
-        painter.drawText(QRectF(16, 12, self.width() - 32, 22), Qt.AlignmentFlag.AlignLeft, "知识图谱 · GRAPH")
-
         visible_nodes, visible_relations, total_nodes, total_relations = self._node_payload()
         subtitle = f"实体 {total_nodes} · 关系 {total_relations}"
         if total_nodes > len(visible_nodes) or total_relations > len(visible_relations):
             subtitle += f" · 显示核心子图 {len(visible_nodes)} / {len(visible_relations)}"
         small_font = QFont(self.font())
-        small_font.setPointSize(8)
+        small_font.setPointSize(9)
+        small_font.setBold(True)
         painter.setFont(small_font)
         painter.setPen(colors["muted"])
-        painter.drawText(QRectF(16, 35, self.width() - 32, 18), Qt.AlignmentFlag.AlignLeft, subtitle)
+        painter.drawText(QRectF(16, 12, self.width() - 32, 20), Qt.AlignmentFlag.AlignLeft, subtitle)
 
         if not visible_nodes:
             painter.drawText(
-                QRectF(16, 58, self.width() - 32, self.height() - 80),
+                QRectF(16, 36, self.width() - 32, self.height() - 54),
                 Qt.AlignmentFlag.AlignCenter,
                 "知识图谱等待资料入库或检索命中。",
             )
             return
 
-        center = QPointF(self.width() / 2.0 + self._pan.x(), self.height() / 2.0 + 18 + self._pan.y())
+        center = QPointF(self.width() / 2.0 + self._pan.x(), self.height() / 2.0 + 8 + self._pan.y())
         radius_x = max(80.0, (self.width() - 88) / 2.0) * self._scale
-        radius_y = max(54.0, (self.height() - 120) / 2.0) * self._scale
+        radius_y = max(54.0, (self.height() - 92) / 2.0) * self._scale
         positions: dict[str, QPointF] = {}
         count = len(visible_nodes)
         for index, (name, _entity_type) in enumerate(visible_nodes):
@@ -283,7 +277,7 @@ class KnowledgeGraphView(QWidget):
         self._scale = max(0.55, min(2.4, self._scale * factor))
         if self._scale != old_scale:
             cursor = event.position()
-            center = QPointF(self.width() / 2.0, self.height() / 2.0 + 18)
+            center = QPointF(self.width() / 2.0, self.height() / 2.0 + 8)
             before = QPointF(
                 (cursor.x() - center.x() - self._pan.x()) / old_scale,
                 (cursor.y() - center.y() - self._pan.y()) / old_scale,
@@ -487,8 +481,7 @@ class KnowledgeWidget(QWidget):
         empty_page_layout = QVBoxLayout(empty_page)
         empty_page_layout.setContentsMargins(0, 0, 0, 0)
         empty_page_layout.setSpacing(0)
-        empty_page_layout.addWidget(self.document_empty_state)
-        empty_page_layout.addStretch(1)
+        empty_page_layout.addWidget(self.document_empty_state, 0, Qt.AlignmentFlag.AlignTop)
         self.document_stack = QStackedWidget()
         self.document_stack.addWidget(empty_page)
         self.document_stack.addWidget(self.document_table)
@@ -567,12 +560,12 @@ class KnowledgeWidget(QWidget):
         left_layout = QVBoxLayout(left)
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(9)
+        left_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         left_layout.addWidget(self.summary_browser)
         document_label = QLabel("资料库 · DOCUMENTS")
         document_label.setObjectName("sectionTitle")
         left_layout.addWidget(document_label)
         left_layout.addWidget(self.document_stack)
-        left_layout.addStretch(1)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)

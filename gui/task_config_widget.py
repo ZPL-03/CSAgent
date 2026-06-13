@@ -9,7 +9,6 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import (
     QFrame,
     QGridLayout,
-    QHBoxLayout,
     QLabel,
     QScrollArea,
     QSizePolicy,
@@ -223,17 +222,22 @@ class TaskConfigWidget(QWidget):
         title, subtitle = header
         self.content_layout.addWidget(self._header_widget(title, subtitle))
 
-        left_groups, right_groups = self._split_groups(groups)
-        body = QHBoxLayout()
+        cards = [self._card_widget(group_title, rows) for group_title, rows in groups]
+        if note:
+            cards.append(self._fact_boundary_widget())
+
+        body = QGridLayout()
         body.setContentsMargins(0, 0, 0, 0)
         body.setSpacing(10)
-        left_column = self._column_widget(left_groups)
-        right_column = self._column_widget(right_groups)
-        if note:
-            right_column.layout().addWidget(self._fact_boundary_widget())
-        body.addWidget(left_column, 3)
-        body.addWidget(right_column, 2)
+        column_count = 2 if len(cards) > 1 else 1
+        for index, card in enumerate(cards):
+            row = index // column_count
+            column = index % column_count
+            body.addWidget(card, row, column)
+        for column in range(column_count):
+            body.setColumnStretch(column, 1)
         self.content_layout.addLayout(body)
+        self.content_layout.addStretch(1)
         self._plain_text = self._compose_plain_text(title, subtitle, groups, note)
 
     def _header_widget(self, title: str, subtitle: str) -> QWidget:
@@ -251,37 +255,6 @@ class TaskConfigWidget(QWidget):
         subtitle_label.setWordWrap(True)
         layout.addWidget(title_label)
         layout.addWidget(subtitle_label)
-        return widget
-
-    def _split_groups(
-        self,
-        groups: list[tuple[str, list[tuple[str, Any]]]],
-    ) -> tuple[
-        list[tuple[str, list[tuple[str, Any]]]],
-        list[tuple[str, list[tuple[str, Any]]]],
-    ]:
-        preferred_left = {self._label("contract"), self._label("control"), self._label("facts")}
-        left: list[tuple[str, list[tuple[str, Any]]]] = []
-        right: list[tuple[str, list[tuple[str, Any]]]] = []
-        for group in groups:
-            if group[0] in preferred_left:
-                left.append(group)
-            else:
-                right.append(group)
-        if not left or not right:
-            midpoint = max(1, (len(groups) + 1) // 2)
-            return groups[:midpoint], groups[midpoint:]
-        return left, right
-
-    def _column_widget(self, groups: list[tuple[str, list[tuple[str, Any]]]]) -> QWidget:
-        widget = QWidget()
-        widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
-        layout = QVBoxLayout(widget)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(10)
-        for group_title, rows in groups:
-            layout.addWidget(self._card_widget(group_title, rows))
-        layout.addStretch(1)
         return widget
 
     def _card_widget(self, title: str, rows: list[tuple[str, Any]]) -> QFrame:

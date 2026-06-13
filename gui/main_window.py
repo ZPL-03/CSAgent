@@ -924,9 +924,6 @@ class MainWindow(QMainWindow):
             settings_overview.setColumnStretch(column, 1)
         content_layout.addLayout(settings_overview)
 
-        forms_layout = QVBoxLayout()
-        forms_layout.setContentsMargins(0, 0, 0, 0)
-        forms_layout.setSpacing(12)
         cards = [
             self._settings_form_card(
                 "模型与 API",
@@ -982,11 +979,18 @@ class MainWindow(QMainWindow):
                 ],
             ),
         ]
-        for card in cards:
-            forms_layout.addWidget(card)
-        content_layout.addLayout(forms_layout)
-
-        content_layout.addSpacing(8)
+        forms_grid = QGridLayout()
+        forms_grid.setContentsMargins(0, 0, 0, 0)
+        forms_grid.setHorizontalSpacing(12)
+        forms_grid.setVerticalSpacing(12)
+        for index, card in enumerate(cards):
+            if index == len(cards) - 1 and len(cards) % 2 == 1:
+                forms_grid.addWidget(card, index // 2, 0, 1, 2)
+            else:
+                forms_grid.addWidget(card, index // 2, index % 2)
+        forms_grid.setColumnStretch(0, 1)
+        forms_grid.setColumnStretch(1, 1)
+        content_layout.addLayout(forms_grid)
 
         scroll_area.setWidget(content)
         layout = QVBoxLayout(page)
@@ -1076,6 +1080,7 @@ class MainWindow(QMainWindow):
         form.setHorizontalSpacing(10)
         form.setVerticalSpacing(9)
         form.setLabelAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        form.setFieldGrowthPolicy(QFormLayout.FieldGrowthPolicy.AllNonFixedFieldsGrow)
         for label, widget in rows:
             key_label = QLabel(label)
             key_label.setObjectName("configKey")
