@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-UI_LAYOUT_VERSION = 3
+UI_LAYOUT_VERSION = 4
 
 from PyQt6 import sip
 from PyQt6.QtCore import QObject, QRectF, QSettings, QSize, Qt, QThread, QUrl, pyqtSignal
@@ -64,6 +64,7 @@ from gui.i18n import LANGUAGE_OPTIONS, THEME_OPTIONS, LocaleManager
 from gui.interactive_view import InteractivePlotWidget
 from gui.knowledge_widget import KnowledgeWidget
 from gui.log_widget import LogWidget
+from gui.monitor_widget import MonitorDashboardWidget
 from gui.report_widget import ReportWidget
 from gui.result_trace_widget import ResultTraceWidget
 from gui.task_config_widget import TaskConfigWidget
@@ -390,6 +391,7 @@ class MainWindow(QMainWindow):
         self.result_trace_widget = ResultTraceWidget()
         self.log_widget = LogWidget()
         self.monitor_log_widget = LogWidget()
+        self.monitor_dashboard_widget = MonitorDashboardWidget()
         self.task_config_widget = TaskConfigWidget(language=self.locale.language)
         self.workflow_widget = WorkflowWidget(event_store=self.workflow_event_store)
         self.workflow_widget.setMinimumHeight(300)
@@ -414,6 +416,7 @@ class MainWindow(QMainWindow):
         self._update_overview_cards()
         self._refresh_run_selector()
         self.knowledge_widget.refresh(load_evidence=False)
+        self._refresh_knowledge_sidebar()
         self.live_result_view.show_reference_hull()
 
     def _sync_brand_logo(self) -> None:
@@ -686,17 +689,121 @@ class MainWindow(QMainWindow):
         )
 
     def _build_knowledge_left_page(self) -> QWidget:
-        return self._sidebar_page(
-            "知识库 · CORPUS",
-            [
-                ("全部资料", "上传资料 / 解析 / 入库 / 检索"),
-                ("设计规范", "标准、手册、工艺约束"),
-                ("论文文献", "屈曲、后屈曲与代理模型"),
-                ("试验报告", "耐压壳校核与缺陷敏感性"),
-                ("项目档案", "案例记忆与运行审计"),
-            ],
-            "连接：项目运行时 RAG/KG\n检索：文本块 + 图谱关系 + 溯源证据",
-        )
+        page = QWidget()
+        page.setObjectName("agentRail")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(9)
+
+        header = QLabel("知识库 · CORPUS")
+        header.setObjectName("sectionTitle")
+        layout.addWidget(header)
+
+        self.knowledge_sidebar_labels: dict[str, QLabel] = {}
+        for key, title, body in [
+            ("merged", "合并知识库", "RAG/KG 总量等待刷新"),
+            ("builtin", "系统资料", "默认工程知识等待载入"),
+            ("runtime", "用户资料", "上传解析后的增量资料"),
+            ("pipeline", "入库流水线", "解析 / 分块 / 索引 / KG"),
+            ("retrieval", "检索验证", "文本块 + 图谱关系 + 溯源"),
+            ("config", "分块参数", "chunk / overlap / top_k"),
+        ]:
+            card = QLabel(f"<b>{title}</b><br>{body}")
+            card.setObjectName("agentCard")
+            card.setWordWrap(True)
+            card.setProperty("state", "waiting")
+            card.setMinimumHeight(66)
+            layout.addWidget(card)
+            self.knowledge_sidebar_labels[key] = card
+
+        category_header = QLabel("资料分层 · SOURCES")
+        category_header.setObjectName("sectionTitle")
+        layout.addWidget(category_header)
+        for primary, secondary in [
+            ("规范与手册", "设计准则 / 工艺约束"),
+            ("论文与模型", "屈曲 / 后屈曲 / 代理模型"),
+            ("试验与仿真", "压力试验 / FEM 结果"),
+            ("项目知识", "案例记忆 / 运行审计"),
+        ]:
+            card = QLabel(f"<b>{primary}</b><br>{secondary}")
+            card.setObjectName("statusLabel")
+            card.setWordWrap(True)
+            card.setMinimumHeight(48)
+            layout.addWidget(card)
+
+        service_header = QLabel("索引服务 · INDEX")
+        service_header.setObjectName("sectionTitle")
+        layout.addWidget(service_header)
+        self.knowledge_index_labels: dict[str, QLabel] = {}
+        for key, title, body in [
+            ("vector", "向量索引", "等待刷新"),
+            ("graph", "知识图谱", "等待刷新"),
+        ]:
+            card = QLabel(f"<b>{title}</b><br>{body}")
+            card.setObjectName("statusLabel")
+            card.setWordWrap(True)
+            card.setMinimumHeight(52)
+            layout.addWidget(card)
+            self.knowledge_index_labels[key] = card
+
+        layout.addStretch(1)
+        footer = QLabel("最终检索入口读取合并后的 RAG/KG；数值计算、排序和 FEM 结果不由知识库改写。")
+        footer.setObjectName("statusLabel")
+        footer.setWordWrap(True)
+        layout.addWidget(footer)
+        return page
+
+    def _refresh_knowledge_sidebar(self) -> None:
+        labels = getattr(self, "knowledge_sidebar_labels", None)
+        if not labels:
+            return
+        try:
+            status = self.knowledge_widget.knowledge_base.status()
+            ingest_status = self.knowledge_widget.ingestion_service.status()
+        except Exception:
+            return
+        merged_status = {**status, **ingest_status}
+        builtin_chunks = int(merged_status.get("builtin_rag_chunk_count", 0) or 0)
+        builtin_entities = int(merged_status.get("builtin_kg_entity_count", 0) or 0)
+        builtin_relations = int(merged_status.get("builtin_kg_relation_count", 0) or 0)
+        runtime_docs = int(merged_status.get("runtime_document_count", merged_status.get("document_count", 0)) or 0)
+        runtime_chunks = int(merged_status.get("runtime_rag_chunk_count", 0) or 0)
+        runtime_relations = int(merged_status.get("runtime_kg_relation_count", 0) or 0)
+        total_chunks = int(merged_status.get("rag_chunk_count", 0) or 0)
+        total_entities = int(merged_status.get("kg_entity_count", 0) or 0)
+        total_relations = int(merged_status.get("kg_relation_count", 0) or 0)
+        vector_status = str(merged_status.get("vector_status") or "pending")
+        last = merged_status.get("last_ingestion") if isinstance(merged_status.get("last_ingestion"), dict) else {}
+        parser = str(last.get("parser_backend") or "等待上传资料")
+        pipeline = merged_status.get("pipeline") if isinstance(merged_status.get("pipeline"), list) else []
+        active = next((step for step in pipeline if isinstance(step, dict) and step.get("status") == "running"), None)
+        pipeline_text = str(active.get("name")) if isinstance(active, dict) else ("等待用户资料" if runtime_docs == 0 else "索引已生成")
+        chunk_size = merged_status.get("chunk_token_size", "-")
+        overlap = merged_status.get("chunk_overlap_tokens", "-")
+        top_k = merged_status.get("top_k", "-")
+        kg_top_k = merged_status.get("kg_top_k", "-")
+
+        payload = {
+            "merged": ("合并知识库", f"RAG {total_chunks} 块 · KG {total_entities}/{total_relations}"),
+            "builtin": ("系统资料", f"{builtin_chunks} 块 · {builtin_entities} 实体 · {builtin_relations} 关系"),
+            "runtime": ("用户资料", f"{runtime_docs} 文档 · {runtime_chunks} 块 · {runtime_relations} 关系"),
+            "pipeline": ("入库流水线", f"{pipeline_text} · {parser}"),
+            "retrieval": ("检索验证", f"Vector {vector_status} · 文本与图谱联合检索"),
+            "config": ("分块参数", f"chunk {chunk_size} / overlap {overlap} · top_k {top_k}/{kg_top_k}"),
+        }
+        for key, (title, body) in payload.items():
+            label = labels.get(key)
+            if label is not None:
+                label.setText(f"<b>{title}</b><br>{body}")
+        index_labels = getattr(self, "knowledge_index_labels", None)
+        if index_labels:
+            vector_label = index_labels.get("vector")
+            if vector_label is not None:
+                vector_count = int(merged_status.get("vector_chunk_count", 0) or 0)
+                vector_label.setText(f"<b>向量索引</b><br>{vector_status} · {vector_count} 向量块")
+            graph_label = index_labels.get("graph")
+            if graph_label is not None:
+                graph_label.setText(f"<b>知识图谱</b><br>{total_entities} 实体 · {total_relations} 关系")
 
     def _build_monitor_left_page(self) -> QWidget:
         return self._sidebar_page(
@@ -846,6 +953,11 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(index)
         self.left_stack.setCurrentIndex(index)
         self.right_stack.setCurrentIndex(index)
+        if index == 2:
+            self.knowledge_widget.refresh(load_evidence=False)
+            self._refresh_knowledge_sidebar()
+        if index == 3:
+            self.monitor_dashboard_widget.refresh()
 
     def _build_settings_page(self) -> QWidget:
         page = QWidget()
@@ -1247,13 +1359,16 @@ class MainWindow(QMainWindow):
 
     def _build_monitor_page(self) -> QWidget:
         page = QWidget()
+        page.setObjectName("centerWorkbench")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
         splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(self.monitor_dashboard_widget)
         splitter.addWidget(self.workflow_widget)
         splitter.addWidget(self.monitor_log_widget)
-        splitter.setSizes([720, 180])
+        splitter.setChildrenCollapsible(False)
+        splitter.setSizes([560, 250, 160])
         layout.addWidget(splitter, 1)
         return page
 
@@ -1292,6 +1407,7 @@ class MainWindow(QMainWindow):
             card.set_theme(self.locale.theme)
         self.live_result_view.set_theme(self.locale.theme)
         self.knowledge_widget.set_theme(self.locale.theme)
+        self.monitor_dashboard_widget.set_theme(self.locale.theme)
         self.chat_widget.set_theme(self.locale.theme)
         self.setStyleSheet(application_stylesheet(self.font_family, self.locale.theme))
         self._sync_view_button_icons()
@@ -1857,6 +1973,7 @@ class MainWindow(QMainWindow):
             self.session.pending_confirmation,
         )
         self.knowledge_widget.refresh(self.session.task)
+        self._refresh_knowledge_sidebar()
         self._refresh_live_view()
         self._update_overview_cards()
 
@@ -1878,6 +1995,7 @@ class MainWindow(QMainWindow):
             self.session.pending_confirmation,
         )
         self.knowledge_widget.refresh(self.session.task)
+        self._refresh_knowledge_sidebar()
         self._refresh_live_view()
         self._update_overview_cards()
 
@@ -1912,6 +2030,7 @@ class MainWindow(QMainWindow):
 
     def _refresh_knowledge_view(self) -> None:
         self.knowledge_widget.refresh(self.session.task)
+        self._refresh_knowledge_sidebar()
         self.status_label.setText(self.locale.text("status.knowledge_refreshed"))
 
     def _open_latest_report(self) -> None:
@@ -2141,6 +2260,7 @@ class MainWindow(QMainWindow):
         self.model_status_label.set_state(self.locale.text("model.current"), "success")
         self.flow_dag_widget.update_state(self._agent_state_map(), self.locale.text("queue.idle"))
         self.knowledge_widget.refresh(load_evidence=False)
+        self._refresh_knowledge_sidebar()
         self.status_label.setText(self.locale.text("status.waiting"))
         self.input_line.clear()
         self._update_overview_cards()

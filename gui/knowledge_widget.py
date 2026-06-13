@@ -488,6 +488,13 @@ class KnowledgeWidget(QWidget):
         self.document_stack.addWidget(self.document_table)
         self.document_stack.setMinimumHeight(160)
 
+        self.source_overview_browser = QTextBrowser()
+        self.source_overview_browser.setOpenExternalLinks(True)
+        self.source_overview_browser.setMaximumHeight(190)
+        self.source_overview_browser.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.source_overview_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.source_overview_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+
         self.pipeline_widget = PipelineStatusWidget()
         self.pipeline_widget.setMinimumHeight(238)
         self.pipeline_widget.setMaximumHeight(276)
@@ -567,6 +574,10 @@ class KnowledgeWidget(QWidget):
         document_label.setObjectName("sectionTitle")
         left_layout.addWidget(document_label)
         left_layout.addWidget(self.document_stack)
+        source_label = QLabel("知识来源 · SOURCES")
+        source_label.setObjectName("sectionTitle")
+        left_layout.addWidget(source_label)
+        left_layout.addWidget(self.source_overview_browser)
 
         right = QWidget()
         right_layout = QVBoxLayout(right)
@@ -634,6 +645,7 @@ class KnowledgeWidget(QWidget):
         merged_status = {**status, **ingest_status}
         self._update_status_pills(merged_status)
         self._update_summary(merged_status)
+        self._update_source_overview(merged_status)
         self._update_document_table()
         self._update_pipeline(merged_status)
         evidence_payload = self._retrieve_evidence(task, query_text) if load_evidence else {"query": "", "chunks": [], "relations": []}
@@ -990,6 +1002,25 @@ class KnowledgeWidget(QWidget):
             f"<span style='font-size:18px;font-weight:800;color:{foreground};'>{escape(value)}</span>"
             f"{detail_html}</div>"
         )
+
+    def _update_source_overview(self, status: dict[str, Any]) -> None:
+        builtin_chunks = int(status.get("builtin_rag_chunk_count", 0) or 0)
+        builtin_entities = int(status.get("builtin_kg_entity_count", 0) or 0)
+        builtin_relations = int(status.get("builtin_kg_relation_count", 0) or 0)
+        runtime_docs = int(status.get("runtime_document_count", status.get("document_count", 0)) or 0)
+        runtime_chunks = int(status.get("runtime_rag_chunk_count", 0) or 0)
+        runtime_relations = int(status.get("runtime_kg_relation_count", 0) or 0)
+        vector_status = status.get("vector_status") or "pending"
+        html = [
+            "<h3>知识来源与索引</h3>",
+            "<ul>",
+            f"<li><b>系统资料包：</b>{builtin_chunks} 文本块，{builtin_entities} 实体，{builtin_relations} 关系。</li>",
+            f"<li><b>用户增量：</b>{runtime_docs} 文档，{runtime_chunks} 文本块，{runtime_relations} 关系。</li>",
+            f"<li><b>合并索引：</b>{status.get('rag_chunk_count', 0)} 文本块，{status.get('kg_entity_count', 0)} 实体，{status.get('kg_relation_count', 0)} 关系。</li>",
+            f"<li><b>向量状态：</b>{escape(str(vector_status))}；chunk {escape(str(status.get('chunk_token_size', '-')))} / overlap {escape(str(status.get('chunk_overlap_tokens', '-')))}。</li>",
+            "</ul>",
+        ]
+        self.source_overview_browser.setHtml("".join(html))
 
     def _html_card_style(self) -> str:
         if self.theme == "light":

@@ -207,6 +207,9 @@ def test_monitor_page_contains_workflow_audit_widget(monkeypatch) -> None:
     try:
         window._switch_workspace_page(3)
         assert window.stack.currentWidget() is window.monitor_page
+        assert window.monitor_dashboard_widget.parent() is not None
+        assert window.monitor_dashboard_widget.isHidden() is False
+        assert len(window.monitor_dashboard_widget.points) >= 1
         assert window.workflow_widget.parent() is not None
         assert window.workflow_widget.isHidden() is False
         assert window.workflow_widget.health_button.isHidden() is False
