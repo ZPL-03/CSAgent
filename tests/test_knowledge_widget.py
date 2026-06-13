@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gzip
 import json
 import os
 import time
@@ -181,6 +182,80 @@ def test_knowledge_widget_graph_search_filters_visible_graph(monkeypatch, tmp_pa
         nodes, relations, _total_nodes, _total_relations = widget.graph_view._node_payload()
         assert len(nodes) >= 2
         assert len(relations) == 1
+    finally:
+        widget.close()
+        app.processEvents()
+
+
+def test_knowledge_widget_default_graph_uses_builtin_kg_without_query(monkeypatch, tmp_path) -> None:
+    builtin_kg = tmp_path / "csllm" / "kg"
+    builtin_kg.mkdir(parents=True)
+    (builtin_kg / "entities.jsonl").write_text(
+        "\n".join(
+            [
+                json.dumps({"type": "DesignFormula", "name": "ASME RD-1172"}, ensure_ascii=False),
+                json.dumps({"type": "FailureMode", "name": "Buckling"}, ensure_ascii=False),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with gzip.open(builtin_kg / "relations.compact.jsonl.gz", "wt", encoding="utf-8") as handle:
+        handle.write(
+            json.dumps(
+                {
+                    "source": "ASME RD-1172",
+                    "source_type": "DesignFormula",
+                    "relation": "PREDICTS",
+                    "target": "Buckling",
+                    "target_type": "FailureMode",
+                    "record_id": "BUILTIN_DOC",
+                },
+                ensure_ascii=False,
+            )
+            + "\n"
+        )
+
+    class BuiltinOnlyKnowledge(FakeKnowledge):
+        def status(self) -> dict:
+            status = super().status()
+            status.update(
+                {
+                    "document_count": 0,
+                    "runtime_document_count": 0,
+                    "runtime_rag_chunk_count": 0,
+                    "runtime_kg_entity_count": 0,
+                    "runtime_kg_relation_count": 0,
+                    "builtin_rag_chunk_count": 1,
+                    "builtin_kg_entity_count": 2,
+                    "builtin_kg_relation_count": 1,
+                    "rag_chunk_count": 1,
+                    "kg_entity_count": 2,
+                    "kg_relation_count": 1,
+                }
+            )
+            return status
+
+    class BuiltinOnlyIngestion(FakeIngestionService):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self.builtin_kg_dir = builtin_kg
+
+    global _DOCS_PATH
+    _DOCS_PATH = tmp_path / "documents.jsonl"
+    _DOCS_PATH.write_text("", encoding="utf-8")
+    monkeypatch.setattr("gui.knowledge_widget.DomainKnowledgeBase", BuiltinOnlyKnowledge)
+    monkeypatch.setattr("gui.knowledge_widget.KnowledgeIngestionService", BuiltinOnlyIngestion)
+
+    app = _app()
+    widget = KnowledgeWidget()
+    try:
+        widget.refresh(load_evidence=False)
+
+        assert widget.graph_view.relations
+        assert widget.graph_view.relations[0]["source"] == "ASME RD-1172"
+        assert widget.graph_view.relations[0]["target"] == "Buckling"
+        assert widget.graph_view.highlight_relations == []
     finally:
         widget.close()
         app.processEvents()

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gzip
 import json
 import math
 from dataclasses import asdict
@@ -832,14 +833,15 @@ class KnowledgeWidget(QWidget):
         self.search_input.setText(query)
         return self.knowledge_base.retrieve_by_query(query, top_k=5, kg_top_k=8)
 
-    def _load_jsonl_rows(self, path: Path | str | None) -> list[dict[str, Any]]:
+    def _load_jsonl_rows(self, path: Path | str | None, limit: int | None = None) -> list[dict[str, Any]]:
         if path is None:
             return []
         target = Path(path)
         if not target.exists():
             return []
         rows: list[dict[str, Any]] = []
-        with target.open("r", encoding="utf-8") as handle:
+        opener = gzip.open if target.suffix.lower() == ".gz" else open
+        with opener(target, "rt", encoding="utf-8") as handle:
             for line in handle:
                 if not line.strip():
                     continue
@@ -849,24 +851,35 @@ class KnowledgeWidget(QWidget):
                     continue
                 if isinstance(payload, dict):
                     rows.append(payload)
+                    if limit is not None and len(rows) >= limit:
+                        break
         return rows
 
-    def _update_graph_view(self, evidence_payload: dict[str, Any]) -> None:
+    def _merged_graph_sources(self, evidence_payload: dict[str, Any]) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
         entities_path = getattr(self.ingestion_service, "entities_path", None)
         relations_path = getattr(self.ingestion_service, "relations_path", None)
-        runtime_entities = self._load_jsonl_rows(entities_path)
-        runtime_relations = self._load_jsonl_rows(relations_path)
+        builtin_kg_dir = Path(getattr(self.ingestion_service, "builtin_kg_dir", "") or "")
+
+        runtime_entities = self._load_jsonl_rows(entities_path, limit=500)
+        runtime_relations = self._load_jsonl_rows(relations_path, limit=160)
+        builtin_entities = self._load_jsonl_rows(builtin_kg_dir / "entities.jsonl", limit=500)
+        builtin_relations = self._load_jsonl_rows(builtin_kg_dir / "relations.compact.jsonl.gz", limit=160)
         evidence_relations = evidence_payload.get("relations") if isinstance(evidence_payload.get("relations"), list) else []
-        relations = [*evidence_relations, *runtime_relations[:80]] if evidence_relations else runtime_relations[:160]
+
+        relations = self._dedupe_relations([*evidence_relations, *runtime_relations[:80], *builtin_relations[:160]])
+        entities = self._dedupe_entities([*runtime_entities, *builtin_entities], relations)
+        return entities, relations, evidence_relations
+
+    def _dedupe_entities(self, entities: list[dict[str, Any]], relations: list[dict[str, Any]]) -> list[dict[str, Any]]:
         entity_seen: set[tuple[str, str]] = set()
-        entities = []
-        for entity in runtime_entities:
+        merged: list[dict[str, Any]] = []
+        for entity in entities:
             entity_type = str(entity.get("type") or "Entity")
             name = str(entity.get("name") or "").strip()
             if not name or (entity_type, name) in entity_seen:
                 continue
             entity_seen.add((entity_type, name))
-            entities.append(entity)
+            merged.append(entity)
         for relation in relations:
             for name_key, type_key in [("source", "source_type"), ("target", "target_type")]:
                 name = str(relation.get(name_key) or "").strip()
@@ -874,7 +887,28 @@ class KnowledgeWidget(QWidget):
                 if not name or (entity_type, name) in entity_seen:
                     continue
                 entity_seen.add((entity_type, name))
-                entities.append({"type": entity_type, "name": name})
+                merged.append({"type": entity_type, "name": name})
+        return merged
+
+    def _dedupe_relations(self, relations: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        seen: set[tuple[str, str, str, str]] = set()
+        merged: list[dict[str, Any]] = []
+        for relation in relations:
+            source = str(relation.get("source") or "").strip()
+            relation_type = str(relation.get("relation") or "").strip()
+            target = str(relation.get("target") or "").strip()
+            record_id = str(relation.get("record_id") or relation.get("source_id") or "").strip()
+            if not source or not target:
+                continue
+            key = (source, relation_type, target, record_id)
+            if key in seen:
+                continue
+            seen.add(key)
+            merged.append(relation)
+        return merged
+
+    def _update_graph_view(self, evidence_payload: dict[str, Any]) -> None:
+        entities, relations, evidence_relations = self._merged_graph_sources(evidence_payload)
         self.graph_view.set_graph(entities, relations, evidence_relations)
 
     def _update_status_pills(self, status: dict[str, Any]) -> None:
