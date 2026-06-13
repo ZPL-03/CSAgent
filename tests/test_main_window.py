@@ -598,6 +598,27 @@ def test_chat_bubble_width_tracks_rendered_text_width() -> None:
         app.processEvents()
 
 
+def test_chat_dynamic_messages_scroll_to_latest_without_tail_spacer() -> None:
+    app = _app()
+    widget = ChatWidget()
+    try:
+        widget.resize(980, 260)
+        widget.show()
+        app.processEvents()
+
+        for index in range(12):
+            widget.add_message("ORCHESTRATOR", f"第 {index + 1} 条运行事件：候选生成、代理初筛和状态更新。")
+            app.processEvents()
+
+        layout = widget.content_layout
+        assert layout.count() == 12
+        assert layout.itemAt(layout.count() - 1).widget() is not None
+        assert widget.scroll_area.verticalScrollBar().value() == widget.scroll_area.verticalScrollBar().maximum()
+    finally:
+        widget.close()
+        app.processEvents()
+
+
 def test_light_theme_uses_light_log_and_sidebar_surfaces() -> None:
     stylesheet = application_stylesheet("Microsoft YaHei UI", "light")
 

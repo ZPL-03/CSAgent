@@ -154,6 +154,38 @@ def test_knowledge_widget_renders_runtime_pipeline_and_evidence(monkeypatch, tmp
         app.processEvents()
 
 
+def test_knowledge_widget_graph_search_filters_visible_graph(monkeypatch, tmp_path) -> None:
+    global _DOCS_PATH
+    _DOCS_PATH = tmp_path / "documents.jsonl"
+    _DOCS_PATH.write_text("", encoding="utf-8")
+
+    monkeypatch.setattr("gui.knowledge_widget.DomainKnowledgeBase", FakeKnowledge)
+    monkeypatch.setattr("gui.knowledge_widget.KnowledgeIngestionService", FakeIngestionService)
+
+    app = _app()
+    widget = KnowledgeWidget()
+    try:
+        widget.refresh(query_text="外压圆柱壳 屈曲")
+        widget.graph_search_input.setText("Initial")
+        app.processEvents()
+
+        nodes, relations, total_nodes, total_relations = widget.graph_view._node_payload()
+
+        assert total_nodes >= 2
+        assert total_relations == 1
+        assert {name for name, _type in nodes} == {"Initial Imperfection", "Buckling"}
+        assert len(relations) == 1
+
+        widget.graph_search_input.clear()
+        app.processEvents()
+        nodes, relations, _total_nodes, _total_relations = widget.graph_view._node_payload()
+        assert len(nodes) >= 2
+        assert len(relations) == 1
+    finally:
+        widget.close()
+        app.processEvents()
+
+
 def test_knowledge_graph_view_filters_and_resets_interactive_state() -> None:
     app = _app()
     _ = app
