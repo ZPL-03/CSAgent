@@ -182,6 +182,14 @@ def test_knowledge_widget_graph_search_filters_visible_graph(monkeypatch, tmp_pa
         nodes, relations, _total_nodes, _total_relations = widget.graph_view._node_payload()
         assert len(nodes) >= 2
         assert len(relations) == 1
+        assert "图谱审计" in widget.graph_detail_browser.toHtml()
+        assert "总实体" in widget.graph_detail_browser.toHtml()
+
+        widget.graph_view._selected_node_name = "Initial Imperfection"
+        widget._update_graph_detail("Initial Imperfection")
+        detail_html = widget.graph_detail_browser.toHtml()
+        assert "选中节点" in detail_html
+        assert "Initial Imperfection" in detail_html
     finally:
         widget.close()
         app.processEvents()

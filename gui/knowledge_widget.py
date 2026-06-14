@@ -10,8 +10,8 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import QObject, QPointF, QRectF, QSize, QThread, Qt, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPen
+from PyQt6.QtCore import QLineF, QObject, QPointF, QRectF, QSize, QThread, Qt, pyqtSignal
+from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPolygonF
 from PyQt6.QtWidgets import (
     QFileDialog,
     QHeaderView,
@@ -44,6 +44,8 @@ DEFAULT_EVIDENCE_QUERY = "复合材料外压圆柱耐压壳 外部静水压力 �
 class KnowledgeGraphView(QWidget):
     """运行时知识图谱可视化画布。"""
 
+    nodeSelected = pyqtSignal(str)
+
     def __init__(self) -> None:
         super().__init__()
         self.theme = "dark"
@@ -61,6 +63,8 @@ class KnowledgeGraphView(QWidget):
         self._node_offset_start = QPointF(0.0, 0.0)
         self._manual_node_offsets: dict[str, QPointF] = {}
         self._last_node_positions: dict[str, QPointF] = {}
+        self._last_node_radii: dict[str, float] = {}
+        self._selected_node_name = ""
         self.setMinimumHeight(190)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMouseTracking(True)
@@ -81,12 +85,21 @@ class KnowledgeGraphView(QWidget):
         self.entities = list(entities)
         self.relations = list(relations)
         self.highlight_relations = list(highlight_relations or [])
+        available_names = {str(entity.get("name") or "").strip() for entity in self.entities}
+        available_names.update(str(relation.get("source") or "").strip() for relation in self.relations)
+        available_names.update(str(relation.get("target") or "").strip() for relation in self.relations)
+        if self._selected_node_name and self._selected_node_name not in available_names:
+            self._selected_node_name = ""
+            self.nodeSelected.emit("")
         self.update()
 
     def set_filter_text(self, value: str) -> None:
         """设置图谱节点过滤词。"""
 
         self.filter_text = str(value or "").strip().lower()
+        if self._selected_node_name:
+            self._selected_node_name = ""
+            self.nodeSelected.emit("")
         self.update()
 
     def reset_view(self) -> None:
@@ -96,6 +109,11 @@ class KnowledgeGraphView(QWidget):
         self._pan = QPointF(0.0, 0.0)
         self._manual_node_offsets.clear()
         self.update()
+
+    def selected_node_name(self) -> str:
+        """返回当前选中的图谱节点名称。"""
+
+        return self._selected_node_name
 
     def zoom_by(self, factor: float) -> None:
         """按比例缩放图谱画布。"""
@@ -119,6 +137,9 @@ class KnowledgeGraphView(QWidget):
                 "muted": QColor("#64748b"),
                 "edge": QColor("#94a3b8"),
                 "highlight": QColor("#8b5cf6"),
+                "grid": QColor(100, 116, 139, 28),
+                "label_bg": QColor(255, 255, 255, 205),
+                "selected": QColor("#0f766e"),
             }
         return {
             "bg": QColor("#101821"),
@@ -128,18 +149,41 @@ class KnowledgeGraphView(QWidget):
             "muted": QColor("#94a3b8"),
             "edge": QColor("#475569"),
             "highlight": QColor("#a78bfa"),
+            "grid": QColor(148, 163, 184, 24),
+            "label_bg": QColor(15, 23, 42, 210),
+            "selected": QColor("#38bdf8"),
         }
 
     def _type_color(self, entity_type: str) -> QColor:
         palette = {
+            "Application": "#0087a8",
+            "DesignVariable": "#b05f6d",
             "Material": "#38bdf8",
             "Structure": "#34d399",
             "FailureMode": "#f59e0b",
             "DesignFormula": "#a78bfa",
+            "LoadCase": "#c05a9d",
+            "Property": "#d08a00",
+            "Standard": "#7b61ff",
+            "StiffnessCoeff": "#5c6ac4",
+            "TaskCategory": "#6a7a89",
+            "Literature": "#8c6f47",
             "VerificationMethod": "#60a5fa",
             "ManufacturingProcess": "#fb7185",
         }
         return QColor(palette.get(entity_type, "#64748b"))
+
+    def _entity_counts(self) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for entity in self.entities:
+            name = str(entity.get("name") or "").strip()
+            if not name:
+                continue
+            try:
+                counts[name] = max(1, int(entity.get("count") or 1))
+            except (TypeError, ValueError):
+                counts[name] = 1
+        return counts
 
     def _node_payload(self) -> tuple[list[tuple[str, str]], list[dict[str, Any]], int, int]:
         node_types: dict[str, str] = {}
@@ -162,7 +206,11 @@ class KnowledgeGraphView(QWidget):
                 degree[source] += 1
             if target in degree:
                 degree[target] += 1
-        sorted_nodes = sorted(node_types.items(), key=lambda item: (-degree.get(item[0], 0), item[1], item[0]))
+        counts = self._entity_counts()
+        sorted_nodes = sorted(
+            node_types.items(),
+            key=lambda item: (-(math.log1p(counts.get(item[0], 1)) + degree.get(item[0], 0) * 2.0), item[1], item[0]),
+        )
         if self.filter_text:
             seed_names = {
                 name
@@ -180,15 +228,246 @@ class KnowledgeGraphView(QWidget):
                     if target:
                         neighbor_names.add(target)
             sorted_nodes = [item for item in sorted_nodes if item[0] in neighbor_names]
-        max_nodes = 26
+        max_nodes = 42
         visible_nodes = sorted_nodes[:max_nodes]
         visible_names = {name for name, _ in visible_nodes}
         visible_relations = [
             relation
             for relation in self.relations
             if str(relation.get("source") or "") in visible_names and str(relation.get("target") or "") in visible_names
-        ][:42]
+        ][:72]
         return visible_nodes, visible_relations, len(node_types), len(self.relations)
+
+    def _visible_degrees(self, relations: list[dict[str, Any]]) -> dict[str, int]:
+        degrees: dict[str, int] = {}
+        for relation in relations:
+            source = str(relation.get("source") or "").strip()
+            target = str(relation.get("target") or "").strip()
+            if source:
+                degrees[source] = degrees.get(source, 0) + 1
+            if target:
+                degrees[target] = degrees.get(target, 0) + 1
+        return degrees
+
+    def _node_weight(self, name: str, degrees: dict[str, int], counts: dict[str, int]) -> float:
+        return math.log1p(counts.get(name, 1)) + degrees.get(name, 0) * 1.8
+
+    def _node_radius(self, name: str, degrees: dict[str, int], counts: dict[str, int]) -> float:
+        weight = self._node_weight(name, degrees, counts)
+        return max(6.0, min(16.0, 6.0 + math.sqrt(max(weight, 1.0)) * 2.1))
+
+    def _layout_positions(
+        self,
+        visible_nodes: list[tuple[str, str]],
+        visible_relations: list[dict[str, Any]],
+        graph_rect: QRectF,
+    ) -> dict[str, QPointF]:
+        if not visible_nodes:
+            return {}
+
+        degrees = self._visible_degrees(visible_relations)
+        counts = self._entity_counts()
+        node_map = {name: entity_type for name, entity_type in visible_nodes}
+        adjacency: dict[str, set[str]] = {name: set() for name in node_map}
+        for relation in visible_relations:
+            source = str(relation.get("source") or "").strip()
+            target = str(relation.get("target") or "").strip()
+            if source in adjacency and target in adjacency:
+                adjacency[source].add(target)
+                adjacency[target].add(source)
+
+        seen: set[str] = set()
+        components: list[list[tuple[str, str]]] = []
+        for name, entity_type in sorted(
+            visible_nodes,
+            key=lambda item: (-self._node_weight(item[0], degrees, counts), item[1], item[0]),
+        ):
+            if name in seen:
+                continue
+            stack = [name]
+            seen.add(name)
+            component: list[tuple[str, str]] = []
+            while stack:
+                current = stack.pop()
+                component.append((current, node_map[current]))
+                for neighbor in sorted(adjacency.get(current, set())):
+                    if neighbor not in seen:
+                        seen.add(neighbor)
+                        stack.append(neighbor)
+            components.append(component)
+
+        components.sort(key=lambda item: (-len(item), -sum(degrees.get(name, 0) for name, _ in item)))
+        positions: dict[str, QPointF] = {}
+        graph_center = QPointF(graph_rect.center().x() + self._pan.x(), graph_rect.center().y() + self._pan.y())
+
+        def place_component(component: list[tuple[str, str]], center: QPointF, rx: float, ry: float, phase: float = 0.0) -> None:
+            ranked = sorted(component, key=lambda item: (-self._node_weight(item[0], degrees, counts), item[1], item[0]))
+            if not ranked:
+                return
+            core_name = ranked[0][0]
+            positions[core_name] = center + self._manual_node_offsets.get(core_name, QPointF(0.0, 0.0))
+            remaining = ranked[1:]
+            if not remaining:
+                return
+            ring_sizes = [10, 18, 30]
+            start = 0
+            for ring_index, capacity in enumerate(ring_sizes):
+                ring_nodes = remaining[start : start + capacity]
+                if not ring_nodes:
+                    break
+                start += len(ring_nodes)
+                ring_rx = rx * (0.48 + ring_index * 0.28)
+                ring_ry = ry * (0.48 + ring_index * 0.28)
+                for index, (name, _entity_type) in enumerate(ring_nodes):
+                    angle = -math.pi / 2.0 + phase + ring_index * 0.18 + 2.0 * math.pi * index / len(ring_nodes)
+                    offset = self._manual_node_offsets.get(name, QPointF(0.0, 0.0))
+                    positions[name] = QPointF(
+                        center.x() + ring_rx * math.cos(angle) + offset.x(),
+                        center.y() + ring_ry * math.sin(angle) + offset.y(),
+                    )
+
+        main_component = components[0]
+        has_side_components = len(components) > 1 and graph_rect.width() >= 520
+        main_center = QPointF(graph_center.x() - (graph_rect.width() * 0.12 if has_side_components else 0), graph_center.y())
+        main_rx = max(78.0, graph_rect.width() * (0.28 if has_side_components else 0.38)) * self._scale
+        main_ry = max(54.0, graph_rect.height() * 0.34) * self._scale
+        place_component(main_component, main_center, main_rx, main_ry)
+
+        small_components = components[1:]
+        if small_components:
+            columns = max(1, min(3, int(math.ceil(math.sqrt(len(small_components))))))
+            if has_side_components:
+                cell_width = max(104.0, graph_rect.width() * 0.15)
+                cell_height = max(78.0, graph_rect.height() * 0.22)
+                start_x = graph_rect.right() - cell_width * columns + cell_width * 0.45 + self._pan.x()
+                start_y = graph_center.y() - cell_height * max(0.0, math.ceil(len(small_components) / columns) - 1) * 0.5
+                for index, component in enumerate(small_components):
+                    column = index % columns
+                    row = index // columns
+                    center = QPointF(start_x + column * cell_width, start_y + row * cell_height)
+                    place_component(component, center, cell_width * 0.36 * self._scale, cell_height * 0.34 * self._scale, phase=0.28)
+            else:
+                outer_rx = max(78.0, graph_rect.width() * 0.36) * self._scale
+                outer_ry = max(52.0, graph_rect.height() * 0.32) * self._scale
+                for index, component in enumerate(small_components):
+                    angle = -math.pi / 2.0 + 2.0 * math.pi * index / max(1, len(small_components))
+                    center = QPointF(graph_center.x() + outer_rx * math.cos(angle), graph_center.y() + outer_ry * math.sin(angle))
+                    place_component(component, center, 38.0 * self._scale, 30.0 * self._scale, phase=0.28)
+        return positions
+
+    def _draw_grid(self, painter: QPainter, rect: QRectF, color: QColor) -> None:
+        painter.save()
+        painter.setClipRect(rect)
+        painter.setPen(QPen(color, 1.0))
+        spacing = 30
+        x = int(rect.left()) - int(rect.left()) % spacing
+        while x <= rect.right():
+            painter.drawLine(QPointF(x, rect.top()), QPointF(x, rect.bottom()))
+            x += spacing
+        y = int(rect.top()) - int(rect.top()) % spacing
+        while y <= rect.bottom():
+            painter.drawLine(QPointF(rect.left(), y), QPointF(rect.right(), y))
+            y += spacing
+        painter.restore()
+
+    def _draw_edge(
+        self,
+        painter: QPainter,
+        source: QPointF,
+        target: QPointF,
+        color: QColor,
+        highlight: bool,
+    ) -> None:
+        line = QLineF(source, target)
+        if line.length() < 2:
+            return
+        dx = target.x() - source.x()
+        dy = target.y() - source.y()
+        length = max(1.0, math.hypot(dx, dy))
+        normal = QPointF(-dy / length, dx / length)
+        curve = 18.0 if not highlight else 28.0
+        control = QPointF((source.x() + target.x()) / 2.0 + normal.x() * curve, (source.y() + target.y()) / 2.0 + normal.y() * curve)
+
+        painter.setPen(QPen(color, 2.0 if highlight else 1.05, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        path = QPainterPath(source)
+        path.quadTo(control, target)
+        painter.drawPath(path)
+
+        arrow_len = 7.0 if highlight else 5.6
+        angle = math.atan2(target.y() - control.y(), target.x() - control.x())
+        arrow = QPolygonF(
+            [
+                target,
+                QPointF(target.x() - arrow_len * math.cos(angle - 0.42), target.y() - arrow_len * math.sin(angle - 0.42)),
+                QPointF(target.x() - arrow_len * math.cos(angle + 0.42), target.y() - arrow_len * math.sin(angle + 0.42)),
+            ]
+        )
+        painter.setBrush(QBrush(color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawPolygon(arrow)
+
+    def _draw_label(
+        self,
+        painter: QPainter,
+        name: str,
+        point: QPointF,
+        radius: float,
+        graph_rect: QRectF,
+        colors: dict[str, QColor],
+        font: QFont,
+        metrics: QFontMetrics,
+        occupied: list[QRectF] | None = None,
+        force: bool = False,
+    ) -> bool:
+        label = metrics.elidedText(name, Qt.TextElideMode.ElideRight, 116)
+        width = min(124.0, max(48.0, float(metrics.horizontalAdvance(label) + 14)))
+        height = 20.0
+        x = point.x() - width / 2.0
+        y = point.y() + radius + 5.0
+        if y + height > graph_rect.bottom():
+            y = point.y() - radius - height - 5.0
+        x = min(max(x, graph_rect.left() + 2.0), graph_rect.right() - width - 2.0)
+        label_rect = QRectF(x, y, width, height)
+        if occupied is not None and not force:
+            padded_rect = label_rect.adjusted(-5, -4, 5, 4)
+            if any(padded_rect.intersects(existing) for existing in occupied):
+                return False
+        painter.setBrush(QBrush(colors["label_bg"]))
+        painter.setPen(QPen(colors["border"], 0.8))
+        painter.drawRoundedRect(label_rect, 5, 5)
+        painter.setFont(font)
+        painter.setPen(colors["text"])
+        painter.drawText(label_rect.adjusted(6, 0, -6, 0), Qt.AlignmentFlag.AlignCenter, label)
+        if occupied is not None:
+            occupied.append(label_rect.adjusted(-5, -4, 5, 4))
+        return True
+
+    def _draw_legend(self, painter: QPainter, visible_nodes: list[tuple[str, str]], colors: dict[str, QColor]) -> None:
+        type_counts: dict[str, int] = {}
+        for _name, entity_type in visible_nodes:
+            type_counts[entity_type] = type_counts.get(entity_type, 0) + 1
+        items = sorted(type_counts.items(), key=lambda item: (-item[1], item[0]))[:4]
+        if not items or self.width() < 620:
+            return
+        font = QFont(self.font())
+        font.setPointSize(8)
+        painter.setFont(font)
+        metrics = QFontMetrics(font)
+        x = self.width() - 18.0
+        y = 14.0
+        for entity_type, count in reversed(items):
+            label = f"{entity_type} {count}"
+            width = metrics.horizontalAdvance(label) + 22
+            x -= width
+            rect = QRectF(x, y, width - 6, 20)
+            painter.setBrush(QBrush(colors["label_bg"]))
+            painter.setPen(QPen(colors["border"], 0.8))
+            painter.drawRoundedRect(rect, 6, 6)
+            painter.setBrush(QBrush(self._type_color(entity_type)))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(QPointF(rect.left() + 9, rect.center().y()), 4.0, 4.0)
+            painter.setPen(colors["muted"])
+            painter.drawText(rect.adjusted(18, 0, -4, 0), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, label)
 
     def paintEvent(self, event) -> None:
         colors = self._colors()
@@ -200,9 +479,11 @@ class KnowledgeGraphView(QWidget):
         painter.setBrush(QBrush(colors["panel"]))
         painter.setPen(QPen(colors["border"], 1.0))
         painter.drawRoundedRect(panel, 12, 12)
+        graph_rect = panel.adjusted(14, 36, -14, -16)
+        self._draw_grid(painter, graph_rect, colors["grid"])
 
         visible_nodes, visible_relations, total_nodes, total_relations = self._node_payload()
-        subtitle = f"实体 {total_nodes} · 关系 {total_relations}"
+        subtitle = f"核心图谱 · 实体 {total_nodes} · 关系 {total_relations}"
         if total_nodes > len(visible_nodes) or total_relations > len(visible_relations):
             subtitle += f" · 显示核心子图 {len(visible_nodes)} / {len(visible_relations)}"
         small_font = QFont(self.font())
@@ -211,28 +492,20 @@ class KnowledgeGraphView(QWidget):
         painter.setFont(small_font)
         painter.setPen(colors["muted"])
         painter.drawText(QRectF(16, 12, self.width() - 32, 20), Qt.AlignmentFlag.AlignLeft, subtitle)
+        self._draw_legend(painter, visible_nodes, colors)
 
         if not visible_nodes:
             painter.drawText(
-                QRectF(16, 36, self.width() - 32, self.height() - 54),
+                graph_rect,
                 Qt.AlignmentFlag.AlignCenter,
                 "知识图谱等待资料入库或检索命中。",
             )
             return
 
-        center = QPointF(self.width() / 2.0 + self._pan.x(), self.height() / 2.0 + 8 + self._pan.y())
-        radius_x = max(80.0, (self.width() - 88) / 2.0) * self._scale
-        radius_y = max(54.0, (self.height() - 92) / 2.0) * self._scale
-        positions: dict[str, QPointF] = {}
-        count = len(visible_nodes)
-        for index, (name, _entity_type) in enumerate(visible_nodes):
-            angle = -math.pi / 2.0 + 2.0 * math.pi * index / max(1, count)
-            offset = self._manual_node_offsets.get(name, QPointF(0.0, 0.0))
-            positions[name] = QPointF(
-                center.x() + radius_x * math.cos(angle) + offset.x(),
-                center.y() + radius_y * math.sin(angle) + offset.y(),
-            )
+        positions = self._layout_positions(visible_nodes, visible_relations, graph_rect)
         self._last_node_positions = positions
+        degrees = self._visible_degrees(visible_relations)
+        counts = self._entity_counts()
 
         highlighted = {
             (
@@ -248,29 +521,57 @@ class KnowledgeGraphView(QWidget):
             if source not in positions or target not in positions:
                 continue
             key = (source, str(relation.get("relation") or ""), target)
-            edge_color = colors["highlight"] if key in highlighted else colors["edge"]
-            pen = QPen(edge_color, 1.8 if key in highlighted else 1.0)
-            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-            painter.setPen(pen)
-            painter.drawLine(positions[source], positions[target])
+            selected_edge = bool(self._selected_node_name and self._selected_node_name in {source, target})
+            edge_color = colors["highlight"] if key in highlighted or selected_edge else colors["edge"]
+            edge_color.setAlpha(220 if key in highlighted else (168 if selected_edge else 86))
+            self._draw_edge(painter, positions[source], positions[target], edge_color, key in highlighted or selected_edge)
 
         label_font = QFont(self.font())
         label_font.setPointSize(8)
         label_font.setBold(True)
         label_metrics = QFontMetrics(label_font)
+        ranked_label_names = {
+            name
+            for name, _entity_type in sorted(
+                visible_nodes,
+                key=lambda item: (-self._node_weight(item[0], degrees, counts), item[1], item[0]),
+            )[:10]
+        }
+        self._last_node_radii = {}
+        occupied_label_rects: list[QRectF] = []
         for name, entity_type in visible_nodes:
             point = positions[name]
             color = self._type_color(entity_type)
+            radius = self._node_radius(name, degrees, counts)
+            if self.filter_text and self.filter_text in name.lower():
+                radius += 2.0
+            self._last_node_radii[name] = radius
+            is_selected = name == self._selected_node_name
+            if is_selected:
+                halo = QColor(colors["selected"])
+                halo.setAlpha(74)
+                painter.setBrush(QBrush(halo))
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.drawEllipse(point, radius + 8.0, radius + 8.0)
             painter.setBrush(QBrush(color))
-            painter.setPen(QPen(colors["panel"], 1.5))
-            radius = 10 if self.filter_text and self.filter_text in name.lower() else 8
+            painter.setPen(QPen(colors["selected"] if is_selected or name in ranked_label_names else colors["panel"], 2.6 if is_selected else 1.8))
             painter.drawEllipse(point, radius, radius)
-            if self.show_labels or (self.filter_text and self.filter_text in name.lower()):
-                label = label_metrics.elidedText(name, Qt.TextElideMode.ElideRight, 92)
-                label_rect = QRectF(point.x() - 48, point.y() + 11, 96, 18)
-                painter.setFont(label_font)
-                painter.setPen(colors["text"])
-                painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
+            should_label = is_selected or (self.show_labels and name in ranked_label_names) or (
+                self.filter_text and self.filter_text in name.lower()
+            )
+            if should_label:
+                self._draw_label(
+                    painter,
+                    name,
+                    point,
+                    radius,
+                    graph_rect,
+                    colors,
+                    label_font,
+                    label_metrics,
+                    occupied_label_rects,
+                    force=is_selected,
+                )
 
     def wheelEvent(self, event) -> None:
         old_scale = self._scale
@@ -294,6 +595,8 @@ class KnowledgeGraphView(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             hovered = self._hovered_node(event.position())
             if hovered:
+                self._selected_node_name = hovered
+                self.nodeSelected.emit(hovered)
                 self._drag_node_name = hovered
                 self._drag_node_start = event.position()
                 self._node_offset_start = QPointF(self._manual_node_offsets.get(hovered, QPointF(0.0, 0.0)))
@@ -349,7 +652,8 @@ class KnowledgeGraphView(QWidget):
         for name, position in self._last_node_positions.items():
             dx = point.x() - position.x()
             dy = point.y() - position.y()
-            if dx * dx + dy * dy <= 18 * 18:
+            radius = max(18.0, self._last_node_radii.get(name, 8.0) + 8.0)
+            if dx * dx + dy * dy <= radius * radius:
                 return name
         return ""
 
@@ -477,7 +781,8 @@ class KnowledgeWidget(QWidget):
         empty_layout.addWidget(empty_body)
         empty_layout.addWidget(empty_hint)
         self.document_empty_state.setMinimumHeight(130)
-        self.document_empty_state.setMaximumHeight(166)
+        self.document_empty_state.setMinimumHeight(96)
+        self.document_empty_state.setMaximumHeight(126)
         empty_page = QWidget()
         empty_page_layout = QVBoxLayout(empty_page)
         empty_page_layout.setContentsMargins(0, 0, 0, 0)
@@ -486,13 +791,13 @@ class KnowledgeWidget(QWidget):
         self.document_stack = QStackedWidget()
         self.document_stack.addWidget(empty_page)
         self.document_stack.addWidget(self.document_table)
-        self.document_stack.setMinimumHeight(160)
+        self.document_stack.setMinimumHeight(116)
 
         self.source_overview_browser = QTextBrowser()
         self.source_overview_browser.setOpenExternalLinks(True)
-        self.source_overview_browser.setMaximumHeight(190)
+        self.source_overview_browser.setMaximumHeight(126)
         self.source_overview_browser.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.source_overview_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.source_overview_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.source_overview_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self.pipeline_widget = PipelineStatusWidget()
@@ -520,15 +825,20 @@ class KnowledgeWidget(QWidget):
         ]:
             button.setObjectName("graphToolButton")
             button.setFixedSize(34, 32)
+        self.graph_detail_browser = QTextBrowser()
+        self.graph_detail_browser.setOpenExternalLinks(False)
+        self.graph_detail_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.graph_detail_browser.setMinimumWidth(236)
+        self.graph_detail_browser.setMinimumHeight(214)
         self.evidence_browser = QTextBrowser()
         self.evidence_browser.setOpenExternalLinks(True)
         self.evidence_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.evidence_browser.setMinimumHeight(142)
         self.summary_browser = QTextBrowser()
-        self.summary_browser.setMaximumHeight(168)
+        self.summary_browser.setMaximumHeight(138)
         self.summary_browser.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.summary_browser.setOpenExternalLinks(True)
-        self.summary_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.summary_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.summary_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
         self._build_layout()
@@ -574,16 +884,26 @@ class KnowledgeWidget(QWidget):
         document_label.setObjectName("sectionTitle")
         left_layout.addWidget(document_label)
         left_layout.addWidget(self.document_stack)
-        source_label = QLabel("知识来源 · SOURCES")
-        source_label.setObjectName("sectionTitle")
-        left_layout.addWidget(source_label)
-        left_layout.addWidget(self.source_overview_browser)
 
-        right = QWidget()
-        right_layout = QVBoxLayout(right)
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(9)
-        right_layout.addWidget(self.pipeline_widget, 0)
+        pipeline_panel = QWidget()
+        pipeline_layout = QVBoxLayout(pipeline_panel)
+        pipeline_layout.setContentsMargins(0, 0, 0, 0)
+        pipeline_layout.setSpacing(9)
+        pipeline_layout.addWidget(self.pipeline_widget, 0, Qt.AlignmentFlag.AlignTop)
+        pipeline_layout.addStretch(1)
+
+        overview_splitter = QSplitter(Qt.Orientation.Horizontal)
+        overview_splitter.addWidget(left)
+        overview_splitter.addWidget(pipeline_panel)
+        overview_splitter.setChildrenCollapsible(False)
+        overview_splitter.setSizes([620, 420])
+        overview_splitter.setStretchFactor(0, 1)
+        overview_splitter.setStretchFactor(1, 0)
+
+        graph_panel = QWidget()
+        graph_layout = QVBoxLayout(graph_panel)
+        graph_layout.setContentsMargins(0, 0, 0, 0)
+        graph_layout.setSpacing(8)
         graph_header = QHBoxLayout()
         graph_header.setContentsMargins(0, 0, 0, 0)
         graph_header.setSpacing(8)
@@ -595,18 +915,34 @@ class KnowledgeWidget(QWidget):
         graph_header.addWidget(self.graph_zoom_in_button)
         graph_header.addWidget(self.graph_zoom_out_button)
         graph_header.addWidget(self.graph_label_button)
-        right_layout.addLayout(graph_header)
-        right_layout.addWidget(self.graph_view, 2)
+        graph_layout.addLayout(graph_header)
+        graph_splitter = QSplitter(Qt.Orientation.Horizontal)
+        graph_splitter.addWidget(self.graph_view)
+        graph_splitter.addWidget(self.graph_detail_browser)
+        graph_splitter.setChildrenCollapsible(False)
+        graph_splitter.setSizes([760, 260])
+        graph_splitter.setStretchFactor(0, 1)
+        graph_splitter.setStretchFactor(1, 0)
+        graph_layout.addWidget(graph_splitter, 1)
+
+        evidence_panel = QWidget()
+        evidence_layout = QVBoxLayout(evidence_panel)
+        evidence_layout.setContentsMargins(0, 0, 0, 0)
+        evidence_layout.setSpacing(8)
         evidence_label = QLabel("检索证据 · EVIDENCE")
         evidence_label.setObjectName("sectionTitle")
-        right_layout.addWidget(evidence_label)
-        right_layout.addWidget(self.evidence_browser, 1)
+        evidence_layout.addWidget(evidence_label)
+        evidence_layout.addWidget(self.evidence_browser, 1)
 
-        splitter = QSplitter()
-        splitter.addWidget(left)
-        splitter.addWidget(right)
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(overview_splitter)
+        splitter.addWidget(graph_panel)
+        splitter.addWidget(evidence_panel)
         splitter.setChildrenCollapsible(False)
-        splitter.setSizes([700, 560])
+        splitter.setSizes([280, 450, 170])
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setStretchFactor(2, 0)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -625,11 +961,12 @@ class KnowledgeWidget(QWidget):
         self.export_snapshot_button.clicked.connect(lambda: self._run_maintenance("export"))
         self.refresh_button.clicked.connect(lambda: self.refresh(load_evidence=False))
         self.graph_search_input.returnPressed.connect(self._filter_graph_from_input)
-        self.graph_search_input.textChanged.connect(lambda value: self.graph_view.set_filter_text(value))
+        self.graph_search_input.textChanged.connect(self._on_graph_filter_text_changed)
         self.graph_reset_button.clicked.connect(self.graph_view.reset_view)
         self.graph_zoom_in_button.clicked.connect(lambda: self.graph_view.zoom_by(1.18))
         self.graph_zoom_out_button.clicked.connect(lambda: self.graph_view.zoom_by(0.84))
         self.graph_label_button.toggled.connect(self.graph_view.set_show_labels)
+        self.graph_view.nodeSelected.connect(self._update_graph_detail)
 
     def refresh(
         self,
@@ -734,6 +1071,11 @@ class KnowledgeWidget(QWidget):
 
     def _filter_graph_from_input(self) -> None:
         self.graph_view.set_filter_text(self.graph_search_input.text())
+        self._update_graph_detail("")
+
+    def _on_graph_filter_text_changed(self, value: str) -> None:
+        self.graph_view.set_filter_text(value)
+        self._update_graph_detail("")
 
     def _on_ingest_progress(self, steps: list) -> None:
         self.pipeline_widget.set_steps(steps)
@@ -922,6 +1264,117 @@ class KnowledgeWidget(QWidget):
     def _update_graph_view(self, evidence_payload: dict[str, Any]) -> None:
         entities, relations, evidence_relations = self._merged_graph_sources(evidence_payload)
         self.graph_view.set_graph(entities, relations, evidence_relations)
+        self._update_graph_detail(self.graph_view.selected_node_name())
+
+    def _graph_detail_card(self, title: str, value: str, detail: str = "") -> str:
+        if self.theme == "light":
+            border = "#c8d2df"
+            background = "#f8fafc"
+            muted = "#64748b"
+            foreground = "#172033"
+        else:
+            border = "#2b3a52"
+            background = "#111a28"
+            muted = "#94a3b8"
+            foreground = "#dbe4ef"
+        detail_html = f"<br><span style='color:{muted};font-size:11px;'>{escape(detail)}</span>" if detail else ""
+        return (
+            f"<div style='border:1px solid {border};border-radius:8px;padding:7px 9px;background:{background};margin-bottom:7px;'>"
+            f"<span style='color:{muted};font-size:11px;'>{escape(title)}</span><br>"
+            f"<span style='font-size:15px;font-weight:800;color:{foreground};'>{escape(value)}</span>"
+            f"{detail_html}</div>"
+        )
+
+    def _update_graph_detail(self, selected_name: str = "") -> None:
+        visible_nodes, visible_relations, total_nodes, total_relations = self.graph_view._node_payload()
+        degrees = self.graph_view._visible_degrees(visible_relations)
+        counts = self.graph_view._entity_counts()
+        node_types = {name: entity_type for name, entity_type in visible_nodes}
+        selected_name = selected_name or self.graph_view.selected_node_name()
+        if selected_name and selected_name not in node_types:
+            selected_name = ""
+
+        if self.theme == "light":
+            muted = "#64748b"
+            foreground = "#172033"
+            relation_bg = "#f8fafc"
+            relation_border = "#c8d2df"
+        else:
+            muted = "#94a3b8"
+            foreground = "#dbe4ef"
+            relation_bg = "#111a28"
+            relation_border = "#2b3a52"
+
+        relation_counts: dict[str, int] = {}
+        type_counts: dict[str, int] = {}
+        for _name, entity_type in visible_nodes:
+            type_counts[entity_type] = type_counts.get(entity_type, 0) + 1
+        for relation in visible_relations:
+            relation_name = str(relation.get("relation") or "RELATED_TO")
+            relation_counts[relation_name] = relation_counts.get(relation_name, 0) + 1
+
+        html = ["<h3>图谱审计</h3>"]
+        if selected_name:
+            entity_type = node_types.get(selected_name, "Entity")
+            related = [
+                relation
+                for relation in visible_relations
+                if selected_name in {str(relation.get("source") or ""), str(relation.get("target") or "")}
+            ]
+            html.append(self._graph_detail_card("选中节点", selected_name, entity_type))
+            html.append(
+                "<div style='display:grid;grid-template-columns:repeat(2,1fr);gap:7px;'>"
+                + self._graph_detail_card("度数", str(degrees.get(selected_name, 0)))
+                + self._graph_detail_card("计数", str(counts.get(selected_name, 1)))
+                + "</div>"
+            )
+            html.append("<h4>关联关系</h4>")
+            if not related:
+                html.append(f"<p style='color:{muted};'>当前核心子图中没有该节点的可见关系。</p>")
+            for relation in related[:18]:
+                source = str(relation.get("source") or "")
+                target = str(relation.get("target") or "")
+                relation_name = str(relation.get("relation") or "RELATED_TO")
+                other = target if source == selected_name else source
+                html.append(
+                    f"<div style='border:1px solid {relation_border};border-radius:8px;padding:7px 8px;"
+                    f"background:{relation_bg};margin:6px 0;'>"
+                    f"<span style='color:{muted};font-size:11px;'>{escape(relation_name)}</span><br>"
+                    f"<span style='color:{foreground};font-weight:700;'>{escape(other)}</span>"
+                    "</div>"
+                )
+        else:
+            html.append(
+                "<p style='margin-top:0;'>当前画布显示合并知识库的高连接核心子图。点击节点可查看关联关系，搜索框可按节点、类型或关系过滤。</p>"
+            )
+            html.append(
+                "<div style='display:grid;grid-template-columns:repeat(2,1fr);gap:7px;'>"
+                + self._graph_detail_card("总实体", str(total_nodes), f"可见 {len(visible_nodes)}")
+                + self._graph_detail_card("总关系", str(total_relations), f"可见 {len(visible_relations)}")
+                + "</div>"
+            )
+            if type_counts:
+                html.append("<h4>节点类型</h4>")
+                for entity_type, count in sorted(type_counts.items(), key=lambda item: (-item[1], item[0]))[:8]:
+                    color = self.graph_view._type_color(entity_type).name()
+                    html.append(
+                        f"<div style='display:flex;align-items:center;gap:7px;margin:5px 0;color:{foreground};'>"
+                        f"<span style='display:inline-block;width:8px;height:8px;border-radius:4px;background:{color};'></span>"
+                        f"<span>{escape(entity_type)}</span>"
+                        f"<span style='margin-left:auto;color:{muted};'>{count}</span>"
+                        "</div>"
+                    )
+            if relation_counts:
+                html.append("<h4>关系类型</h4>")
+                for relation_name, count in sorted(relation_counts.items(), key=lambda item: (-item[1], item[0]))[:8]:
+                    html.append(
+                        f"<div style='border:1px solid {relation_border};border-radius:8px;padding:6px 8px;"
+                        f"background:{relation_bg};margin:5px 0;color:{foreground};'>"
+                        f"{escape(relation_name)}"
+                        f"<span style='float:right;color:{muted};'>{count}</span>"
+                        "</div>"
+                    )
+        self.graph_detail_browser.setHtml("".join(html))
 
     def _update_status_pills(self, status: dict[str, Any]) -> None:
         ready = bool(status.get("ready"))
@@ -1044,7 +1497,7 @@ class KnowledgeWidget(QWidget):
         self.document_table.setRowCount(len(rows))
         if not rows:
             self.document_stack.setCurrentIndex(0)
-            self.document_stack.setMaximumHeight(170)
+            self.document_stack.setMaximumHeight(132)
             self.document_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             return
         self.document_stack.setCurrentIndex(1)

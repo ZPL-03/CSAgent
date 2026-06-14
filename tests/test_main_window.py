@@ -368,7 +368,7 @@ def test_main_window_routes_runtime_events_to_logs_without_chat_noise(monkeypatc
         assert window.chat_widget.toPlainText() == before_chat
         assert window.runtime_agent_states["ORCHESTRATOR"] == "active"
         assert window.flow_dag_widget.agent_states["ORCHESTRATOR"] == "active"
-        assert window.flow_dag_widget.stage_text == "运行中 · parse_task"
+        assert window.flow_dag_widget.stage_text == "运行中 · 任务解析中"
 
         event["payload"]["runtime_event_type"] = "node_completed"
         window._handle_message("FLOW", "节点完成：parse_task", event)
@@ -504,6 +504,51 @@ def test_visible_workbench_buttons_keep_text_inside_layout(monkeypatch) -> None:
         app.processEvents()
 
 
+def test_shell_pages_keep_major_regions_inside_window_across_themes(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+
+    def assert_inside_window(widget) -> None:
+        window_rect = window.rect().adjusted(-2, -2, 2, 2)
+        top_left = widget.mapTo(window, widget.rect().topLeft())
+        bottom_right = widget.mapTo(window, widget.rect().bottomRight())
+        assert widget.width() > 0
+        assert widget.height() > 0
+        assert window_rect.contains(top_left), (widget.objectName(), top_left, window_rect)
+        assert window_rect.contains(bottom_right), (widget.objectName(), bottom_right, window_rect)
+
+    try:
+        window.resize(1680, 980)
+        window.show()
+        app.processEvents()
+
+        for theme in ["dark", "light"]:
+            window.locale.set_theme(theme)
+            window._apply_styles()
+            for index in range(len(window.nav_buttons)):
+                window._switch_workspace_page(index)
+                app.processEvents()
+
+                assert_inside_window(window.main_splitter)
+                assert_inside_window(window.left_stack)
+                assert_inside_window(window.stack)
+                assert_inside_window(window.right_stack)
+                assert_inside_window(window.model_status_label)
+
+                left_width, center_width, right_width = window.main_splitter.sizes()
+                assert 240 <= left_width <= 330
+                assert center_width >= 820
+                assert 300 <= right_width <= 460
+
+                assert window.stack.currentWidget().sizeHint().width() >= 0
+                assert window.left_stack.currentWidget().sizeHint().width() >= 0
+                assert window.right_stack.currentWidget().sizeHint().width() >= 0
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_flow_dag_knowledge_node_has_even_spacing_and_stays_inside_panel() -> None:
     app = _app()
     widget = FlowDagWidget()
@@ -601,7 +646,7 @@ def test_chat_bubble_width_tracks_rendered_text_width() -> None:
         app.processEvents()
 
 
-def test_chat_dynamic_messages_scroll_to_latest_without_tail_spacer() -> None:
+def test_chat_dynamic_messages_scroll_to_latest_with_bottom_spacer() -> None:
     app = _app()
     widget = ChatWidget()
     try:
@@ -614,8 +659,10 @@ def test_chat_dynamic_messages_scroll_to_latest_without_tail_spacer() -> None:
             app.processEvents()
 
         layout = widget.content_layout
-        assert layout.count() == 12
-        assert layout.itemAt(layout.count() - 1).widget() is not None
+        assert layout.count() == 13
+        for index in range(12):
+            assert layout.itemAt(index).widget() is not None
+        assert layout.itemAt(layout.count() - 1).widget() is None
         assert widget.scroll_area.verticalScrollBar().value() == widget.scroll_area.verticalScrollBar().maximum()
     finally:
         widget.close()

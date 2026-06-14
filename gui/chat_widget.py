@@ -257,6 +257,7 @@ class ChatWidget(QWidget):
         palette = self._palette()
         role = self._role(sender)
         row = QWidget()
+        row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
         row_layout.setSpacing(10)
@@ -277,6 +278,7 @@ class ChatWidget(QWidget):
 
         row_layout.addWidget(self._avatar_label(self._avatar(sender), palette["avatar_bg"], palette["avatar_text"]), 0, Qt.AlignmentFlag.AlignTop)
         column = QWidget()
+        column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         column_layout = QVBoxLayout(column)
         column_layout.setContentsMargins(0, 0, 0, 0)
         column_layout.setSpacing(5)
@@ -391,6 +393,7 @@ class ChatWidget(QWidget):
             return
         for sender, message in self._messages:
             self.content_layout.addWidget(self._message_widget(sender, message))
+        self.content_layout.addStretch(1)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

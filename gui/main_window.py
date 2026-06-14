@@ -818,17 +818,68 @@ class MainWindow(QMainWindow):
         )
 
     def _build_settings_left_page(self) -> QWidget:
-        return self._sidebar_page(
-            "设置 · SETTINGS",
-            [
-                ("模型与 API", ".env / llm_config.yaml"),
-                ("求解器集成", "ABAQUS 路径与工作目录"),
-                ("智能体编排", "LangGraph / HITL / SQLite"),
-                ("知识库 / RAG", "top_k / 图谱增强 / 溯源"),
-                ("通知与日志", "运行审计与异常记录"),
-            ],
-            "运行事实源：本项目配置与数据",
-        )
+        page = QWidget()
+        page.setObjectName("agentRail")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(9)
+
+        header = QLabel("设置 · SETTINGS")
+        header.setObjectName("sectionTitle")
+        layout.addWidget(header)
+
+        self.settings_sidebar_labels: dict[str, QLabel] = {}
+        for key, title, body in [
+            ("llm", "模型与 API", "主模型 / 回退模型 / 温度"),
+            ("solver", "求解器集成", "ABAQUS 命令 / 用户子程序"),
+            ("workflow", "智能体编排", "确认节点 / 运行快照"),
+            ("knowledge", "知识库 / RAG", "top_k / 分块 / 向量索引"),
+            ("ui", "界面偏好", "语言 / 主题 / 本地偏好"),
+            ("files", "配置文件", "YAML 配置与 .env 密钥隔离"),
+        ]:
+            card = QLabel(f"<b>{title}</b><br>{body}")
+            card.setObjectName("agentCard")
+            card.setWordWrap(True)
+            card.setProperty("state", "waiting")
+            card.setMinimumHeight(66)
+            layout.addWidget(card)
+            self.settings_sidebar_labels[key] = card
+
+        layout.addStretch(1)
+        footer = QLabel("运行事实源为本项目 YAML 配置、.env 环境变量和本地运行数据；GUI 不显示密钥正文。")
+        footer.setObjectName("statusLabel")
+        footer.setWordWrap(True)
+        layout.addWidget(footer)
+        return page
+
+    def _refresh_settings_sidebar(self) -> None:
+        labels = getattr(self, "settings_sidebar_labels", None)
+        if not labels:
+            return
+        app_config = load_app_config()
+        llm_config = load_llm_config()
+        backends = llm_config.get("backends") if isinstance(llm_config.get("backends"), list) else []
+        primary = backends[0] if backends else {}
+        fallback = backends[1] if len(backends) > 1 else {}
+        abaqus = app_config.get("abaqus") if isinstance(app_config.get("abaqus"), dict) else {}
+        pipeline = app_config.get("pipeline") if isinstance(app_config.get("pipeline"), dict) else {}
+        ratio = pipeline.get("candidate_source_ratio") if isinstance(pipeline.get("candidate_source_ratio"), dict) else {}
+        knowledge = app_config.get("project_knowledge") if isinstance(app_config.get("project_knowledge"), dict) else {}
+        conversation = app_config.get("conversation") if isinstance(app_config.get("conversation"), dict) else {}
+        confirm_steps = conversation.get("confirmation_steps", [])
+        confirm_count = len(confirm_steps) if isinstance(confirm_steps, list) else 0
+        values = {
+            "llm": ("模型与 API", f"{primary.get('model') or primary.get('model_env') or '-'} / {fallback.get('model') or fallback.get('model_env') or '-'}"),
+            "solver": ("求解器集成", f"{abaqus.get('command') or 'abaqus'} · 用户子程序 {'启用' if abaqus.get('use_user_subroutine') else '关闭'}"),
+            "workflow": ("智能体编排", f"确认节点 {confirm_count} 个 · 随机种子 {pipeline.get('random_seed', '-')}"),
+            "knowledge": ("知识库 / RAG", f"top_k {knowledge.get('top_k', '-')} / KG {knowledge.get('kg_top_k', '-')} · chunk {knowledge.get('chunk_token_size', '-')}"),
+            "ui": ("界面偏好", f"{self.locale.language} · {self.locale.theme}"),
+            "files": ("配置文件", "config/app_config.yaml · config/llm_config.yaml · .env"),
+        }
+        for key, (title, body) in values.items():
+            label = labels.get(key)
+            if label is not None:
+                label.setText(f"<b>{title}</b><br>{body}")
 
     def _build_project_right_page(self) -> QWidget:
         return self._right_page(
@@ -944,7 +995,14 @@ class MainWindow(QMainWindow):
         for key, (primary_text, secondary) in cards.items():
             label = labels.get(key)
             if label is not None:
-                label.setText(f"<b>{primary_text}</b><br>{secondary}")
+                state_color = "#34d399"
+                if key in {"primary", "fallback"} and "0/" in secondary:
+                    state_color = "#f59e0b"
+                label.setText(
+                    f"<span style='color:{state_color};font-size:15px;'>●</span> "
+                    f"<b>{primary_text}</b><br>{secondary}"
+                )
+        self._refresh_settings_sidebar()
 
     def _switch_workspace_page(self, index: int) -> None:
         button = self.nav_group.button(index)
@@ -958,6 +1016,9 @@ class MainWindow(QMainWindow):
             self._refresh_knowledge_sidebar()
         if index == 3:
             self.monitor_dashboard_widget.refresh()
+        if index == 4:
+            self._refresh_settings_sidebar()
+            self._refresh_settings_health_panel()
 
     def _build_settings_page(self) -> QWidget:
         page = QWidget()
@@ -1283,6 +1344,7 @@ class MainWindow(QMainWindow):
             self._set_settings_value(key, value)
         self.settings_status_label.setText("配置已从本项目 YAML 文件重新载入。")
         self._refresh_settings_health_panel()
+        self._refresh_settings_sidebar()
 
     def _save_settings_from_page(self) -> None:
         app_config = load_app_config()
@@ -1356,6 +1418,7 @@ class MainWindow(QMainWindow):
         load_llm_config.cache_clear()
         self.settings_status_label.setText("设置已保存，新启动的流程会读取当前配置。")
         self._refresh_settings_health_panel()
+        self._refresh_settings_sidebar()
 
     def _build_monitor_page(self) -> QWidget:
         page = QWidget()
@@ -1645,6 +1708,7 @@ class MainWindow(QMainWindow):
         passed_count = sum(1 for result in self.session.results_by_session_id.values() if result.get("verdict") == "通过")
         candidate_pool_target = requested_candidate_pool_size(self.session.task) if self.session.task else 0
         requested_top_k = requested_screen_top_k(self.session.task) if self.session.task else 0
+        stage_display = self._display_stage(self.session.stage or "idle")
         def metric_html(label: str, value: str) -> str:
             light_theme = resolve_theme(self.locale.theme) == "light"
             value_color = "#172033" if light_theme else "#e5edf7"
@@ -1657,7 +1721,7 @@ class MainWindow(QMainWindow):
             )
 
         if self.locale.language == "en":
-            self.stage_card.setText(metric_html("Stage", self.session.stage or "idle"))
+            self.stage_card.setText(metric_html("Stage", stage_display))
             self.candidate_card.setText(
                 metric_html("Candidate Pool", f"{generated_count} / {candidate_pool_target}")
                 if self.session.task
@@ -1670,7 +1734,7 @@ class MainWindow(QMainWindow):
             )
             self.pass_card.setText(metric_html("Passed", str(passed_count)))
         else:
-            self.stage_card.setText(metric_html("当前阶段", self.session.stage or "idle"))
+            self.stage_card.setText(metric_html("当前阶段", stage_display))
             self.candidate_card.setText(
                 metric_html("候选池", f"{generated_count} / {candidate_pool_target}")
                 if self.session.task
@@ -1683,6 +1747,63 @@ class MainWindow(QMainWindow):
             )
             self.pass_card.setText(metric_html("通过", str(passed_count)))
         self._update_runtime_panel()
+
+    def _display_stage(self, stage: str | None) -> str:
+        value = str(stage or "idle")
+        zh = {
+            "idle": "等待输入",
+            "parsing": "任务解析中",
+            "generate_candidates": "候选生成中",
+            "candidate_generation_started": "候选生成中",
+            "awaiting_screen_confirmation": "等待初筛确认",
+            "screen_candidates": "代理初筛中",
+            "screen_candidates_failed": "初筛失败",
+            "awaiting_fem_confirmation": "等待 FEM 确认",
+            "evaluate_candidates": "有限元校核中",
+            "evaluate_candidates_failed": "有限元失败",
+            "persist_knowledge": "知识回流中",
+            "persist_knowledge_failed": "知识回流失败",
+            "awaiting_report_confirmation": "等待报告确认",
+            "generate_report": "报告生成中",
+            "generate_report_failed": "报告失败",
+            "completed": "已完成",
+            "failed": "失败",
+        }
+        en = {
+            "idle": "Idle",
+            "parsing": "Parsing",
+            "generate_candidates": "Generating",
+            "candidate_generation_started": "Generating",
+            "awaiting_screen_confirmation": "Await screening",
+            "screen_candidates": "Screening",
+            "screen_candidates_failed": "Screening failed",
+            "awaiting_fem_confirmation": "Await FEM",
+            "evaluate_candidates": "FEM running",
+            "evaluate_candidates_failed": "FEM failed",
+            "persist_knowledge": "Persisting knowledge",
+            "persist_knowledge_failed": "Knowledge failed",
+            "awaiting_report_confirmation": "Await report",
+            "generate_report": "Reporting",
+            "generate_report_failed": "Report failed",
+            "completed": "Completed",
+            "failed": "Failed",
+        }
+        mapping = en if self.locale.language == "en" else zh
+        if value in mapping:
+            return mapping[value]
+        if value.startswith("parse_task"):
+            return en["parsing"] if self.locale.language == "en" else zh["parsing"]
+        if value.startswith("generate_candidates"):
+            return en["generate_candidates"] if self.locale.language == "en" else zh["generate_candidates"]
+        if value.startswith("screen_candidates"):
+            return en["screen_candidates"] if self.locale.language == "en" else zh["screen_candidates"]
+        if value.startswith("evaluate_candidates"):
+            return en["evaluate_candidates"] if self.locale.language == "en" else zh["evaluate_candidates"]
+        if value.startswith("persist_knowledge"):
+            return en["persist_knowledge"] if self.locale.language == "en" else zh["persist_knowledge"]
+        if value.startswith("generate_report"):
+            return en["generate_report"] if self.locale.language == "en" else zh["generate_report"]
+        return value.replace("_", " ")
 
     def _stage_progress(self) -> int:
         if not self.session.task:
@@ -1825,7 +1946,7 @@ class MainWindow(QMainWindow):
             self.queue_label.setText(
                 self.locale.text("queue.progress", percent=percent)
                 + "\n"
-                + self.locale.text("queue.stage", stage=self.session.stage or "idle")
+                + self.locale.text("queue.stage", stage=self._display_stage(self.session.stage or "idle"))
             )
         else:
             self.queue_label.setText(self.locale.text("queue.idle"))
@@ -1842,7 +1963,7 @@ class MainWindow(QMainWindow):
             + f"Chunks {knowledge_payload.get('rag_chunk_count', 0)} · "
             + f"Relations {knowledge_payload.get('kg_relation_count', 0)}"
         )
-        active_stage = self.runtime_stage_text or self.session.stage
+        active_stage = self._display_stage(self.runtime_stage_text or self.session.stage)
         stage_text = (
             f"{self.locale.text('agent.active')} · {active_stage}"
             if self.session.task or self.runtime_stage_text
@@ -1976,6 +2097,7 @@ class MainWindow(QMainWindow):
         self._refresh_knowledge_sidebar()
         self._refresh_live_view()
         self._update_overview_cards()
+        self._sync_status_label_with_session()
 
     def _refresh_design_views(self) -> None:
         self.task_browser.setHtml(self._task_summary_html())
@@ -1998,6 +2120,13 @@ class MainWindow(QMainWindow):
         self._refresh_knowledge_sidebar()
         self._refresh_live_view()
         self._update_overview_cards()
+        self._sync_status_label_with_session()
+
+    def _sync_status_label_with_session(self) -> None:
+        if not self.session.task:
+            self.status_label.setText(self.locale.text("status.waiting"))
+            return
+        self.status_label.setText(self.locale.text("queue.stage", stage=self._display_stage(self.session.stage)))
 
     def _refresh_live_view(self) -> None:
         results = list(self.session.results_by_session_id.values())
