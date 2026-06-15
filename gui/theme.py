@@ -573,6 +573,13 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         font-weight: 600;
         padding: 0 4px;
     }}
+    QLabel#graphSubTitle {{
+        background: transparent;
+        color: {color["muted"]};
+        font-size: 12px;
+        font-weight: 800;
+        padding: 4px 2px 0 2px;
+    }}
     QLineEdit#graphSearchInput {{
         min-height: 34px;
         padding: 5px 10px;
@@ -598,6 +605,22 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
     QComboBox#graphFilterCombo:hover {{
         background: {color["button_hover"]};
         border-color: {color["accent"]};
+    }}
+    QPushButton#graphChipButton {{
+        background-color: {color["surface"]};
+        border: 1px solid {color["border_soft"]};
+        color: {color["text"]};
+        border-radius: 8px;
+        min-height: 26px;
+        padding: 3px 8px;
+        font-size: 11px;
+        font-weight: 700;
+        text-align: left;
+    }}
+    QPushButton#graphChipButton:hover, QPushButton#graphChipButton:checked {{
+        background-color: {color["accent_soft"]};
+        border-color: {color["accent"]};
+        color: {color["text"]};
     }}
     QPushButton[variant="link"] {{
         background: transparent;

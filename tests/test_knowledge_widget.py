@@ -151,6 +151,8 @@ def test_knowledge_widget_renders_runtime_pipeline_and_evidence(monkeypatch, tmp
         assert widget.graph_label_button.isChecked() is True
         assert widget.graph_type_filter.count() >= 2
         assert widget.graph_relation_filter.count() >= 2
+        assert widget.graph_type_chip_buttons
+        assert widget.graph_relation_chip_buttons
         assert widget.pipeline_widget.minimumHeight() >= 230
     finally:
         widget.close()
@@ -200,6 +202,14 @@ def test_knowledge_widget_graph_search_filters_visible_graph(monkeypatch, tmp_pa
         nodes, relations, _total_nodes, _total_relations = widget.graph_view._node_payload()
         assert {name for name, _type in nodes} == {"Initial Imperfection", "Buckling"}
         assert len(relations) == 1
+        assert any(button.isChecked() for button in widget.graph_type_chip_buttons)
+
+        widget.graph_type_filter.setCurrentIndex(0)
+        app.processEvents()
+        relation_chip = next(button for button in widget.graph_relation_chip_buttons if "CO_OCCURS_WITH" in button.toolTip())
+        relation_chip.setChecked(True)
+        app.processEvents()
+        assert widget.graph_view.active_relation_types == {"CO_OCCURS_WITH"}
         assert "图谱审计" in widget.graph_detail_browser.toHtml()
         assert "总实体" in widget.graph_detail_browser.toHtml()
 

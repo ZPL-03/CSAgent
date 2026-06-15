@@ -14,6 +14,7 @@ from PyQt6.QtCore import QLineF, QObject, QPointF, QRectF, QSize, QThread, Qt, p
 from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPolygonF, QRadialGradient
 from PyQt6.QtWidgets import (
     QFileDialog,
+    QGridLayout,
     QHeaderView,
     QHBoxLayout,
     QLabel,
@@ -40,6 +41,71 @@ from gui.workbench_widgets import PipelineStatusWidget, StatusPill
 
 
 DEFAULT_EVIDENCE_QUERY = "复合材料外压圆柱耐压壳 外部静水压力 线性屈曲 极限压力 初始缺陷 制造质量控制"
+
+
+class GraphChipButton(QPushButton):
+    """知识图谱筛选 chip，自绘以避免平台原生按钮样式干扰。"""
+
+    def __init__(self, value: str, count: int, accent_color: str, theme: str) -> None:
+        super().__init__()
+        self.value = value
+        self.count = count
+        self.accent_color = QColor(accent_color)
+        self.theme = resolve_theme(theme)
+        self.setCheckable(True)
+        self.setMinimumHeight(28)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def set_theme(self, theme: str) -> None:
+        self.theme = resolve_theme(theme)
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        if self.theme == "light":
+            fill = QColor("#ffffff")
+            hover_fill = QColor("#eef5ff")
+            active_fill = QColor("#eaf2ff")
+            border = QColor("#c8d2df")
+            text = QColor("#172033")
+            muted = QColor("#64748b")
+        else:
+            fill = QColor("#111a28")
+            hover_fill = QColor("#162237")
+            active_fill = QColor("#18243a")
+            border = QColor("#2b3a52")
+            text = QColor("#dbe4ef")
+            muted = QColor("#94a3b8")
+        active = self.isChecked()
+        rect = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        painter.setBrush(QBrush(active_fill if active else (hover_fill if self.underMouse() else fill)))
+        painter.setPen(QPen(self.accent_color if active or self.underMouse() else border, 1.0))
+        painter.drawRoundedRect(rect, 8, 8)
+
+        dot = QColor(self.accent_color)
+        dot.setAlpha(255 if active or self.underMouse() else 210)
+        painter.setBrush(QBrush(dot))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QPointF(12.5, rect.center().y()), 3.7, 3.7)
+
+        font = QFont(self.font())
+        font.setPointSize(8)
+        font.setBold(True)
+        painter.setFont(font)
+        metrics = QFontMetrics(font)
+        count_text = str(self.count)
+        count_width = max(18, metrics.horizontalAdvance(count_text) + 8)
+        label_width = max(28, int(rect.width() - count_width - 34))
+        label = metrics.elidedText(self.value, Qt.TextElideMode.ElideRight, label_width)
+        painter.setPen(text)
+        painter.drawText(QRectF(22, 0, label_width, self.height()), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, label)
+        painter.setPen(muted)
+        painter.drawText(
+            QRectF(self.width() - count_width - 7, 0, count_width, self.height()),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
+            count_text,
+        )
 
 
 class KnowledgeGraphView(QWidget):
@@ -475,7 +541,7 @@ class KnowledgeGraphView(QWidget):
         height = max(1.0, max_y - min_y)
         available_width = max(1.0, graph_rect.width() - padding * 2.0)
         available_height = max(1.0, graph_rect.height() - padding * 2.0)
-        factor = min(1.0, available_width / width, available_height / height)
+        factor = min(2.15, available_width / width, available_height / height)
         current_center = QPointF((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
         target_center = graph_rect.center()
         fitted: dict[str, QPointF] = {}
@@ -485,6 +551,75 @@ class KnowledgeGraphView(QWidget):
                 target_center.y() + (point.y() - current_center.y()) * factor,
             )
         return fitted
+
+    def _component_groups(
+        self,
+        visible_nodes: list[tuple[str, str]],
+        visible_relations: list[dict[str, Any]],
+    ) -> list[list[str]]:
+        node_names = {name for name, _entity_type in visible_nodes}
+        adjacency: dict[str, set[str]] = {name: set() for name in node_names}
+        for relation in visible_relations:
+            source = str(relation.get("source") or "").strip()
+            target = str(relation.get("target") or "").strip()
+            if source in adjacency and target in adjacency:
+                adjacency[source].add(target)
+                adjacency[target].add(source)
+        groups: list[list[str]] = []
+        seen: set[str] = set()
+        for name in sorted(node_names):
+            if name in seen:
+                continue
+            stack = [name]
+            seen.add(name)
+            group: list[str] = []
+            while stack:
+                current = stack.pop()
+                group.append(current)
+                for neighbor in sorted(adjacency.get(current, set())):
+                    if neighbor not in seen:
+                        seen.add(neighbor)
+                        stack.append(neighbor)
+            groups.append(group)
+        return sorted(groups, key=lambda item: (-len(item), item[0] if item else ""))
+
+    def _draw_component_halos(
+        self,
+        painter: QPainter,
+        groups: list[list[str]],
+        positions: dict[str, QPointF],
+        visible_nodes: list[tuple[str, str]],
+        graph_rect: QRectF,
+        colors: dict[str, QColor],
+    ) -> None:
+        type_by_name = {name: entity_type for name, entity_type in visible_nodes}
+        painter.save()
+        for group_index, group in enumerate(groups[:6]):
+            group_points = [positions[name] for name in group if name in positions]
+            if len(group_points) < 2:
+                continue
+            min_x = min(point.x() for point in group_points)
+            max_x = max(point.x() for point in group_points)
+            min_y = min(point.y() for point in group_points)
+            max_y = max(point.y() for point in group_points)
+            halo_rect = QRectF(min_x, min_y, max_x - min_x, max_y - min_y).adjusted(-34, -28, 34, 30)
+            halo_rect = halo_rect.intersected(graph_rect.adjusted(4, 4, -4, -4))
+            if halo_rect.width() < 34 or halo_rect.height() < 28:
+                continue
+            type_counts: dict[str, int] = {}
+            for name in group:
+                entity_type = type_by_name.get(name, "Entity")
+                type_counts[entity_type] = type_counts.get(entity_type, 0) + 1
+            dominant_type = sorted(type_counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
+            accent = self._type_color(dominant_type)
+            fill = QColor(accent)
+            fill.setAlpha(16 if self.theme == "light" else 18)
+            pen_color = QColor(accent)
+            pen_color.setAlpha(60 if group_index == 0 else 38)
+            painter.setBrush(QBrush(fill))
+            painter.setPen(QPen(pen_color, 1.0))
+            painter.drawRoundedRect(halo_rect, 18, 18)
+        painter.restore()
 
     def _draw_grid(self, painter: QPainter, rect: QRectF, color: QColor) -> None:
         painter.save()
@@ -744,6 +879,14 @@ class KnowledgeGraphView(QWidget):
         self._last_node_positions = positions
         degrees = self._visible_degrees(visible_relations)
         counts = self._entity_counts()
+        self._draw_component_halos(
+            painter,
+            self._component_groups(visible_nodes, visible_relations),
+            positions,
+            visible_nodes,
+            graph_rect,
+            colors,
+        )
 
         highlighted = {
             (
@@ -1090,6 +1233,10 @@ class KnowledgeWidget(QWidget):
         self.graph_detail_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.graph_detail_browser.setMinimumWidth(300)
         self.graph_detail_browser.setMinimumHeight(260)
+        self.graph_type_chip_layout: QGridLayout | None = None
+        self.graph_relation_chip_layout: QGridLayout | None = None
+        self.graph_type_chip_buttons: list[QPushButton] = []
+        self.graph_relation_chip_buttons: list[QPushButton] = []
         self.evidence_browser = QTextBrowser()
         self.evidence_browser.setOpenExternalLinks(True)
         self.evidence_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -1182,12 +1329,26 @@ class KnowledgeWidget(QWidget):
         graph_tools_label.setObjectName("sectionTitle")
         graph_side_layout.addWidget(graph_tools_label)
         graph_side_layout.addWidget(self.graph_search_input)
-        graph_filter_layout = QHBoxLayout()
-        graph_filter_layout.setContentsMargins(0, 0, 0, 0)
-        graph_filter_layout.setSpacing(8)
-        graph_filter_layout.addWidget(self.graph_type_filter, 1)
-        graph_filter_layout.addWidget(self.graph_relation_filter, 1)
-        graph_side_layout.addLayout(graph_filter_layout)
+        self.graph_type_filter.setVisible(False)
+        self.graph_relation_filter.setVisible(False)
+        type_label = QLabel("节点类型")
+        type_label.setObjectName("graphSubTitle")
+        graph_side_layout.addWidget(type_label)
+        type_chip_widget = QWidget()
+        self.graph_type_chip_layout = QGridLayout(type_chip_widget)
+        self.graph_type_chip_layout.setContentsMargins(0, 0, 0, 0)
+        self.graph_type_chip_layout.setHorizontalSpacing(6)
+        self.graph_type_chip_layout.setVerticalSpacing(6)
+        graph_side_layout.addWidget(type_chip_widget)
+        relation_label = QLabel("关系类型")
+        relation_label.setObjectName("graphSubTitle")
+        graph_side_layout.addWidget(relation_label)
+        relation_chip_widget = QWidget()
+        self.graph_relation_chip_layout = QGridLayout(relation_chip_widget)
+        self.graph_relation_chip_layout.setContentsMargins(0, 0, 0, 0)
+        self.graph_relation_chip_layout.setHorizontalSpacing(6)
+        self.graph_relation_chip_layout.setVerticalSpacing(6)
+        graph_side_layout.addWidget(relation_chip_widget)
         graph_button_layout = QHBoxLayout()
         graph_button_layout.setContentsMargins(0, 0, 0, 0)
         graph_button_layout.setSpacing(8)
@@ -1380,18 +1541,111 @@ class KnowledgeWidget(QWidget):
         combo.setCurrentIndex(index if index >= 0 else 0)
         combo.blockSignals(False)
 
+    def _clear_graph_chip_layout(self, layout: QGridLayout | None) -> None:
+        if layout is None:
+            return
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def _create_graph_chip(self, label: str, count: int, color: str, checked: bool, tooltip: str) -> GraphChipButton:
+        button = GraphChipButton(label, count, color, self.theme)
+        button.setObjectName("graphChipButton")
+        button.setChecked(checked)
+        button.setToolTip(tooltip)
+        return button
+
+    def _rebuild_graph_filter_chips(
+        self,
+        type_entries: list[tuple[str, int]],
+        relation_entries: list[tuple[str, int]],
+    ) -> None:
+        self._clear_graph_chip_layout(self.graph_type_chip_layout)
+        self._clear_graph_chip_layout(self.graph_relation_chip_layout)
+        self.graph_type_chip_buttons = []
+        self.graph_relation_chip_buttons = []
+
+        def add_chip(layout: QGridLayout | None, button: QPushButton, index: int) -> None:
+            if layout is None:
+                return
+            layout.addWidget(button, index // 2, index % 2)
+
+        for index, (name, count) in enumerate(type_entries[:8]):
+            color = self.graph_view._type_color(name).name()
+            checked = name in self.graph_view.active_node_types
+            button = self._create_graph_chip(name, count, color, checked, f"按节点类型过滤：{name}")
+            button.toggled.connect(lambda _checked: self._apply_graph_chip_filters())
+            self.graph_type_chip_buttons.append(button)
+            add_chip(self.graph_type_chip_layout, button, index)
+        for index, (name, count) in enumerate(relation_entries[:8]):
+            color = "#38bdf8" if self.theme != "light" else "#2563eb"
+            checked = name in self.graph_view.active_relation_types
+            button = self._create_graph_chip(name, count, color, checked, f"按关系类型过滤：{name}")
+            button.toggled.connect(lambda _checked: self._apply_graph_chip_filters())
+            self.graph_relation_chip_buttons.append(button)
+            add_chip(self.graph_relation_chip_layout, button, index)
+
     def _refresh_graph_filter_options(self) -> None:
         type_entries, relation_entries = self.graph_view.filter_options()
         current_type = str(self.graph_type_filter.currentData() or "")
         current_relation = str(self.graph_relation_filter.currentData() or "")
         self._populate_graph_filter_combo(self.graph_type_filter, "全部节点类型", type_entries, current_type)
         self._populate_graph_filter_combo(self.graph_relation_filter, "全部关系类型", relation_entries, current_relation)
+        self._rebuild_graph_filter_chips(type_entries, relation_entries)
+
+    def _sync_graph_combos_from_filters(self) -> None:
+        type_value = next(iter(self.graph_view.active_node_types), "") if len(self.graph_view.active_node_types) == 1 else ""
+        relation_value = (
+            next(iter(self.graph_view.active_relation_types), "") if len(self.graph_view.active_relation_types) == 1 else ""
+        )
+        for combo, value in [(self.graph_type_filter, type_value), (self.graph_relation_filter, relation_value)]:
+            combo.blockSignals(True)
+            index = combo.findData(value)
+            combo.setCurrentIndex(index if index >= 0 else 0)
+            combo.blockSignals(False)
+
+    def _sync_graph_chips_from_filters(self) -> None:
+        for button in self.graph_type_chip_buttons:
+            value = getattr(button, "value", button.toolTip().replace("按节点类型过滤：", ""))
+            button.blockSignals(True)
+            button.setChecked(value in self.graph_view.active_node_types)
+            if isinstance(button, GraphChipButton):
+                button.set_theme(self.theme)
+            button.blockSignals(False)
+        relation_color = "#38bdf8" if self.theme != "light" else "#2563eb"
+        for button in self.graph_relation_chip_buttons:
+            value = getattr(button, "value", button.toolTip().replace("按关系类型过滤：", ""))
+            button.blockSignals(True)
+            button.setChecked(value in self.graph_view.active_relation_types)
+            if isinstance(button, GraphChipButton):
+                button.accent_color = QColor(relation_color)
+                button.set_theme(self.theme)
+            button.blockSignals(False)
+
+    def _apply_graph_chip_filters(self) -> None:
+        node_types = {
+            getattr(button, "value", button.toolTip().replace("按节点类型过滤：", ""))
+            for button in self.graph_type_chip_buttons
+            if button.isChecked()
+        }
+        relation_types = {
+            getattr(button, "value", button.toolTip().replace("按关系类型过滤：", ""))
+            for button in self.graph_relation_chip_buttons
+            if button.isChecked()
+        }
+        self.graph_view.set_type_filter(node_types)
+        self.graph_view.set_relation_filter(relation_types)
+        self._sync_graph_combos_from_filters()
+        self._update_graph_detail("")
 
     def _apply_graph_filters_from_controls(self) -> None:
         node_type = str(self.graph_type_filter.currentData() or "")
         relation_type = str(self.graph_relation_filter.currentData() or "")
         self.graph_view.set_type_filter({node_type} if node_type else set())
         self.graph_view.set_relation_filter({relation_type} if relation_type else set())
+        self._sync_graph_chips_from_filters()
         self._update_graph_detail("")
 
     def _on_ingest_progress(self, steps: list) -> None:
