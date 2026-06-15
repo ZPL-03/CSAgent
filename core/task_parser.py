@@ -60,6 +60,7 @@ class TaskParser:
             r"(?:外压|外部压力|静水压力|压力|p)\s*(?:为|是|=|:|：)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:MPa|兆帕)",
             r"([0-9]+(?:\.[0-9]+)?)\s*(?:MPa|兆帕)\s*(?:外压|外部压力|静水压力|压力)",
             r"(?:external\s+pressure|hydrostatic\s+pressure|pressure)\s*(?:=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*MPa",
+            r"([0-9]+(?:\.[0-9]+)?)\s*MPa\s*(?:external\s+pressure|hydrostatic\s+pressure)",
         ]
         for pattern in patterns:
             value = self._extract_float(pattern, text)
@@ -185,9 +186,10 @@ class TaskParser:
 
     def _ultimate_pressure_target_value(self, text: str) -> float | None:
         patterns = [
-            r"(?:极限压力|极限强度|失效压力|承压|耐压|P_?ult)\s*(?:不低于|至少|>=|≥|为|是|=|:|：)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:MPa|兆帕)?",
+            r"(?:极限压力|极限强度|失效压力|承压|耐压|P_?ult)[^，。；,;\n]{0,24}?(?:不低于|不少于|不小于|至少|>=|≥|为|是|=|:|：)\s*([0-9]+(?:\.[0-9]+)?)\s*(?:MPa|兆帕)?",
+            r"(?:极限压力|极限强度|失效压力|承压|耐压|P_?ult)\s*(?:不低于|不少于|不小于|至少|>=|≥|为|是|=|:|：)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:MPa|兆帕)?",
             r"([0-9]+(?:\.[0-9]+)?)\s*(?:MPa|兆帕)\s*(?:以上|承压|耐压|极限压力|极限强度)",
-            r"(?:ultimate\s+pressure|failure\s+pressure|collapse\s+pressure|P_?ult)[^\n\r,;]{0,40}?(?:not\s+less\s+than|at\s+least|>=|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*MPa",
+            r"(?:ultimate\s+pressure|failure\s+pressure|collapse\s+pressure|P_?ult)[^\n\r,;]{0,40}?(?:not\s+less\s+than|no\s+less\s+than|at\s+least|not\s+below|>=|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*MPa",
             r"(?:ultimate\s+pressure|failure\s+pressure|collapse\s+pressure|P_?ult)\s*(?:>=|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*MPa",
         ]
         for pattern in patterns:
@@ -219,6 +221,7 @@ class TaskParser:
             r"(?:初筛保留|筛选后保留|初步保留)\s*([1-9][0-9]?)\s*(?:个)?(?:候选|样本|方案)?",
             r"(?:初筛数量|筛选数量|TopK|Top-K)\D{0,4}([1-9][0-9]?)",
             r"(?:初筛|筛选)\D{0,8}(?:Top[- ]?|TOP[- ]?|top[- ]?)\s*([1-9][0-9]?)",
+            r"(?:keep|retain|reserve)\s*([1-9][0-9]?)\s*(?:screened\s+)?(?:candidates|designs|samples)",
             r"(?:keep|retain|reserve)\s*([1-9][0-9]?)\s*(?:candidates|designs|samples)?\s*(?:after|following)\s*(?:screening|prescreening|pre[- ]?screening)",
             r"(?:screen|select|top[- ]?k|top)\D{0,8}([1-9][0-9]?)",
         ]

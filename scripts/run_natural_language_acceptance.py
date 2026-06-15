@@ -233,7 +233,7 @@ def _run_case(instruction: str, output_dir: Path, use_real_fem: bool) -> dict[st
 def _load_instructions(path: Path | None) -> list[str]:
     if path is None:
         return list(DEFAULT_INSTRUCTIONS)
-    payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = json.loads(path.read_text(encoding="utf-8-sig"))
     if isinstance(payload, list):
         return [str(item).strip() for item in payload if str(item).strip()]
     if isinstance(payload, dict) and isinstance(payload.get("instructions"), list):
