@@ -132,7 +132,7 @@ def _attach_deterministic_downstream(orchestrator: OrchestratorAgent, output_dir
             f"- FEM 验收结果：{len(results)} 个",
         ]
         markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        pdf_path.write_bytes(b"%PDF-1.4\n% CSAgent acceptance placeholder\n")
+        pdf_path.write_bytes(b"%PDF-1.4\n% CSAgent acceptance fixture\n")
         return {
             "markdown_path": str(markdown_path),
             "pdf_path": str(pdf_path),
