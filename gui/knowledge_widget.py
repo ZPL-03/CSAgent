@@ -199,21 +199,6 @@ class KnowledgeGraphView(QWidget):
         }
         return QColor(palette.get(entity_type, "#64748b"))
 
-    def _relation_color(self, relation_type: str) -> QColor:
-        palette = [
-            "#38bdf8",
-            "#34d399",
-            "#a78bfa",
-            "#f59e0b",
-            "#fb7185",
-            "#60a5fa",
-            "#22d3ee",
-            "#c084fc",
-        ]
-        text = str(relation_type or "RELATED_TO")
-        index = sum(ord(char) for char in text) % len(palette)
-        return QColor(palette[index])
-
     def _entity_counts(self) -> dict[str, int]:
         counts: dict[str, int] = {}
         for entity in self.entities:
@@ -316,7 +301,8 @@ class KnowledgeGraphView(QWidget):
                 str(relation.get("relation") or ""),
             )
         )
-        visible_relations = visible_relations[:76]
+        relation_limit = 76 if self.filter_text or self.active_node_types or self.active_relation_types else 20
+        visible_relations = visible_relations[:relation_limit]
         if visible_relations:
             connected_names: set[str] = set()
             for relation in visible_relations:
@@ -600,6 +586,7 @@ class KnowledgeGraphView(QWidget):
         target: QPointF,
         color: QColor,
         highlight: bool,
+        show_arrow: bool,
     ) -> None:
         line = QLineF(source, target)
         if line.length() < 2:
@@ -611,23 +598,24 @@ class KnowledgeGraphView(QWidget):
         curve = 18.0 if not highlight else 28.0
         control = QPointF((source.x() + target.x()) / 2.0 + normal.x() * curve, (source.y() + target.y()) / 2.0 + normal.y() * curve)
 
-        painter.setPen(QPen(color, 2.0 if highlight else 1.05, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.setPen(QPen(color, 2.0 if highlight else 0.72, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         path = QPainterPath(source)
         path.quadTo(control, target)
         painter.drawPath(path)
 
-        arrow_len = 7.0 if highlight else 5.6
-        angle = math.atan2(target.y() - control.y(), target.x() - control.x())
-        arrow = QPolygonF(
-            [
-                target,
-                QPointF(target.x() - arrow_len * math.cos(angle - 0.42), target.y() - arrow_len * math.sin(angle - 0.42)),
-                QPointF(target.x() - arrow_len * math.cos(angle + 0.42), target.y() - arrow_len * math.sin(angle + 0.42)),
-            ]
-        )
-        painter.setBrush(QBrush(color))
-        painter.setPen(Qt.PenStyle.NoPen)
-        painter.drawPolygon(arrow)
+        if show_arrow:
+            arrow_len = 7.0 if highlight else 5.6
+            angle = math.atan2(target.y() - control.y(), target.x() - control.x())
+            arrow = QPolygonF(
+                [
+                    target,
+                    QPointF(target.x() - arrow_len * math.cos(angle - 0.42), target.y() - arrow_len * math.sin(angle - 0.42)),
+                    QPointF(target.x() - arrow_len * math.cos(angle + 0.42), target.y() - arrow_len * math.sin(angle + 0.42)),
+                ]
+            )
+            painter.setBrush(QBrush(color))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawPolygon(arrow)
 
     def _draw_edge_label(
         self,
@@ -773,12 +761,12 @@ class KnowledgeGraphView(QWidget):
             key = (source, str(relation.get("relation") or ""), target)
             selected_edge = bool(self._selected_node_name and self._selected_node_name in {source, target})
             highlight = key in highlighted or selected_edge
-            edge_color = colors["highlight"] if highlight else self._relation_color(str(relation.get("relation") or "RELATED_TO"))
-            edge_color.setAlpha(218 if key in highlighted else (164 if selected_edge else 72))
+            edge_color = colors["highlight"] if highlight else colors["edge"]
+            edge_color.setAlpha(218 if key in highlighted else (164 if selected_edge else 28))
             source_radius = self._node_radius(source, degrees, counts) + 3.0
             target_radius = self._node_radius(target, degrees, counts) + 5.0
             edge_source, edge_target = self._trim_edge(positions[source], positions[target], source_radius, target_radius)
-            self._draw_edge(painter, edge_source, edge_target, edge_color, highlight)
+            self._draw_edge(painter, edge_source, edge_target, edge_color, highlight, show_arrow=highlight)
             if key in highlighted or selected_edge:
                 self._draw_edge_label(painter, edge_source, edge_target, str(relation.get("relation") or ""), graph_rect, colors)
 
@@ -786,12 +774,13 @@ class KnowledgeGraphView(QWidget):
         label_font.setPointSize(8)
         label_font.setBold(True)
         label_metrics = QFontMetrics(label_font)
+        label_budget = 4 if len(visible_nodes) > 24 else 6
         ranked_label_names = {
             name
             for name, _entity_type in sorted(
                 visible_nodes,
                 key=lambda item: (-self._node_weight(item[0], degrees, counts), item[1], item[0]),
-            )[:7]
+            )[:label_budget]
         }
         self._last_node_radii = {}
         occupied_label_rects: list[QRectF] = []

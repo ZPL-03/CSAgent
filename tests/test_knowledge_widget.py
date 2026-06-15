@@ -417,18 +417,27 @@ def test_knowledge_graph_view_default_layout_fits_canvas() -> None:
     graph = KnowledgeGraphView()
     try:
         graph.resize(680, 360)
-        entities = [{"name": f"Node {index}", "type": "Material" if index % 3 == 0 else "Structure"} for index in range(54)]
+        entities = [{"name": f"Node {index}", "type": "Material" if index % 3 == 0 else "Structure"} for index in range(50)]
         relations = [
             {
-                "source": f"Node {index}",
+                "source": f"Node {index % 50}",
                 "relation": "RELATED_TO" if index % 2 else "AFFECTS",
-                "target": f"Node {(index + 1) % 54}",
+                "target": f"Node {(index * 7 + 3) % 50}",
                 "source_type": "Material",
                 "target_type": "Structure",
             }
-            for index in range(54)
+            for index in range(90)
         ]
         graph.set_graph(entities=entities, relations=relations)
+        _nodes, visible_relations, _total_nodes, total_relations = graph._node_payload()
+        assert total_relations == 90
+        assert len(visible_relations) <= 20
+
+        graph.set_filter_text("Node")
+        _nodes, filtered_relations, _total_nodes, _total_relations = graph._node_payload()
+        assert len(filtered_relations) > len(visible_relations)
+        graph.set_filter_text("")
+
         graph.show()
         app.processEvents()
         graph.grab()
