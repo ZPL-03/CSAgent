@@ -523,6 +523,41 @@ def test_llm_candidate_table_without_material_or_imperfection_is_rejected(monkey
     assert candidates == []
 
 
+def test_llm_generation_failure_diagnostics_are_written_to_audit(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 4 个候选，初筛保留 2 个候选")
+    agent = CandidateGenAgent()
+    agent.llm_config["fallback"]["max_format_retries"] = 1
+
+    class Runtime:
+        name = "fake_primary"
+
+    class ControlledBackend:
+        json_output_tokens = 4096
+
+        def __init__(self):
+            self.backends = [Runtime()]
+            self.active_backend = self.backends[0]
+            self.last_call_trace = []
+
+        def chat(self, *_args, **_kwargs):
+            return "当前只能给出原则性建议，未列出完整候选参数。"
+
+    agent.llm_backend = ControlledBackend()
+    monkeypatch.setattr(agent, "_case_transfer_candidates", lambda task_payload, start_index, desired_count: [])
+
+    candidates = agent.run(task)
+    audit = candidates[0]["generation_audit"]
+
+    assert len(candidates) == 4
+    assert audit["added_counts"]["LLM"] == 0
+    assert audit["added_counts"]["DOE"] == 4
+    assert audit["llm_diagnostics"]
+    assert audit["llm_diagnostics"][0]["stage"] == "parse"
+    assert audit["llm_diagnostics"][0]["answer_char_count"] > 0
+    assert audit["filter_reasons"]["LLM"]
+
+
 def test_candidate_normalization_rejects_incomplete_source_geometry(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")

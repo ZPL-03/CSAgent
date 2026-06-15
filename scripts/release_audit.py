@@ -491,7 +491,10 @@ class ReleaseAudit:
         from PyQt6.QtGui import QColor
         from PyQt6.QtWidgets import QApplication, QLabel, QPushButton
 
-        from gui.main_window import MainWindow
+        from agents.screener import ScreenerAgent
+        from core.doe_sampler import DOESampler
+        from core.task_parser import TaskParser
+        from gui.main_window import MainWindow, PipelineSession
 
         app = QApplication.instance() or QApplication([])
         window = MainWindow()
@@ -556,6 +559,89 @@ class ReleaseAudit:
                 if len(errors) >= 12:
                     return
 
+        def build_runtime_session() -> PipelineSession:
+            instruction = "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
+            task = TaskParser().parse_instruction(instruction)
+            candidates = DOESampler().sample_candidates(task, n_samples=6, start_index=1, strict_solver_window=True)
+            screened = ScreenerAgent().run({"task": task, "candidates": candidates})
+            results_by_session_id = {}
+            knowledge_updates = []
+            for index, candidate in enumerate(screened, start=1):
+                formal_id = f"C{index}"
+                session_id = str(candidate.get("candidate_id") or f"TMP_{index}")
+                results_by_session_id[session_id] = {
+                    "candidate_id": formal_id,
+                    "display_name": formal_id,
+                    "session_candidate_id": session_id,
+                    "status": "success",
+                    "verdict": "通过",
+                    "linear_buckling_pressure_MPa": candidate.get("asme_linear_buckling_pressure_MPa") or 42.0,
+                    "ultimate_pressure_MPa": candidate.get("surrogate_ultimate_pressure_MPa") or 48.0,
+                    "failure_mode": "GUI 运行态审计样例",
+                    "visualization_path": "",
+                    "odb_path": "",
+                }
+                knowledge_updates.append(
+                    {
+                        "status": "stored",
+                        "case_id": f"CASE_UI_{index}",
+                        "candidate_id": formal_id,
+                        "session_candidate_id": session_id,
+                    }
+                )
+            return PipelineSession(
+                task=task,
+                workflow_run_id="RUN_UI_AUDIT",
+                instruction=instruction,
+                candidates=candidates,
+                screened_candidates=screened,
+                evaluated_candidates=screened,
+                results_by_session_id=results_by_session_id,
+                knowledge_updates=knowledge_updates,
+                report={
+                    "markdown_path": "data/results/ui_audit_report.md",
+                    "pdf_path": "data/results/ui_audit_report.pdf",
+                    "content": "# CSAgent 耐压壳设计报告\n\n运行态 GUI 审计样例。",
+                },
+                pending_confirmation="export_report",
+                stage="awaiting_report_confirmation",
+            )
+
+        def render_runtime_workbench(theme: str) -> None:
+            window._switch_workspace_page(0)
+            window._apply_session(build_runtime_session())
+            window.chat_widget.clear()
+            window.chat_widget.add_message(
+                "USER",
+                "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选",
+            )
+            window.chat_widget.add_message(
+                "ORCHESTRATOR",
+                "已解析任务并建立候选池、初筛目标和人工确认节点，后续数值校核由确定性工程逻辑推进。",
+            )
+            window.chat_widget.add_message(
+                "CANDIDATE_GEN",
+                "候选来源已完成去重：LLM、案例迁移和 DOE 的有效候选进入统一候选池，缺口由 DOE 补足。",
+            )
+            window.chat_widget.add_message(
+                "SCREENER",
+                "代理模型初筛已完成，候选按 PBIPF 预测极限压力、面密度和公式不确定度排序。",
+            )
+            window._handle_runtime_state_event("node_completed", "parse_task", "parse_task")
+            window._handle_runtime_state_event("tool_completed", "generate_candidates", "candidate_generator")
+            window._handle_runtime_state_event("node_completed", "screen_candidates", "screen_candidates")
+            window._handle_runtime_state_event("simulation_job_completed", "evaluate_candidates", "SimulationQueue")
+            window._handle_runtime_state_event("node_completed", "persist_knowledge", "persist_knowledge")
+            window._handle_runtime_state_event("node_started", "generate_report", "generate_report")
+            app.processEvents()
+            pixmap = window.grab()
+            image = pixmap.toImage()
+            if not image_has_content(image):
+                errors.append(f"{theme}/workbench_runtime 渲染内容异常")
+            if screenshot_root is not None:
+                pixmap.save(str(screenshot_root / f"{theme}_workbench_runtime.png"), "PNG")
+            check_label_geometry(theme, "workbench_runtime")
+
         screenshot_root: Path | None = None
         temp_dir: tempfile.TemporaryDirectory[str] | None = None
         if self.keep_gui_screenshots:
@@ -587,6 +673,8 @@ class ReleaseAudit:
                     if center_widget is None or center_widget.width() < 760 or center_widget.height() < 620:
                         errors.append(f"{theme}/{page_name} 中央页尺寸异常")
                     check_label_geometry(theme, page_name)
+                render_runtime_workbench(theme)
+                screenshots += 1
 
             window._switch_workspace_page(2)
             app.processEvents()

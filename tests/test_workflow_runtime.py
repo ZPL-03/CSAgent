@@ -96,6 +96,35 @@ class FailingScreenOrchestrator(FakeOrchestrator):
         raise RuntimeError("screen failed")
 
 
+class FakeChildAgent:
+    def __init__(self) -> None:
+        self.progress_callback = None
+
+    def emit_llm_trace(self) -> None:
+        if self.progress_callback:
+            self.progress_callback(
+                "CANDIDATE_GEN",
+                "LLM 调用完成",
+                {
+                    "event_type": "llm_call_trace",
+                    "payload": {
+                        "selected_backend": "primary",
+                        "trace": [{"backend": "primary", "status": "success"}],
+                    },
+                },
+            )
+
+
+class ChildEventOrchestrator(FakeOrchestrator):
+    def __init__(self) -> None:
+        super().__init__()
+        self.candidate_gen = FakeChildAgent()
+
+    def generate_candidates(self, task):
+        self.candidate_gen.emit_llm_trace()
+        return super().generate_candidates(task)
+
+
 def test_workflow_runtime_persists_and_resumes_without_repeating_completed_nodes(tmp_path):
     store = WorkflowEventStore(tmp_path / "workflow.sqlite3")
     orchestrator = FakeOrchestrator()
@@ -143,6 +172,20 @@ def test_workflow_runtime_persists_and_resumes_without_repeating_completed_nodes
     assert runs[0]["status"] == "paused"
     assert runs[0]["stage"] == "paused_before_fem"
     assert runs[0]["pending_confirmation"] is None
+
+
+def test_workflow_runtime_binds_child_agent_events_to_store(tmp_path):
+    store = WorkflowEventStore(tmp_path / "workflow.sqlite3")
+    orchestrator = ChildEventOrchestrator()
+    runtime = DesignWorkflowRuntime(orchestrator=orchestrator, event_store=store)
+
+    state = runtime.start("生成 2 个候选，初筛保留 1 个候选")
+
+    events = store.list_events(state["run_id"])
+    llm_events = [event for event in events if event["event_type"] == "llm_call_trace"]
+    assert llm_events
+    assert llm_events[0]["agent"] == "CANDIDATE_GEN"
+    assert llm_events[0]["payload"]["selected_backend"] == "primary"
 
 
 def test_workflow_runtime_completes_full_approved_path(tmp_path):

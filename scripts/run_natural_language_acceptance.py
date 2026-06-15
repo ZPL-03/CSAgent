@@ -174,6 +174,7 @@ def _validate_completed_state(state: ConversationState, instruction: str) -> dic
     if len(state.evaluated_candidates) != target_top_k:
         raise AssertionError(f"初筛数量不符合任务契约：{len(state.evaluated_candidates)} != {target_top_k}")
 
+    generation_audit = dict(state.candidates[0].get("generation_audit") or {}) if state.candidates else {}
     return {
         "instruction": instruction,
         "run_id": state.workflow_run_id,
@@ -189,6 +190,7 @@ def _validate_completed_state(state: ConversationState, instruction: str) -> dic
             source: sum(1 for candidate in state.candidates if candidate.get("source") == source)
             for source in sorted({str(candidate.get("source")) for candidate in state.candidates})
         },
+        "generation_audit": generation_audit,
     }
 
 
@@ -247,7 +249,7 @@ def main() -> int:
     parser.add_argument("--verbose", action="store_true", help="在控制台输出智能体内部日志。")
     args = parser.parse_args()
 
-    load_dotenv(ROOT / ".env")
+    load_dotenv(ROOT / ".env", override=True)
     if not args.verbose:
         logging.disable(logging.CRITICAL)
     if args.disable_llm:

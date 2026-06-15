@@ -490,7 +490,6 @@ class MainWindow(QMainWindow):
             )
             self.agent_cards[agent_name] = card
             agent_layout.addWidget(card)
-        agent_layout.addStretch(1)
 
         queue_layout = QVBoxLayout()
         queue_layout.setContentsMargins(14, 14, 14, 14)
@@ -500,7 +499,6 @@ class MainWindow(QMainWindow):
         queue_layout.addWidget(self.queue_label)
         queue_layout.addWidget(self.knowledge_status_header)
         queue_layout.addWidget(self.knowledge_status_label)
-        queue_layout.addStretch(1)
 
         workflow_panel = QWidget()
         workflow_panel.setObjectName("centerWorkbench")
@@ -583,8 +581,9 @@ class MainWindow(QMainWindow):
         agent_widget.setLayout(agent_layout)
         queue_widget = QWidget()
         queue_widget.setLayout(queue_layout)
-        left_layout.addWidget(agent_widget, 3)
-        left_layout.addWidget(queue_widget, 2)
+        left_layout.addWidget(agent_widget)
+        left_layout.addWidget(queue_widget)
+        left_layout.addStretch(1)
         workbench_left.setMinimumWidth(248)
         workbench_left.setMaximumWidth(286)
 

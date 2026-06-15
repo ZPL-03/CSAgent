@@ -39,10 +39,18 @@ class DesignWorkflowRuntime:
         self._active_stage = ""
         self._external_agent_callback = getattr(orchestrator, "progress_callback", None) if orchestrator is not None else None
         self.orchestrator = orchestrator or OrchestratorAgent(progress_callback=self._agent_event)
-        if orchestrator is not None:
-            self.orchestrator.progress_callback = self._agent_event
+        self._bind_agent_event_callbacks()
         self.tools = self._build_tools()
         self.graph = self._build_graph()
+
+    def _bind_agent_event_callbacks(self) -> None:
+        """让运行时接管主智能体和子智能体事件，保证 GUI 与事件库可见完整轨迹。"""
+
+        self.orchestrator.progress_callback = self._agent_event
+        for attribute in ("candidate_gen", "screener", "fem_agent", "knowledge_agent", "report_gen"):
+            agent = getattr(self.orchestrator, attribute, None)
+            if agent is not None:
+                agent.progress_callback = self._agent_event
 
     def _agent_event(self, sender: str, message: str, event: Dict[str, Any] | None = None) -> None:
         if not self._active_run_id:

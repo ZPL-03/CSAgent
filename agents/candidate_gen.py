@@ -43,6 +43,7 @@ class CandidateGenAgent(BaseAgent):
         self.material_catalog = self._build_material_catalog()
         self.llm_backend: LLMBackend | None = None
         self.last_generation_audit: Dict[str, Any] = {}
+        self._last_llm_generation_diagnostics: List[Dict[str, Any]] = []
         if auto_llm_enabled():
             try:
                 self.llm_backend = LLMBackend(self.llm_config)
@@ -476,6 +477,27 @@ class CandidateGenAgent(BaseAgent):
         estimated_budget = max(3000, 1400 + max(int(desired_count), 1) * 500)
         return min(configured_budget, estimated_budget)
 
+    def _record_llm_generation_diagnostic(
+        self,
+        stage: str,
+        message: str,
+        answer: str = "",
+        parsed_count: int | None = None,
+        usable_count: int | None = None,
+    ) -> None:
+        backend = getattr(getattr(self.llm_backend, "active_backend", None), "name", "") if self.llm_backend else ""
+        payload: Dict[str, Any] = {
+            "stage": str(stage),
+            "message": str(message),
+            "backend": str(backend or ""),
+            "answer_char_count": len(str(answer or "")),
+        }
+        if parsed_count is not None:
+            payload["parsed_count"] = int(parsed_count)
+        if usable_count is not None:
+            payload["usable_count"] = int(usable_count)
+        self._last_llm_generation_diagnostics.append(payload)
+
     def _repair_geometry_by_task(
         self,
         task: Dict[str, Any],
@@ -562,7 +584,10 @@ class CandidateGenAgent(BaseAgent):
         return candidate
 
     def _llm_candidates(self, task: Dict[str, Any], start_index: int, desired_count: int) -> List[Dict[str, Any]]:
+        self._last_llm_generation_diagnostics = []
         if self.llm_backend is None or desired_count <= 0:
+            if desired_count > 0:
+                self._record_llm_generation_diagnostic("disabled", "LLM 后端未启用，候选来源由案例迁移和 DOE 补足")
             return []
 
         knowledge_guidance = self._knowledge_guidance(task, top_k=max(3, desired_count))
@@ -588,6 +613,12 @@ class CandidateGenAgent(BaseAgent):
                     )
                     items = self._extract_candidates_from_natural_answer(answer)
                     if not items:
+                        self._record_llm_generation_diagnostic(
+                            "parse",
+                            "自然语言回答中没有可解析的候选表或编号方案",
+                            answer=answer,
+                            parsed_count=0,
+                        )
                         raise SchemaValidationError("LLM 自然语言回答中没有可解析的候选表或编号方案")
                     usable_items = []
                     for raw in items:
@@ -597,6 +628,13 @@ class CandidateGenAgent(BaseAgent):
                         if self._llm_raw_candidate_is_usable(merged_raw):
                             usable_items.append(merged_raw)
                     if not usable_items:
+                        self._record_llm_generation_diagnostic(
+                            "field_validation",
+                            "候选缺少材料、几何、铺层角或缺陷比等完整参数",
+                            answer=answer,
+                            parsed_count=len(items),
+                            usable_count=0,
+                        )
                         raise SchemaValidationError("LLM 自然语言回答中没有可解析的完整候选参数")
                     normalized = [
                         self._normalize_candidate(task, raw, start_index + offset, "LLM")
@@ -613,23 +651,33 @@ class CandidateGenAgent(BaseAgent):
                             f"{reasons or '未给出有效规则诊断'}。"
                             "请重新输出候选表，确保长度、半径、厚度、alpha、beta 和缺陷比均在系统候选字段约束范围内。"
                         )
+                        self._record_llm_generation_diagnostic(
+                            "rule_check",
+                            reasons or "LLM 候选均未通过参数域规则",
+                            answer=answer,
+                            parsed_count=len(items),
+                            usable_count=len(usable_items),
+                        )
                         raise SchemaValidationError("LLM 候选均未通过参数域规则")
                     return normalized[:desired_count]
                 except SchemaValidationError as exc:
                     last_schema_error = exc
                     self.emit(f"LLM 生成失败，准备重试：{exc}")
                 except Exception as exc:
+                    last_schema_error = exc
+                    self._record_llm_generation_diagnostic("request", str(exc))
                     self.emit_llm_trace(
                         self.llm_backend,
                         {"purpose": "candidate_generation", "desired_count": desired_count, "failed": True},
                     )
                     self.emit(f"LLM 生成失败，准备重试：{exc}")
-                    return []
+                    continue
 
             active_name = str(getattr(getattr(self.llm_backend, "active_backend", None), "name", "") or "")
             if not active_name or active_name in excluded_backend_names:
                 break
             excluded_backend_names.add(active_name)
+            self._record_llm_generation_diagnostic("backend_fallback", str(last_schema_error or "输出不合规"))
             self.emit(f"LLM 后端 {active_name} 输出不合规，尝试下一个后端：{last_schema_error}")
         return []
 
@@ -833,7 +881,13 @@ class CandidateGenAgent(BaseAgent):
             },
             "doe_rounds": doe_round,
             "doe_fill_count": doe_added,
+            "llm_diagnostics": list(self._last_llm_generation_diagnostics[:8]),
         }
+        if not audit["filter_reasons"]["LLM"] and self._last_llm_generation_diagnostics:
+            audit["filter_reasons"]["LLM"] = [
+                str(item.get("message") or item.get("stage") or "LLM 候选未进入候选池")
+                for item in self._last_llm_generation_diagnostics[:5]
+            ]
         audit["summary"] = (
             f"初始配额 LLM={source_targets['llm']} / 案例迁移={source_targets['case_transfer']} / DOE={source_targets['doe']}；"
             f"有效进入候选池 LLM={llm_added}，案例迁移={transfer_added}，DOE补足={doe_added}；"
