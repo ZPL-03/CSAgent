@@ -561,6 +561,29 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         border-color: {color["accent"]};
         color: {color["accent"]};
     }}
+    QWidget#graphSidePanel {{
+        background: {color["surface_alt"]};
+        border: 1px solid {color["border_soft"]};
+        border-radius: 12px;
+    }}
+    QLabel#graphSummaryLabel {{
+        background: transparent;
+        color: {color["muted"]};
+        font-size: 12px;
+        font-weight: 600;
+        padding: 0 4px;
+    }}
+    QLineEdit#graphSearchInput {{
+        min-height: 34px;
+        padding: 5px 10px;
+        padding-right: 10px;
+    }}
+    QTextBrowser#graphDetailBrowser {{
+        background: {color["surface"]};
+        border: 1px solid {color["border_soft"]};
+        border-radius: 10px;
+        padding: 8px;
+    }}
     QComboBox#graphFilterCombo {{
         min-height: 30px;
         max-height: 30px;

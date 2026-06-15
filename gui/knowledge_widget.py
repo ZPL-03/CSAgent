@@ -199,6 +199,21 @@ class KnowledgeGraphView(QWidget):
         }
         return QColor(palette.get(entity_type, "#64748b"))
 
+    def _relation_color(self, relation_type: str) -> QColor:
+        palette = [
+            "#38bdf8",
+            "#34d399",
+            "#a78bfa",
+            "#f59e0b",
+            "#fb7185",
+            "#60a5fa",
+            "#22d3ee",
+            "#c084fc",
+        ]
+        text = str(relation_type or "RELATED_TO")
+        index = sum(ord(char) for char in text) % len(palette)
+        return QColor(palette[index])
+
     def _entity_counts(self) -> dict[str, int]:
         counts: dict[str, int] = {}
         for entity in self.entities:
@@ -284,7 +299,7 @@ class KnowledgeGraphView(QWidget):
                     if target:
                         neighbor_names.add(target)
             sorted_nodes = [item for item in sorted_nodes if item[0] in neighbor_names]
-        max_nodes = 42
+        max_nodes = 50
         visible_nodes = sorted_nodes[:max_nodes]
         visible_names = {name for name, _ in visible_nodes}
         visible_relations = [
@@ -301,7 +316,18 @@ class KnowledgeGraphView(QWidget):
                 str(relation.get("relation") or ""),
             )
         )
-        visible_relations = visible_relations[:56]
+        visible_relations = visible_relations[:76]
+        if visible_relations:
+            connected_names: set[str] = set()
+            for relation in visible_relations:
+                source = str(relation.get("source") or "").strip()
+                target = str(relation.get("target") or "").strip()
+                if source:
+                    connected_names.add(source)
+                if target:
+                    connected_names.add(target)
+            if connected_names:
+                visible_nodes = [item for item in visible_nodes if item[0] in connected_names]
         return visible_nodes, visible_relations, len(node_types), len(self.relations)
 
     def filter_options(self) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
@@ -344,11 +370,11 @@ class KnowledgeGraphView(QWidget):
         return degrees
 
     def _node_weight(self, name: str, degrees: dict[str, int], counts: dict[str, int]) -> float:
-        return math.log1p(counts.get(name, 1)) + degrees.get(name, 0) * 1.8
+        return math.log1p(counts.get(name, 1)) + degrees.get(name, 0) * 2.2
 
     def _node_radius(self, name: str, degrees: dict[str, int], counts: dict[str, int]) -> float:
         weight = self._node_weight(name, degrees, counts)
-        return max(6.0, min(16.0, 6.0 + math.sqrt(max(weight, 1.0)) * 2.1))
+        return max(7.5, min(22.0, 7.0 + math.sqrt(max(weight, 1.0)) * 2.65))
 
     def _layout_positions(
         self,
@@ -447,7 +473,32 @@ class KnowledgeGraphView(QWidget):
                     angle = -math.pi / 2.0 + 2.0 * math.pi * index / max(1, len(small_components))
                     center = QPointF(graph_center.x() + outer_rx * math.cos(angle), graph_center.y() + outer_ry * math.sin(angle))
                     place_component(component, center, 38.0 * self._scale, 30.0 * self._scale, phase=0.28)
+        if abs(self._pan.x()) < 0.01 and abs(self._pan.y()) < 0.01 and self._scale <= 1.02:
+            positions = self._fit_positions_to_rect(positions, graph_rect)
         return positions
+
+    def _fit_positions_to_rect(self, positions: dict[str, QPointF], graph_rect: QRectF) -> dict[str, QPointF]:
+        if len(positions) < 2:
+            return positions
+        padding = 44.0
+        min_x = min(point.x() for point in positions.values())
+        max_x = max(point.x() for point in positions.values())
+        min_y = min(point.y() for point in positions.values())
+        max_y = max(point.y() for point in positions.values())
+        width = max(1.0, max_x - min_x)
+        height = max(1.0, max_y - min_y)
+        available_width = max(1.0, graph_rect.width() - padding * 2.0)
+        available_height = max(1.0, graph_rect.height() - padding * 2.0)
+        factor = min(1.0, available_width / width, available_height / height)
+        current_center = QPointF((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
+        target_center = graph_rect.center()
+        fitted: dict[str, QPointF] = {}
+        for name, point in positions.items():
+            fitted[name] = QPointF(
+                target_center.x() + (point.x() - current_center.x()) * factor,
+                target_center.y() + (point.y() - current_center.y()) * factor,
+            )
+        return fitted
 
     def _draw_grid(self, painter: QPainter, rect: QRectF, color: QColor) -> None:
         painter.save()
@@ -528,6 +579,19 @@ class KnowledgeGraphView(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawEllipse(QPointF(point.x() - radius * 0.32, point.y() - radius * 0.34), max(2.0, radius * 0.18), max(2.0, radius * 0.18))
         painter.restore()
+
+    def _trim_edge(self, source: QPointF, target: QPointF, source_radius: float, target_radius: float) -> tuple[QPointF, QPointF]:
+        dx = target.x() - source.x()
+        dy = target.y() - source.y()
+        length = math.hypot(dx, dy)
+        if length < 2.0:
+            return source, target
+        ux = dx / length
+        uy = dy / length
+        return (
+            QPointF(source.x() + ux * source_radius, source.y() + uy * source_radius),
+            QPointF(target.x() - ux * target_radius, target.y() - uy * target_radius),
+        )
 
     def _draw_edge(
         self,
@@ -708,11 +772,15 @@ class KnowledgeGraphView(QWidget):
                 continue
             key = (source, str(relation.get("relation") or ""), target)
             selected_edge = bool(self._selected_node_name and self._selected_node_name in {source, target})
-            edge_color = colors["highlight"] if key in highlighted or selected_edge else colors["edge"]
-            edge_color.setAlpha(218 if key in highlighted else (154 if selected_edge else 54))
-            self._draw_edge(painter, positions[source], positions[target], edge_color, key in highlighted or selected_edge)
+            highlight = key in highlighted or selected_edge
+            edge_color = colors["highlight"] if highlight else self._relation_color(str(relation.get("relation") or "RELATED_TO"))
+            edge_color.setAlpha(218 if key in highlighted else (164 if selected_edge else 72))
+            source_radius = self._node_radius(source, degrees, counts) + 3.0
+            target_radius = self._node_radius(target, degrees, counts) + 5.0
+            edge_source, edge_target = self._trim_edge(positions[source], positions[target], source_radius, target_radius)
+            self._draw_edge(painter, edge_source, edge_target, edge_color, highlight)
             if key in highlighted or selected_edge:
-                self._draw_edge_label(painter, positions[source], positions[target], str(relation.get("relation") or ""), graph_rect, colors)
+                self._draw_edge_label(painter, edge_source, edge_target, str(relation.get("relation") or ""), graph_rect, colors)
 
         label_font = QFont(self.font())
         label_font.setPointSize(8)
@@ -995,8 +1063,12 @@ class KnowledgeWidget(QWidget):
         self.pipeline_widget.setMinimumHeight(238)
         self.pipeline_widget.setMaximumHeight(276)
         self.graph_view = KnowledgeGraphView()
-        self.graph_view.setMinimumHeight(330)
+        self.graph_view.setMinimumHeight(360)
+        self.graph_summary_label = QLabel("核心图谱等待知识库数据")
+        self.graph_summary_label.setObjectName("graphSummaryLabel")
+        self.graph_summary_label.setWordWrap(True)
         self.graph_search_input = QLineEdit()
+        self.graph_search_input.setObjectName("graphSearchInput")
         self.graph_search_input.setPlaceholderText("搜索图谱节点或关系")
         self.graph_type_filter = QComboBox()
         self.graph_type_filter.setObjectName("graphFilterCombo")
@@ -1024,10 +1096,11 @@ class KnowledgeWidget(QWidget):
             button.setObjectName("graphToolButton")
             button.setFixedSize(34, 32)
         self.graph_detail_browser = QTextBrowser()
+        self.graph_detail_browser.setObjectName("graphDetailBrowser")
         self.graph_detail_browser.setOpenExternalLinks(False)
         self.graph_detail_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.graph_detail_browser.setMinimumWidth(250)
-        self.graph_detail_browser.setMinimumHeight(330)
+        self.graph_detail_browser.setMinimumWidth(300)
+        self.graph_detail_browser.setMinimumHeight(260)
         self.evidence_browser = QTextBrowser()
         self.evidence_browser.setOpenExternalLinks(True)
         self.evidence_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -1101,31 +1174,47 @@ class KnowledgeWidget(QWidget):
         graph_panel = QWidget()
         graph_layout = QVBoxLayout(graph_panel)
         graph_layout.setContentsMargins(0, 0, 0, 0)
-        graph_layout.setSpacing(8)
+        graph_layout.setSpacing(9)
         graph_header = QHBoxLayout()
         graph_header.setContentsMargins(0, 0, 0, 0)
         graph_header.setSpacing(8)
         graph_label = QLabel("知识图谱 · GRAPH")
         graph_label.setObjectName("sectionTitle")
         graph_header.addWidget(graph_label)
-        graph_header.addWidget(self.graph_search_input, 1)
-        graph_header.addWidget(self.graph_reset_button)
-        graph_header.addWidget(self.graph_zoom_in_button)
-        graph_header.addWidget(self.graph_zoom_out_button)
-        graph_header.addWidget(self.graph_label_button)
+        graph_header.addWidget(self.graph_summary_label, 1)
         graph_layout.addLayout(graph_header)
+
+        graph_side_panel = QWidget()
+        graph_side_panel.setObjectName("graphSidePanel")
+        graph_side_layout = QVBoxLayout(graph_side_panel)
+        graph_side_layout.setContentsMargins(12, 12, 12, 12)
+        graph_side_layout.setSpacing(9)
+        graph_tools_label = QLabel("筛选与审计")
+        graph_tools_label.setObjectName("sectionTitle")
+        graph_side_layout.addWidget(graph_tools_label)
+        graph_side_layout.addWidget(self.graph_search_input)
         graph_filter_layout = QHBoxLayout()
         graph_filter_layout.setContentsMargins(0, 0, 0, 0)
         graph_filter_layout.setSpacing(8)
-        graph_filter_layout.addWidget(self.graph_type_filter)
-        graph_filter_layout.addWidget(self.graph_relation_filter)
-        graph_filter_layout.addStretch(1)
-        graph_layout.addLayout(graph_filter_layout)
+        graph_filter_layout.addWidget(self.graph_type_filter, 1)
+        graph_filter_layout.addWidget(self.graph_relation_filter, 1)
+        graph_side_layout.addLayout(graph_filter_layout)
+        graph_button_layout = QHBoxLayout()
+        graph_button_layout.setContentsMargins(0, 0, 0, 0)
+        graph_button_layout.setSpacing(8)
+        graph_button_layout.addWidget(self.graph_reset_button)
+        graph_button_layout.addWidget(self.graph_zoom_in_button)
+        graph_button_layout.addWidget(self.graph_zoom_out_button)
+        graph_button_layout.addWidget(self.graph_label_button)
+        graph_button_layout.addStretch(1)
+        graph_side_layout.addLayout(graph_button_layout)
+        graph_side_layout.addWidget(self.graph_detail_browser, 1)
+
         graph_splitter = QSplitter(Qt.Orientation.Horizontal)
         graph_splitter.addWidget(self.graph_view)
-        graph_splitter.addWidget(self.graph_detail_browser)
+        graph_splitter.addWidget(graph_side_panel)
         graph_splitter.setChildrenCollapsible(False)
-        graph_splitter.setSizes([820, 280])
+        graph_splitter.setSizes([840, 330])
         graph_splitter.setStretchFactor(0, 1)
         graph_splitter.setStretchFactor(1, 0)
         graph_layout.addWidget(graph_splitter, 1)
@@ -1507,6 +1596,26 @@ class KnowledgeWidget(QWidget):
         self._apply_graph_filters_from_controls()
         self._update_graph_detail(self.graph_view.selected_node_name())
 
+    def _update_graph_summary_label(
+        self,
+        visible_nodes: list[tuple[str, str]],
+        visible_relations: list[dict[str, Any]],
+        total_nodes: int,
+        total_relations: int,
+    ) -> None:
+        active_filters = []
+        if self.graph_search_input.text().strip():
+            active_filters.append("搜索")
+        if str(self.graph_type_filter.currentData() or ""):
+            active_filters.append("节点类型")
+        if str(self.graph_relation_filter.currentData() or ""):
+            active_filters.append("关系类型")
+        filter_text = f"；过滤：{' / '.join(active_filters)}" if active_filters else ""
+        self.graph_summary_label.setText(
+            f"合并知识图谱 {total_nodes} 实体 / {total_relations} 关系；"
+            f"当前显示 {len(visible_nodes)} 节点 / {len(visible_relations)} 关系{filter_text}"
+        )
+
     def _graph_detail_card(self, title: str, value: str, detail: str = "") -> str:
         if self.theme == "light":
             border = "#c8d2df"
@@ -1528,6 +1637,7 @@ class KnowledgeWidget(QWidget):
 
     def _update_graph_detail(self, selected_name: str = "") -> None:
         visible_nodes, visible_relations, total_nodes, total_relations = self.graph_view._node_payload()
+        self._update_graph_summary_label(visible_nodes, visible_relations, total_nodes, total_relations)
         degrees = self.graph_view._visible_degrees(visible_relations)
         counts = self.graph_view._entity_counts()
         node_types = {name: entity_type for name, entity_type in visible_nodes}

@@ -412,6 +412,40 @@ def test_knowledge_graph_view_drags_visible_node() -> None:
         app.processEvents()
 
 
+def test_knowledge_graph_view_default_layout_fits_canvas() -> None:
+    app = _app()
+    graph = KnowledgeGraphView()
+    try:
+        graph.resize(680, 360)
+        entities = [{"name": f"Node {index}", "type": "Material" if index % 3 == 0 else "Structure"} for index in range(54)]
+        relations = [
+            {
+                "source": f"Node {index}",
+                "relation": "RELATED_TO" if index % 2 else "AFFECTS",
+                "target": f"Node {(index + 1) % 54}",
+                "source_type": "Material",
+                "target_type": "Structure",
+            }
+            for index in range(54)
+        ]
+        graph.set_graph(entities=entities, relations=relations)
+        graph.show()
+        app.processEvents()
+        graph.grab()
+        app.processEvents()
+
+        assert graph._last_node_positions
+        xs = [point.x() for point in graph._last_node_positions.values()]
+        ys = [point.y() for point in graph._last_node_positions.values()]
+        assert min(xs) >= 40
+        assert max(xs) <= graph.width() - 40
+        assert min(ys) >= 64
+        assert max(ys) <= graph.height() - 36
+    finally:
+        graph.close()
+        app.processEvents()
+
+
 def test_knowledge_widget_vector_pill_follows_actual_vector_status(monkeypatch, tmp_path) -> None:
     global _DOCS_PATH
     _DOCS_PATH = tmp_path / "documents.jsonl"
