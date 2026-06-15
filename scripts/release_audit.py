@@ -487,7 +487,7 @@ class ReleaseAudit:
         previous_llm_auto = os.environ.get("CSDM_cph_DISABLE_LLM_AUTO")
         os.environ["CSDM_cph_DISABLE_LLM_AUTO"] = "1"
 
-        from PyQt6.QtCore import QRect, Qt
+        from PyQt6.QtCore import QPoint, QRect, Qt
         from PyQt6.QtGui import QColor
         from PyQt6.QtWidgets import QApplication, QLabel, QPushButton
 
@@ -558,6 +558,16 @@ class ReleaseAudit:
                     errors.append(f"{theme}/{page_name} 标签文本溢出：{text[:32]}")
                 if len(errors) >= 12:
                     return
+
+        def check_workbench_left_rail_geometry(theme: str, page_name: str) -> None:
+            report_card = window.agent_cards.get("REPORT_GEN")
+            if report_card is None or not report_card.isVisible() or not window.queue_header.isVisible():
+                return
+            report_bottom = report_card.mapTo(window, QPoint(0, 0)).y() + report_card.height()
+            queue_top = window.queue_header.mapTo(window, QPoint(0, 0)).y()
+            gap = queue_top - report_bottom
+            if gap < 8 or gap > 40:
+                errors.append(f"{theme}/{page_name} 左栏智能体与任务队列间距异常：{gap}px")
 
         def build_runtime_session() -> PipelineSession:
             instruction = "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
@@ -673,8 +683,11 @@ class ReleaseAudit:
                     if center_widget is None or center_widget.width() < 760 or center_widget.height() < 620:
                         errors.append(f"{theme}/{page_name} 中央页尺寸异常")
                     check_label_geometry(theme, page_name)
+                    if page_name == "workbench":
+                        check_workbench_left_rail_geometry(theme, page_name)
                 render_runtime_workbench(theme)
                 screenshots += 1
+                check_workbench_left_rail_geometry(theme, "workbench_runtime")
 
             window._switch_workspace_page(2)
             app.processEvents()
