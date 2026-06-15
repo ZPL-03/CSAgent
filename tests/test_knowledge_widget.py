@@ -149,6 +149,8 @@ def test_knowledge_widget_renders_runtime_pipeline_and_evidence(monkeypatch, tmp
         assert widget.graph_zoom_in_button.toolTip()
         assert widget.graph_zoom_out_button.toolTip()
         assert widget.graph_label_button.isChecked() is True
+        assert widget.graph_type_filter.count() >= 2
+        assert widget.graph_relation_filter.count() >= 2
         assert widget.pipeline_widget.minimumHeight() >= 230
     finally:
         widget.close()
@@ -181,6 +183,22 @@ def test_knowledge_widget_graph_search_filters_visible_graph(monkeypatch, tmp_pa
         app.processEvents()
         nodes, relations, _total_nodes, _total_relations = widget.graph_view._node_payload()
         assert len(nodes) >= 2
+        assert len(relations) == 1
+
+        relation_index = widget.graph_relation_filter.findData("CO_OCCURS_WITH")
+        assert relation_index > 0
+        widget.graph_relation_filter.setCurrentIndex(relation_index)
+        app.processEvents()
+        nodes, relations, _total_nodes, _total_relations = widget.graph_view._node_payload()
+        assert {name for name, _type in nodes} == {"Initial Imperfection", "Buckling"}
+        assert len(relations) == 1
+
+        type_index = widget.graph_type_filter.findData("FailureMode")
+        assert type_index > 0
+        widget.graph_type_filter.setCurrentIndex(type_index)
+        app.processEvents()
+        nodes, relations, _total_nodes, _total_relations = widget.graph_view._node_payload()
+        assert {name for name, _type in nodes} == {"Initial Imperfection", "Buckling"}
         assert len(relations) == 1
         assert "图谱审计" in widget.graph_detail_browser.toHtml()
         assert "总实体" in widget.graph_detail_browser.toHtml()
@@ -293,6 +311,21 @@ def test_knowledge_graph_view_filters_and_resets_interactive_state() -> None:
         filtered_nodes, filtered_relations, _, _ = graph._node_payload()
         assert {name for name, _type in filtered_nodes} == {"ASME RD-1172", "Buckling"}
         assert len(filtered_relations) == 1
+
+        graph.set_filter_text("")
+        graph.set_type_filter({"DesignFormula"})
+        filtered_nodes, filtered_relations, _, _ = graph._node_payload()
+        assert {name for name, _type in filtered_nodes} == {"ASME RD-1172", "Buckling"}
+        assert len(filtered_relations) == 1
+
+        graph.set_type_filter(set())
+        graph.set_relation_filter({"AFFECTS"})
+        filtered_nodes, filtered_relations, _, _ = graph._node_payload()
+        assert {name for name, _type in filtered_nodes} == {"Manufacturing Quality", "Buckling"}
+        assert len(filtered_relations) == 1
+        type_options, relation_options = graph.filter_options()
+        assert ("DesignFormula", 1) in type_options
+        assert ("AFFECTS", 1) in relation_options
 
         graph._scale = 1.8
         graph._pan = QPointF(24.0, -12.0)

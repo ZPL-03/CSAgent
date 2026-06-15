@@ -561,6 +561,21 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         border-color: {color["accent"]};
         color: {color["accent"]};
     }}
+    QComboBox#graphFilterCombo {{
+        min-height: 30px;
+        max-height: 30px;
+        border-radius: 8px;
+        padding: 3px 28px 3px 10px;
+        background: {color["button_bg"]};
+        border: 1px solid {color["border_soft"]};
+        color: {color["text"]};
+        font-size: 12px;
+        font-weight: 600;
+    }}
+    QComboBox#graphFilterCombo:hover {{
+        background: {color["button_hover"]};
+        border-color: {color["accent"]};
+    }}
     QPushButton[variant="link"] {{
         background: transparent;
         border: 0;

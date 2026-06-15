@@ -19,6 +19,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QPushButton,
+    QComboBox,
     QFrame,
     QSizePolicy,
     QSplitter,
@@ -53,6 +54,8 @@ class KnowledgeGraphView(QWidget):
         self.relations: list[dict[str, Any]] = []
         self.highlight_relations: list[dict[str, Any]] = []
         self.filter_text = ""
+        self.active_node_types: set[str] = set()
+        self.active_relation_types: set[str] = set()
         self.show_labels = True
         self._scale = 1.0
         self._pan = QPointF(0.0, 0.0)
@@ -97,6 +100,24 @@ class KnowledgeGraphView(QWidget):
         """设置图谱节点过滤词。"""
 
         self.filter_text = str(value or "").strip().lower()
+        if self._selected_node_name:
+            self._selected_node_name = ""
+            self.nodeSelected.emit("")
+        self.update()
+
+    def set_type_filter(self, entity_types: set[str]) -> None:
+        """设置节点类型过滤。"""
+
+        self.active_node_types = {str(item).strip() for item in entity_types if str(item).strip()}
+        if self._selected_node_name:
+            self._selected_node_name = ""
+            self.nodeSelected.emit("")
+        self.update()
+
+    def set_relation_filter(self, relation_types: set[str]) -> None:
+        """设置关系类型过滤。"""
+
+        self.active_relation_types = {str(item).strip() for item in relation_types if str(item).strip()}
         if self._selected_node_name:
             self._selected_node_name = ""
             self.nodeSelected.emit("")
@@ -199,7 +220,15 @@ class KnowledgeGraphView(QWidget):
             if target:
                 node_types.setdefault(target, str(relation.get("target_type") or "Entity"))
         degree: dict[str, int] = {name: 0 for name in node_types}
+
+        candidate_relations = []
         for relation in self.relations:
+            relation_name = str(relation.get("relation") or "RELATED_TO").strip()
+            if self.active_relation_types and relation_name not in self.active_relation_types:
+                continue
+            candidate_relations.append(relation)
+
+        for relation in candidate_relations:
             source = str(relation.get("source") or "").strip()
             target = str(relation.get("target") or "").strip()
             if source in degree:
@@ -211,6 +240,28 @@ class KnowledgeGraphView(QWidget):
             node_types.items(),
             key=lambda item: (-(math.log1p(counts.get(item[0], 1)) + degree.get(item[0], 0) * 2.0), item[1], item[0]),
         )
+        if self.active_relation_types:
+            relation_names: set[str] = set()
+            for relation in candidate_relations:
+                source = str(relation.get("source") or "").strip()
+                target = str(relation.get("target") or "").strip()
+                if source:
+                    relation_names.add(source)
+                if target:
+                    relation_names.add(target)
+            sorted_nodes = [item for item in sorted_nodes if item[0] in relation_names]
+        if self.active_node_types:
+            seed_names = {name for name, entity_type in sorted_nodes if entity_type in self.active_node_types}
+            neighbor_names: set[str] = set(seed_names)
+            for relation in candidate_relations:
+                source = str(relation.get("source") or "").strip()
+                target = str(relation.get("target") or "").strip()
+                if source in seed_names or target in seed_names:
+                    if source:
+                        neighbor_names.add(source)
+                    if target:
+                        neighbor_names.add(target)
+            sorted_nodes = [item for item in sorted_nodes if item[0] in neighbor_names]
         if self.filter_text:
             seed_names = {
                 name
@@ -218,7 +269,7 @@ class KnowledgeGraphView(QWidget):
                 if self.filter_text in name.lower() or self.filter_text in entity_type.lower()
             }
             neighbor_names: set[str] = set(seed_names)
-            for relation in self.relations:
+            for relation in candidate_relations:
                 source = str(relation.get("source") or "").strip()
                 target = str(relation.get("target") or "").strip()
                 relation_name = str(relation.get("relation") or "").strip().lower()
@@ -233,7 +284,7 @@ class KnowledgeGraphView(QWidget):
         visible_names = {name for name, _ in visible_nodes}
         visible_relations = [
             relation
-            for relation in self.relations
+            for relation in candidate_relations
             if str(relation.get("source") or "") in visible_names and str(relation.get("target") or "") in visible_names
         ]
         visible_relations.sort(
@@ -247,6 +298,34 @@ class KnowledgeGraphView(QWidget):
         )
         visible_relations = visible_relations[:56]
         return visible_nodes, visible_relations, len(node_types), len(self.relations)
+
+    def filter_options(self) -> tuple[list[tuple[str, int]], list[tuple[str, int]]]:
+        """返回图谱可用节点类型和关系类型。"""
+
+        node_types: dict[str, str] = {}
+        for entity in self.entities:
+            name = str(entity.get("name") or "").strip()
+            if name:
+                node_types[name] = str(entity.get("type") or "Entity")
+        for relation in self.relations:
+            source = str(relation.get("source") or "").strip()
+            target = str(relation.get("target") or "").strip()
+            if source:
+                node_types.setdefault(source, str(relation.get("source_type") or "Entity"))
+            if target:
+                node_types.setdefault(target, str(relation.get("target_type") or "Entity"))
+        type_counts: dict[str, int] = {}
+        for entity_type in node_types.values():
+            type_counts[entity_type] = type_counts.get(entity_type, 0) + 1
+        relation_counts: dict[str, int] = {}
+        for relation in self.relations:
+            relation_type = str(relation.get("relation") or "RELATED_TO").strip()
+            if relation_type:
+                relation_counts[relation_type] = relation_counts.get(relation_type, 0) + 1
+        return (
+            sorted(type_counts.items(), key=lambda item: (-item[1], item[0])),
+            sorted(relation_counts.items(), key=lambda item: (-item[1], item[0])),
+        )
 
     def _visible_degrees(self, relations: list[dict[str, Any]]) -> dict[str, int]:
         degrees: dict[str, int] = {}
@@ -416,6 +495,35 @@ class KnowledgeGraphView(QWidget):
         painter.setPen(Qt.PenStyle.NoPen)
         painter.drawPolygon(arrow)
 
+    def _draw_edge_label(
+        self,
+        painter: QPainter,
+        source: QPointF,
+        target: QPointF,
+        relation_name: str,
+        graph_rect: QRectF,
+        colors: dict[str, QColor],
+    ) -> None:
+        label = str(relation_name or "RELATED_TO").strip()
+        if not label:
+            return
+        font = QFont(self.font())
+        font.setPointSize(7)
+        font.setBold(True)
+        painter.setFont(font)
+        metrics = QFontMetrics(font)
+        text = metrics.elidedText(label, Qt.TextElideMode.ElideRight, 82)
+        width = max(44.0, float(metrics.horizontalAdvance(text) + 12))
+        mid = QPointF((source.x() + target.x()) / 2.0, (source.y() + target.y()) / 2.0)
+        rect = QRectF(mid.x() - width / 2.0, mid.y() - 10.0, width, 18.0)
+        rect.moveLeft(min(max(rect.left(), graph_rect.left() + 4.0), graph_rect.right() - rect.width() - 4.0))
+        rect.moveTop(min(max(rect.top(), graph_rect.top() + 4.0), graph_rect.bottom() - rect.height() - 4.0))
+        painter.setBrush(QBrush(colors["label_bg"]))
+        painter.setPen(QPen(colors["highlight"], 0.8))
+        painter.drawRoundedRect(rect, 5, 5)
+        painter.setPen(colors["text"])
+        painter.drawText(rect.adjusted(5, 0, -5, 0), Qt.AlignmentFlag.AlignCenter, text)
+
     def _draw_label(
         self,
         painter: QPainter,
@@ -535,6 +643,8 @@ class KnowledgeGraphView(QWidget):
             edge_color = colors["highlight"] if key in highlighted or selected_edge else colors["edge"]
             edge_color.setAlpha(218 if key in highlighted else (154 if selected_edge else 54))
             self._draw_edge(painter, positions[source], positions[target], edge_color, key in highlighted or selected_edge)
+            if key in highlighted or selected_edge:
+                self._draw_edge_label(painter, positions[source], positions[target], str(relation.get("relation") or ""), graph_rect, colors)
 
         label_font = QFont(self.font())
         label_font.setPointSize(8)
@@ -816,6 +926,13 @@ class KnowledgeWidget(QWidget):
         self.graph_view.setMinimumHeight(330)
         self.graph_search_input = QLineEdit()
         self.graph_search_input.setPlaceholderText("搜索图谱节点或关系")
+        self.graph_type_filter = QComboBox()
+        self.graph_type_filter.setObjectName("graphFilterCombo")
+        self.graph_relation_filter = QComboBox()
+        self.graph_relation_filter.setObjectName("graphFilterCombo")
+        for combo in [self.graph_type_filter, self.graph_relation_filter]:
+            combo.setMinimumWidth(136)
+            combo.setMaximumWidth(190)
         self.graph_reset_button = QPushButton("F")
         self.graph_reset_button.setToolTip("适配图谱")
         self.graph_zoom_in_button = QPushButton("+")
@@ -925,6 +1042,13 @@ class KnowledgeWidget(QWidget):
         graph_header.addWidget(self.graph_zoom_out_button)
         graph_header.addWidget(self.graph_label_button)
         graph_layout.addLayout(graph_header)
+        graph_filter_layout = QHBoxLayout()
+        graph_filter_layout.setContentsMargins(0, 0, 0, 0)
+        graph_filter_layout.setSpacing(8)
+        graph_filter_layout.addWidget(self.graph_type_filter)
+        graph_filter_layout.addWidget(self.graph_relation_filter)
+        graph_filter_layout.addStretch(1)
+        graph_layout.addLayout(graph_filter_layout)
         graph_splitter = QSplitter(Qt.Orientation.Horizontal)
         graph_splitter.addWidget(self.graph_view)
         graph_splitter.addWidget(self.graph_detail_browser)
@@ -971,6 +1095,8 @@ class KnowledgeWidget(QWidget):
         self.refresh_button.clicked.connect(lambda: self.refresh(load_evidence=False))
         self.graph_search_input.returnPressed.connect(self._filter_graph_from_input)
         self.graph_search_input.textChanged.connect(self._on_graph_filter_text_changed)
+        self.graph_type_filter.currentIndexChanged.connect(self._apply_graph_filters_from_controls)
+        self.graph_relation_filter.currentIndexChanged.connect(self._apply_graph_filters_from_controls)
         self.graph_reset_button.clicked.connect(self.graph_view.reset_view)
         self.graph_zoom_in_button.clicked.connect(lambda: self.graph_view.zoom_by(1.18))
         self.graph_zoom_out_button.clicked.connect(lambda: self.graph_view.zoom_by(0.84))
@@ -1071,6 +1197,8 @@ class KnowledgeWidget(QWidget):
             self.rebuild_button,
             self.export_snapshot_button,
             self.refresh_button,
+            self.graph_type_filter,
+            self.graph_relation_filter,
             self.graph_reset_button,
             self.graph_zoom_in_button,
             self.graph_zoom_out_button,
@@ -1084,6 +1212,36 @@ class KnowledgeWidget(QWidget):
 
     def _on_graph_filter_text_changed(self, value: str) -> None:
         self.graph_view.set_filter_text(value)
+        self._update_graph_detail("")
+
+    def _populate_graph_filter_combo(
+        self,
+        combo: QComboBox,
+        placeholder: str,
+        entries: list[tuple[str, int]],
+        current_value: str,
+    ) -> None:
+        combo.blockSignals(True)
+        combo.clear()
+        combo.addItem(placeholder, "")
+        for name, count in entries[:24]:
+            combo.addItem(f"{name} ({count})", name)
+        index = combo.findData(current_value)
+        combo.setCurrentIndex(index if index >= 0 else 0)
+        combo.blockSignals(False)
+
+    def _refresh_graph_filter_options(self) -> None:
+        type_entries, relation_entries = self.graph_view.filter_options()
+        current_type = str(self.graph_type_filter.currentData() or "")
+        current_relation = str(self.graph_relation_filter.currentData() or "")
+        self._populate_graph_filter_combo(self.graph_type_filter, "全部节点类型", type_entries, current_type)
+        self._populate_graph_filter_combo(self.graph_relation_filter, "全部关系类型", relation_entries, current_relation)
+
+    def _apply_graph_filters_from_controls(self) -> None:
+        node_type = str(self.graph_type_filter.currentData() or "")
+        relation_type = str(self.graph_relation_filter.currentData() or "")
+        self.graph_view.set_type_filter({node_type} if node_type else set())
+        self.graph_view.set_relation_filter({relation_type} if relation_type else set())
         self._update_graph_detail("")
 
     def _on_ingest_progress(self, steps: list) -> None:
@@ -1273,6 +1431,8 @@ class KnowledgeWidget(QWidget):
     def _update_graph_view(self, evidence_payload: dict[str, Any]) -> None:
         entities, relations, evidence_relations = self._merged_graph_sources(evidence_payload)
         self.graph_view.set_graph(entities, relations, evidence_relations)
+        self._refresh_graph_filter_options()
+        self._apply_graph_filters_from_controls()
         self._update_graph_detail(self.graph_view.selected_node_name())
 
     def _graph_detail_card(self, title: str, value: str, detail: str = "") -> str:
