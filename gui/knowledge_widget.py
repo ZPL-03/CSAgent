@@ -65,12 +65,12 @@ class KnowledgeGraphView(QWidget):
         self._last_node_positions: dict[str, QPointF] = {}
         self._last_node_radii: dict[str, float] = {}
         self._selected_node_name = ""
-        self.setMinimumHeight(190)
+        self.setMinimumHeight(300)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMouseTracking(True)
 
     def sizeHint(self) -> QSize:
-        return QSize(380, 214)
+        return QSize(760, 380)
 
     def set_theme(self, theme: str) -> None:
         self.theme = resolve_theme(theme)
@@ -135,7 +135,7 @@ class KnowledgeGraphView(QWidget):
                 "border": QColor("#c3cedd"),
                 "text": QColor("#172033"),
                 "muted": QColor("#64748b"),
-                "edge": QColor("#94a3b8"),
+                "edge": QColor("#8aa0ba"),
                 "highlight": QColor("#8b5cf6"),
                 "grid": QColor(100, 116, 139, 28),
                 "label_bg": QColor(255, 255, 255, 205),
@@ -147,7 +147,7 @@ class KnowledgeGraphView(QWidget):
             "border": QColor("#2b3a52"),
             "text": QColor("#dbe4ef"),
             "muted": QColor("#94a3b8"),
-            "edge": QColor("#475569"),
+                "edge": QColor("#52647e"),
             "highlight": QColor("#a78bfa"),
             "grid": QColor(148, 163, 184, 24),
             "label_bg": QColor(15, 23, 42, 210),
@@ -235,7 +235,17 @@ class KnowledgeGraphView(QWidget):
             relation
             for relation in self.relations
             if str(relation.get("source") or "") in visible_names and str(relation.get("target") or "") in visible_names
-        ][:72]
+        ]
+        visible_relations.sort(
+            key=lambda relation: (
+                -(
+                    degree.get(str(relation.get("source") or ""), 0)
+                    + degree.get(str(relation.get("target") or ""), 0)
+                ),
+                str(relation.get("relation") or ""),
+            )
+        )
+        visible_relations = visible_relations[:56]
         return visible_nodes, visible_relations, len(node_types), len(self.relations)
 
     def _visible_degrees(self, relations: list[dict[str, Any]]) -> dict[str, int]:
@@ -328,18 +338,18 @@ class KnowledgeGraphView(QWidget):
 
         main_component = components[0]
         has_side_components = len(components) > 1 and graph_rect.width() >= 520
-        main_center = QPointF(graph_center.x() - (graph_rect.width() * 0.12 if has_side_components else 0), graph_center.y())
-        main_rx = max(78.0, graph_rect.width() * (0.28 if has_side_components else 0.38)) * self._scale
-        main_ry = max(54.0, graph_rect.height() * 0.34) * self._scale
+        main_center = QPointF(graph_center.x() - (graph_rect.width() * 0.08 if has_side_components else 0), graph_center.y())
+        main_rx = max(96.0, graph_rect.width() * (0.30 if has_side_components else 0.40)) * self._scale
+        main_ry = max(66.0, graph_rect.height() * 0.36) * self._scale
         place_component(main_component, main_center, main_rx, main_ry)
 
         small_components = components[1:]
         if small_components:
             columns = max(1, min(3, int(math.ceil(math.sqrt(len(small_components))))))
             if has_side_components:
-                cell_width = max(104.0, graph_rect.width() * 0.15)
-                cell_height = max(78.0, graph_rect.height() * 0.22)
-                start_x = graph_rect.right() - cell_width * columns + cell_width * 0.45 + self._pan.x()
+                cell_width = max(116.0, graph_rect.width() * 0.16)
+                cell_height = max(86.0, graph_rect.height() * 0.22)
+                start_x = graph_rect.right() - cell_width * columns + cell_width * 0.52 + self._pan.x()
                 start_y = graph_center.y() - cell_height * max(0.0, math.ceil(len(small_components) / columns) - 1) * 0.5
                 for index, component in enumerate(small_components):
                     column = index % columns
@@ -479,7 +489,7 @@ class KnowledgeGraphView(QWidget):
         painter.setBrush(QBrush(colors["panel"]))
         painter.setPen(QPen(colors["border"], 1.0))
         painter.drawRoundedRect(panel, 12, 12)
-        graph_rect = panel.adjusted(14, 36, -14, -16)
+        graph_rect = panel.adjusted(16, 42, -16, -18)
         self._draw_grid(painter, graph_rect, colors["grid"])
 
         visible_nodes, visible_relations, total_nodes, total_relations = self._node_payload()
@@ -523,7 +533,7 @@ class KnowledgeGraphView(QWidget):
             key = (source, str(relation.get("relation") or ""), target)
             selected_edge = bool(self._selected_node_name and self._selected_node_name in {source, target})
             edge_color = colors["highlight"] if key in highlighted or selected_edge else colors["edge"]
-            edge_color.setAlpha(220 if key in highlighted else (168 if selected_edge else 86))
+            edge_color.setAlpha(218 if key in highlighted else (154 if selected_edge else 54))
             self._draw_edge(painter, positions[source], positions[target], edge_color, key in highlighted or selected_edge)
 
         label_font = QFont(self.font())
@@ -535,7 +545,7 @@ class KnowledgeGraphView(QWidget):
             for name, _entity_type in sorted(
                 visible_nodes,
                 key=lambda item: (-self._node_weight(item[0], degrees, counts), item[1], item[0]),
-            )[:10]
+            )[:7]
         }
         self._last_node_radii = {}
         occupied_label_rects: list[QRectF] = []
@@ -780,7 +790,6 @@ class KnowledgeWidget(QWidget):
         empty_layout.addWidget(empty_title)
         empty_layout.addWidget(empty_body)
         empty_layout.addWidget(empty_hint)
-        self.document_empty_state.setMinimumHeight(130)
         self.document_empty_state.setMinimumHeight(96)
         self.document_empty_state.setMaximumHeight(126)
         empty_page = QWidget()
@@ -804,10 +813,10 @@ class KnowledgeWidget(QWidget):
         self.pipeline_widget.setMinimumHeight(238)
         self.pipeline_widget.setMaximumHeight(276)
         self.graph_view = KnowledgeGraphView()
-        self.graph_view.setMinimumHeight(214)
+        self.graph_view.setMinimumHeight(330)
         self.graph_search_input = QLineEdit()
         self.graph_search_input.setPlaceholderText("搜索图谱节点或关系")
-        self.graph_reset_button = QPushButton("⟳")
+        self.graph_reset_button = QPushButton("F")
         self.graph_reset_button.setToolTip("适配图谱")
         self.graph_zoom_in_button = QPushButton("+")
         self.graph_zoom_in_button.setToolTip("放大图谱")
@@ -828,8 +837,8 @@ class KnowledgeWidget(QWidget):
         self.graph_detail_browser = QTextBrowser()
         self.graph_detail_browser.setOpenExternalLinks(False)
         self.graph_detail_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.graph_detail_browser.setMinimumWidth(236)
-        self.graph_detail_browser.setMinimumHeight(214)
+        self.graph_detail_browser.setMinimumWidth(250)
+        self.graph_detail_browser.setMinimumHeight(330)
         self.evidence_browser = QTextBrowser()
         self.evidence_browser.setOpenExternalLinks(True)
         self.evidence_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -920,7 +929,7 @@ class KnowledgeWidget(QWidget):
         graph_splitter.addWidget(self.graph_view)
         graph_splitter.addWidget(self.graph_detail_browser)
         graph_splitter.setChildrenCollapsible(False)
-        graph_splitter.setSizes([760, 260])
+        graph_splitter.setSizes([820, 280])
         graph_splitter.setStretchFactor(0, 1)
         graph_splitter.setStretchFactor(1, 0)
         graph_layout.addWidget(graph_splitter, 1)
@@ -939,7 +948,7 @@ class KnowledgeWidget(QWidget):
         splitter.addWidget(graph_panel)
         splitter.addWidget(evidence_panel)
         splitter.setChildrenCollapsible(False)
-        splitter.setSizes([280, 450, 170])
+        splitter.setSizes([260, 520, 150])
         splitter.setStretchFactor(0, 0)
         splitter.setStretchFactor(1, 1)
         splitter.setStretchFactor(2, 0)

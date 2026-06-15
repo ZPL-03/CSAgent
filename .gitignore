@@ -29,6 +29,7 @@ data/abaqus_runs/
 data/results/latest_report.md
 data/results/latest_report.pdf
 data/results/batch_summary_*.json
+data/results/natural_language_acceptance_*.json
 data/runtime/
 knowledge/chroma_db/
 knowledge/runtime/

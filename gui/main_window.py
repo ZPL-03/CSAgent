@@ -69,7 +69,7 @@ from gui.report_widget import ReportWidget
 from gui.result_trace_widget import ResultTraceWidget
 from gui.task_config_widget import TaskConfigWidget
 from gui.theme import application_stylesheet, install_application_font, resolve_theme
-from gui.workbench_widgets import AgentStatusCard, FlowDagWidget, StatusPill
+from gui.workbench_widgets import AgentStatusCard, FlowDagWidget, PipelineStatusWidget, StatusPill
 from gui.workflow_widget import WorkflowWidget
 from workflow.event_store import WorkflowEventStore
 
@@ -804,6 +804,34 @@ class MainWindow(QMainWindow):
             graph_label = index_labels.get("graph")
             if graph_label is not None:
                 graph_label.setText(f"<b>知识图谱</b><br>{total_entities} 实体 · {total_relations} 关系")
+        right_labels = getattr(self, "knowledge_right_labels", None)
+        if right_labels:
+            verification = merged_status.get("last_retrieval_verification") if isinstance(merged_status.get("last_retrieval_verification"), dict) else {}
+            vector_count = int(merged_status.get("vector_chunk_count", 0) or 0)
+            right_payload = {
+                "merged": ("合并检索入口", f"RAG {total_chunks} 块 · KG {total_entities}/{total_relations}"),
+                "retrieval": ("检索验证", str(verification.get("message") or "等待检索命中")),
+                "vector": ("向量索引", f"{vector_status} · {vector_count} 向量块"),
+                "graph": ("知识图谱", f"{total_entities} 实体 · {total_relations} 关系"),
+            }
+            for key, (title, body) in right_payload.items():
+                label = right_labels.get(key)
+                if label is not None:
+                    label.setText(f"<b>{title}</b><br>{body}")
+        right_pipeline = getattr(self, "knowledge_right_pipeline", None)
+        if right_pipeline is not None:
+            if pipeline:
+                right_pipeline.set_steps(pipeline)
+            else:
+                right_pipeline.set_steps(
+                    [
+                        {"name": "MinerU / Docling 文档解析", "status": "pending", "message": "等待用户上传资料"},
+                        {"name": "语义分块", "status": "pending", "message": f"chunk {chunk_size} / overlap {overlap}"},
+                        {"name": "向量化索引", "status": "pending", "message": "等待文本块写入索引"},
+                        {"name": "KG 实体/关系抽取", "status": "pending", "message": "等待实体关系抽取"},
+                        {"name": "检索验证 / 证据引用", "status": "pending", "message": "等待可引用证据"},
+                    ]
+                )
 
     def _build_monitor_left_page(self) -> QWidget:
         return self._sidebar_page(
@@ -893,15 +921,44 @@ class MainWindow(QMainWindow):
         )
 
     def _build_knowledge_right_page(self) -> QWidget:
-        return self._right_page(
-            "检索测试 · RETRIEVAL",
-            [
-                ("混合检索", "RAG 文本块 + 知识图谱路径命中。"),
-                ("检索边界", "证据用于上下文和审计，不替代代理公式或 FEM 结果。"),
-                ("入库流水线", "MinerU/Docling 解析、token 分块、去重、KG 抽取。"),
-            ],
-            [self.refresh_button],
-        )
+        page = QWidget()
+        page.setObjectName("resultRail")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(9)
+        header = QLabel("检索测试 · RETRIEVAL")
+        header.setObjectName("sectionTitle")
+        layout.addWidget(header)
+
+        self.knowledge_right_labels: dict[str, QLabel] = {}
+        for key, title, body in [
+            ("merged", "合并检索入口", "等待知识库状态刷新"),
+            ("retrieval", "检索验证", "RAG 文本块 + 知识图谱路径命中"),
+            ("vector", "向量索引", "等待向量索引状态"),
+            ("graph", "知识图谱", "等待实体关系统计"),
+        ]:
+            card = QLabel(f"<b>{title}</b><br>{body}")
+            card.setObjectName("statusLabel")
+            card.setWordWrap(True)
+            card.setMinimumHeight(62)
+            layout.addWidget(card)
+            self.knowledge_right_labels[key] = card
+
+        self.knowledge_right_pipeline = PipelineStatusWidget("入库流水线 · PIPELINE")
+        self.knowledge_right_pipeline.setMinimumHeight(260)
+        self.knowledge_right_pipeline.setMaximumHeight(310)
+        layout.addWidget(self.knowledge_right_pipeline)
+        layout.addStretch(1)
+
+        self.knowledge_right_rebuild_button = QPushButton("重建全部索引")
+        self.knowledge_right_snapshot_button = QPushButton("导出图谱快照")
+        self._set_button_variant(self.refresh_button, "secondary")
+        self._set_button_variant(self.knowledge_right_rebuild_button, "primary")
+        self._set_button_variant(self.knowledge_right_snapshot_button, "secondary")
+        layout.addWidget(self.refresh_button)
+        layout.addWidget(self.knowledge_right_rebuild_button)
+        layout.addWidget(self.knowledge_right_snapshot_button)
+        return page
 
     def _build_monitor_right_page(self) -> QWidget:
         page = QWidget()
@@ -1470,6 +1527,8 @@ class MainWindow(QMainWindow):
             card.set_theme(self.locale.theme)
         self.live_result_view.set_theme(self.locale.theme)
         self.knowledge_widget.set_theme(self.locale.theme)
+        if hasattr(self, "knowledge_right_pipeline"):
+            self.knowledge_right_pipeline.set_theme(self.locale.theme)
         self.monitor_dashboard_widget.set_theme(self.locale.theme)
         self.chat_widget.set_theme(self.locale.theme)
         self.setStyleSheet(application_stylesheet(self.font_family, self.locale.theme))
@@ -1533,6 +1592,10 @@ class MainWindow(QMainWindow):
         self.example_button.clicked.connect(self._load_example_prompt)
         self.trace_button.clicked.connect(lambda: self._switch_workspace_page(3))
         self.refresh_button.clicked.connect(self._refresh_knowledge_view)
+        if hasattr(self, "knowledge_right_rebuild_button"):
+            self.knowledge_right_rebuild_button.clicked.connect(lambda: self.knowledge_widget._run_maintenance("rebuild"))
+        if hasattr(self, "knowledge_right_snapshot_button"):
+            self.knowledge_right_snapshot_button.clicked.connect(lambda: self.knowledge_widget._run_maintenance("export"))
         self.open_report_button.clicked.connect(self._open_latest_report)
         self.export_data_button.clicked.connect(self._export_session_data)
         self.reset_view_button.clicked.connect(self.live_result_view.reset_view)
@@ -1709,6 +1772,8 @@ class MainWindow(QMainWindow):
         candidate_pool_target = requested_candidate_pool_size(self.session.task) if self.session.task else 0
         requested_top_k = requested_screen_top_k(self.session.task) if self.session.task else 0
         stage_display = self._display_stage(self.session.stage or "idle")
+        pending_label_zh = "待初筛" if self.session.stage == "awaiting_screen_confirmation" else "待 FEM 校核"
+        pending_label_en = "Pending Screening" if self.session.stage == "awaiting_screen_confirmation" else "Pending FEM"
         def metric_html(label: str, value: str) -> str:
             light_theme = resolve_theme(self.locale.theme) == "light"
             value_color = "#172033" if light_theme else "#e5edf7"
@@ -1728,9 +1793,9 @@ class MainWindow(QMainWindow):
                 else metric_html("Candidate Pool", "0")
             )
             self.pending_card.setText(
-                metric_html("Pending FEM", f"{pending_count} / {requested_top_k}")
+                metric_html(pending_label_en, f"{pending_count} / {requested_top_k}")
                 if self.session.task
-                else metric_html("Pending FEM", "0")
+                else metric_html(pending_label_en, "0")
             )
             self.pass_card.setText(metric_html("Passed", str(passed_count)))
         else:
@@ -1741,9 +1806,9 @@ class MainWindow(QMainWindow):
                 else metric_html("候选池", "0")
             )
             self.pending_card.setText(
-                metric_html("待 FEM 校核", f"{pending_count} / {requested_top_k}")
+                metric_html(pending_label_zh, f"{pending_count} / {requested_top_k}")
                 if self.session.task
-                else metric_html("待 FEM 校核", "0")
+                else metric_html(pending_label_zh, "0")
             )
             self.pass_card.setText(metric_html("通过", str(passed_count)))
         self._update_runtime_panel()

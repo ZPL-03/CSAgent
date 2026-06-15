@@ -111,6 +111,14 @@ D:\anaconda3\envs\GPT\python.exe main.py
 D:\anaconda3\envs\GPT\python.exe scripts\check_env.py
 ```
 
+多条自然语言输入端到端验收：
+
+```powershell
+D:\anaconda3\envs\GPT\python.exe scripts\run_natural_language_acceptance.py --disable-llm
+```
+
+该入口使用完整工作流运行时推进任务解析、候选生成、代理初筛、有限元阶段、知识回流和报告导出，并检查候选数量、初筛数量、结构去重、运行事件、快照状态和报告路径。默认有限元阶段使用快速验收适配器，不消耗 Abaqus 求解资源；需要调用当前配置的 LLM 时去掉 `--disable-llm`，需要真实 Abaqus 链路时增加 `--real-fem`。
+
 批量生成初始案例：
 
 ```powershell
