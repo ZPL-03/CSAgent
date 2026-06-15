@@ -39,3 +39,23 @@ def test_release_audit_passes_without_network() -> None:
     assert "[PASS] GUI 工作台契约" in result.stdout
     assert "[PASS] 案例库编号" in result.stdout
     assert "[PASS] UI 展示资产" in result.stdout
+
+
+def test_release_audit_gui_render_passes_without_artifacts() -> None:
+    _clean_test_caches()
+    screenshot_dir = ROOT / "data/runtime/release_gui_audit"
+    if screenshot_dir.exists():
+        shutil.rmtree(screenshot_dir)
+    result = subprocess.run(
+        [sys.executable, "scripts/release_audit.py", "--with-gui-render"],
+        cwd=ROOT,
+        env={**os.environ, "PYTHONIOENCODING": "utf-8"},
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "[PASS] GUI 渲染审计" in result.stdout
+    assert not screenshot_dir.exists()
