@@ -110,6 +110,24 @@ def clean_abaqus_session_files() -> None:
             remove_path(path)
 
 
+def clean_contaminated_vector_index() -> None:
+    """清理由测试临时目录污染的本地向量索引。"""
+    if not CHROMA_DIR.exists():
+        return
+    temp_markers = (b"pytest-", b"pytest-of-")
+    for path in CHROMA_DIR.rglob("*"):
+        if not path.is_file():
+            continue
+        try:
+            with path.open("rb") as handle:
+                data = handle.read(2_000_000)
+        except OSError:
+            continue
+        if any(marker in data for marker in temp_markers):
+            remove_path(CHROMA_DIR)
+            return
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--purge-prefix", action="append", default=[])
@@ -119,6 +137,7 @@ def main() -> int:
 
     clean_python_caches()
     clean_abaqus_session_files()
+    clean_contaminated_vector_index()
     purge_business_records(args.candidate_id, args.case_id)
     purge_problem_prefixes(args.purge_prefix)
     return 0
