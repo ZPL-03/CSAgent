@@ -22,9 +22,9 @@ from PyQt6.QtWidgets import (
     QPushButton,
     QComboBox,
     QFrame,
+    QScrollArea,
     QSizePolicy,
     QSplitter,
-    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTextBrowser,
@@ -136,6 +136,7 @@ class KnowledgeGraphView(QWidget):
         self._selected_node_name = ""
         self._hovered_node_name = ""
         self.setMinimumHeight(300)
+        self.setMinimumWidth(560)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMouseTracking(True)
 
@@ -350,7 +351,7 @@ class KnowledgeGraphView(QWidget):
                     if target:
                         neighbor_names.add(target)
             sorted_nodes = [item for item in sorted_nodes if item[0] in neighbor_names]
-        max_nodes = 50
+        max_nodes = 56
         visible_nodes = sorted_nodes[:max_nodes]
         visible_names = {name for name, _ in visible_nodes}
         visible_relations = [
@@ -367,7 +368,7 @@ class KnowledgeGraphView(QWidget):
                 str(relation.get("relation") or ""),
             )
         )
-        relation_limit = 76 if self.filter_text or self.active_node_types or self.active_relation_types else 20
+        relation_limit = 90 if self.filter_text or self.active_node_types or self.active_relation_types else 16
         visible_relations = visible_relations[:relation_limit]
         if visible_relations:
             connected_names: set[str] = set()
@@ -532,7 +533,7 @@ class KnowledgeGraphView(QWidget):
     def _fit_positions_to_rect(self, positions: dict[str, QPointF], graph_rect: QRectF) -> dict[str, QPointF]:
         if len(positions) < 2:
             return positions
-        padding = 44.0
+        padding = 38.0
         min_x = min(point.x() for point in positions.values())
         max_x = max(point.x() for point in positions.values())
         min_y = min(point.y() for point in positions.values())
@@ -615,7 +616,7 @@ class KnowledgeGraphView(QWidget):
             fill = QColor(accent)
             fill.setAlpha(16 if self.theme == "light" else 18)
             pen_color = QColor(accent)
-            pen_color.setAlpha(60 if group_index == 0 else 38)
+            pen_color.setAlpha(44 if group_index == 0 else 30)
             painter.setBrush(QBrush(fill))
             painter.setPen(QPen(pen_color, 1.0))
             painter.drawRoundedRect(halo_rect, 18, 18)
@@ -730,10 +731,10 @@ class KnowledgeGraphView(QWidget):
         dy = target.y() - source.y()
         length = max(1.0, math.hypot(dx, dy))
         normal = QPointF(-dy / length, dx / length)
-        curve = 18.0 if not highlight else 28.0
+        curve = 6.0 if not highlight else 26.0
         control = QPointF((source.x() + target.x()) / 2.0 + normal.x() * curve, (source.y() + target.y()) / 2.0 + normal.y() * curve)
 
-        painter.setPen(QPen(color, 2.0 if highlight else 0.72, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.setPen(QPen(color, 1.9 if highlight else 0.24, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         path = QPainterPath(source)
         path.quadTo(control, target)
         painter.drawPath(path)
@@ -851,7 +852,7 @@ class KnowledgeGraphView(QWidget):
         painter.fillRect(self.rect(), colors["bg"])
 
         panel = QRectF(1, 1, self.width() - 2, self.height() - 2)
-        graph_rect = panel.adjusted(16, 42, -16, -16)
+        graph_rect = panel.adjusted(18, 34, -18, -18)
         self._draw_background(painter, panel, graph_rect, colors)
         self._draw_grid(painter, graph_rect, colors["grid"])
 
@@ -864,7 +865,7 @@ class KnowledgeGraphView(QWidget):
         small_font.setBold(True)
         painter.setFont(small_font)
         painter.setPen(colors["muted"])
-        painter.drawText(QRectF(16, 12, self.width() - 32, 20), Qt.AlignmentFlag.AlignLeft, subtitle)
+        painter.drawText(QRectF(18, 8, self.width() - 36, 20), Qt.AlignmentFlag.AlignLeft, subtitle)
         self._draw_legend(painter, visible_nodes, colors)
 
         if not visible_nodes:
@@ -904,8 +905,8 @@ class KnowledgeGraphView(QWidget):
             key = (source, str(relation.get("relation") or ""), target)
             selected_edge = bool(self._selected_node_name and self._selected_node_name in {source, target})
             highlight = key in highlighted or selected_edge
-            edge_color = colors["highlight"] if highlight else colors["edge"]
-            edge_color.setAlpha(218 if key in highlighted else (164 if selected_edge else 28))
+            edge_color = QColor(colors["highlight"]) if highlight else QColor("#9aa9bb" if self.theme == "light" else "#4d5d73")
+            edge_color.setAlpha(218 if key in highlighted else (164 if selected_edge else 14))
             source_radius = self._node_radius(source, degrees, counts) + 3.0
             target_radius = self._node_radius(target, degrees, counts) + 5.0
             edge_source, edge_target = self._trim_edge(positions[source], positions[target], source_radius, target_radius)
@@ -1122,6 +1123,8 @@ class KnowledgeMaintenanceWorker(QObject):
 class KnowledgeWidget(QWidget):
     """管理项目内可更新 RAG/KG 知识库并展示检索证据。"""
 
+    pipelineChanged = pyqtSignal(list)
+
     def __init__(self) -> None:
         super().__init__()
         self.knowledge_base = DomainKnowledgeBase()
@@ -1157,39 +1160,12 @@ class KnowledgeWidget(QWidget):
         self.document_table.horizontalHeader().setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)
         self.document_table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
 
-        self.document_empty_state = QFrame()
-        self.document_empty_state.setObjectName("settingsCard")
-        empty_layout = QVBoxLayout(self.document_empty_state)
-        empty_layout.setContentsMargins(18, 14, 18, 14)
-        empty_layout.setSpacing(8)
-        empty_title = QLabel("资料库等待入库")
-        empty_title.setObjectName("sectionTitle")
-        empty_body = QLabel("上传资料并入库后，这里显示解析器、Chunk、SHA256、入库时间和路径。")
-        empty_body.setWordWrap(True)
-        empty_hint = QLabel("支持解析、token 分块、overlap、内容去重、向量索引和 KG 实体关系抽取。")
-        empty_hint.setObjectName("chatStatus")
-        empty_hint.setWordWrap(True)
-        empty_layout.addWidget(empty_title)
-        empty_layout.addWidget(empty_body)
-        empty_layout.addWidget(empty_hint)
-        self.document_empty_state.setMinimumHeight(96)
-        self.document_empty_state.setMaximumHeight(126)
-        empty_page = QWidget()
-        empty_page_layout = QVBoxLayout(empty_page)
-        empty_page_layout.setContentsMargins(0, 0, 0, 0)
-        empty_page_layout.setSpacing(0)
-        empty_page_layout.addWidget(self.document_empty_state, 0, Qt.AlignmentFlag.AlignTop)
-        self.document_stack = QStackedWidget()
-        self.document_stack.addWidget(empty_page)
-        self.document_stack.addWidget(self.document_table)
-        self.document_stack.setMinimumHeight(116)
+        self.document_overview_label = self._make_panel_label()
+        self.document_overview_scroll = self._scrollable_panel(self.document_overview_label)
+        self._set_document_empty_html()
 
-        self.source_overview_browser = QTextBrowser()
-        self.source_overview_browser.setOpenExternalLinks(True)
-        self.source_overview_browser.setMaximumHeight(126)
-        self.source_overview_browser.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.source_overview_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.source_overview_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.source_overview_label = self._make_panel_label()
+        self.source_overview_scroll = self._scrollable_panel(self.source_overview_label)
 
         self.pipeline_widget = PipelineStatusWidget()
         self.pipeline_widget.setMinimumHeight(238)
@@ -1228,32 +1204,120 @@ class KnowledgeWidget(QWidget):
             button.setObjectName("graphToolButton")
             button.setFixedSize(34, 32)
         self.graph_detail_browser = QTextBrowser()
-        self.graph_detail_browser.setObjectName("graphDetailBrowser")
         self.graph_detail_browser.setOpenExternalLinks(False)
-        self.graph_detail_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.graph_detail_browser.setMinimumWidth(300)
-        self.graph_detail_browser.setMinimumHeight(260)
+        self._configure_panel_browser(self.graph_detail_browser)
+        self.graph_detail_browser.setMinimumWidth(260)
+        self.graph_detail_browser.setMinimumHeight(150)
         self.graph_type_chip_layout: QGridLayout | None = None
         self.graph_relation_chip_layout: QGridLayout | None = None
         self.graph_type_chip_buttons: list[QPushButton] = []
         self.graph_relation_chip_buttons: list[QPushButton] = []
         self.evidence_browser = QTextBrowser()
         self.evidence_browser.setOpenExternalLinks(True)
-        self.evidence_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.evidence_browser.setMinimumHeight(142)
-        self.summary_browser = QTextBrowser()
-        self.summary_browser.setMaximumHeight(138)
-        self.summary_browser.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.summary_browser.setOpenExternalLinks(True)
-        self.summary_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.summary_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._configure_panel_browser(self.evidence_browser)
+        self.evidence_browser.setMinimumHeight(150)
+        self.summary_label = self._make_panel_label()
+        self.summary_scroll = self._scrollable_panel(self.summary_label)
+        self._summary_html_cache = ""
+        for overview_scroll in [self.summary_scroll, self.source_overview_scroll, self.document_overview_scroll]:
+            overview_scroll.setMinimumHeight(134)
+            overview_scroll.setMaximumHeight(148)
+            overview_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self._build_layout()
         self._connect_signals()
         self.refresh(load_evidence=False)
 
+    def _set_pipeline_steps(self, steps: list) -> None:
+        self.pipeline_widget.set_steps(steps)
+        self.pipelineChanged.emit(steps)
+
+    def _make_panel_label(self) -> QLabel:
+        label = QLabel()
+        label.setObjectName("knowledgeBodyLabel")
+        label.setTextFormat(Qt.TextFormat.PlainText)
+        label.setWordWrap(True)
+        label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        return label
+
+    def _scrollable_panel(self, label: QLabel) -> QScrollArea:
+        scroll = QScrollArea()
+        scroll.setObjectName("knowledgeTextScroll")
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setAutoFillBackground(False)
+        scroll.viewport().setAutoFillBackground(False)
+        scroll.setWidget(label)
+        return scroll
+
+    def _configure_panel_browser(self, browser: QTextBrowser) -> None:
+        browser.setObjectName("knowledgePanelBrowser")
+        browser.setFrameShape(QFrame.Shape.NoFrame)
+        browser.document().setDocumentMargin(8)
+        browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        browser.setAutoFillBackground(False)
+        browser.viewport().setAutoFillBackground(False)
+        browser.viewport().setStyleSheet("background: transparent;")
+
+    def _panel_html(self, body: str) -> str:
+        if self.theme == "light":
+            text = "#172033"
+            muted = "#64748b"
+            strong = "#0f172a"
+        else:
+            text = "#dbe4ef"
+            muted = "#94a3b8"
+            strong = "#f3f7fb"
+        return (
+            "<html><head><style>"
+            "body{margin:0;padding:0;background:transparent;"
+            "font-family:'Microsoft YaHei UI','Segoe UI',Arial,sans-serif;"
+            f"font-size:13px;line-height:1.42;color:{text};}}"
+            "p{margin:0 0 7px 0;}"
+            f"b{{color:{strong};font-weight:800;}}"
+            f".muted{{color:{muted};}}"
+            ".metric{font-size:17px;font-weight:800;}"
+            "</style></head><body>"
+            f"{body}"
+            "</body></html>"
+        )
+
+    def _browser_html(self, body: str) -> str:
+        if self.theme == "light":
+            text = "#172033"
+            muted = "#64748b"
+            strong = "#0f172a"
+        else:
+            text = "#dbe4ef"
+            muted = "#94a3b8"
+            strong = "#f3f7fb"
+        return (
+            "<html><head><style>"
+            "body{margin:0;padding:0;background:transparent;"
+            "font-family:'Microsoft YaHei UI','Segoe UI',Arial,sans-serif;"
+            f"font-size:13px;line-height:1.42;color:{text};}}"
+            "p{margin:0 0 8px 0;}"
+            "h4{margin:2px 0 8px 0;padding:0;font-size:14px;line-height:1.35;}"
+            f"h4,b{{color:{strong};font-weight:800;}}"
+            f".muted{{color:{muted};}}"
+            "</style></head><body>"
+            f"{body}"
+            "</body></html>"
+        )
+
+    def _set_document_empty_html(self) -> None:
+        self.document_overview_label.setText(
+            "等待入库资料。资料完成解析后显示解析器、Chunk、SHA256、入库时间和路径。\n"
+            "支持 token 分块、overlap、内容去重、向量索引和 KG 实体关系抽取。"
+        )
+
     def set_theme(self, theme: str) -> None:
         self.theme = resolve_theme(theme)
+        self._set_document_empty_html()
         for pill in [self.store_pill, self.rag_pill, self.vector_pill, self.kg_pill, self.parser_pill]:
             pill.set_theme(self.theme)
         self.pipeline_widget.set_theme(self.theme)
@@ -1281,112 +1345,102 @@ class KnowledgeWidget(QWidget):
             pill_layout.addWidget(pill)
         pill_layout.addStretch(1)
 
-        left = QWidget()
-        left_layout = QVBoxLayout(left)
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(9)
-        left_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        left_layout.addWidget(self.summary_browser)
-        document_label = QLabel("资料库 · DOCUMENTS")
-        document_label.setObjectName("sectionTitle")
-        left_layout.addWidget(document_label)
-        left_layout.addWidget(self.document_stack)
+        def titled_panel(title: str, widget: QWidget, object_name: str = "knowledgeMiniPanel") -> QFrame:
+            card = QFrame()
+            card.setObjectName(object_name)
+            card_layout = QVBoxLayout(card)
+            card_layout.setContentsMargins(12, 11, 12, 12)
+            card_layout.setSpacing(8)
+            label = QLabel(title)
+            label.setObjectName("knowledgePanelTitle")
+            label.setFixedHeight(24)
+            label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+            card_layout.addWidget(label)
+            card_layout.addWidget(widget, 1)
+            return card
 
-        pipeline_panel = QWidget()
-        pipeline_layout = QVBoxLayout(pipeline_panel)
-        pipeline_layout.setContentsMargins(0, 0, 0, 0)
-        pipeline_layout.setSpacing(9)
-        pipeline_layout.addWidget(self.pipeline_widget, 0, Qt.AlignmentFlag.AlignTop)
-        pipeline_layout.addStretch(1)
+        overview_panel = QFrame()
+        overview_panel.setObjectName("knowledgeOverviewPanel")
+        overview_layout = QHBoxLayout(overview_panel)
+        overview_layout.setContentsMargins(0, 0, 0, 0)
+        overview_layout.setSpacing(10)
+        overview_layout.addWidget(titled_panel("资料状态 · STATUS", self.summary_scroll), 1)
+        overview_layout.addWidget(titled_panel("知识来源 · SOURCES", self.source_overview_scroll), 1)
+        overview_layout.addWidget(titled_panel("资料库 · DOCUMENTS", self.document_overview_scroll), 1)
 
-        overview_splitter = QSplitter(Qt.Orientation.Horizontal)
-        overview_splitter.addWidget(left)
-        overview_splitter.addWidget(pipeline_panel)
-        overview_splitter.setChildrenCollapsible(False)
-        overview_splitter.setSizes([620, 420])
-        overview_splitter.setStretchFactor(0, 1)
-        overview_splitter.setStretchFactor(1, 0)
-
-        graph_panel = QWidget()
+        graph_panel = QFrame()
+        graph_panel.setObjectName("knowledgeGraphPanel")
         graph_layout = QVBoxLayout(graph_panel)
-        graph_layout.setContentsMargins(0, 0, 0, 0)
-        graph_layout.setSpacing(9)
+        graph_layout.setContentsMargins(12, 12, 12, 12)
+        graph_layout.setSpacing(10)
         graph_header = QHBoxLayout()
         graph_header.setContentsMargins(0, 0, 0, 0)
         graph_header.setSpacing(8)
         graph_label = QLabel("知识图谱 · GRAPH")
         graph_label.setObjectName("sectionTitle")
+        graph_label.setMinimumWidth(graph_label.fontMetrics().horizontalAdvance(graph_label.text()) + 18)
         graph_header.addWidget(graph_label)
         graph_header.addWidget(self.graph_summary_label, 1)
+        graph_header.addWidget(self.graph_reset_button)
+        graph_header.addWidget(self.graph_zoom_in_button)
+        graph_header.addWidget(self.graph_zoom_out_button)
+        graph_header.addWidget(self.graph_label_button)
         graph_layout.addLayout(graph_header)
 
-        graph_side_panel = QWidget()
-        graph_side_panel.setObjectName("graphSidePanel")
-        graph_side_layout = QVBoxLayout(graph_side_panel)
-        graph_side_layout.setContentsMargins(12, 12, 12, 12)
-        graph_side_layout.setSpacing(9)
-        graph_tools_label = QLabel("筛选与审计")
-        graph_tools_label.setObjectName("sectionTitle")
-        graph_side_layout.addWidget(graph_tools_label)
-        graph_side_layout.addWidget(self.graph_search_input)
+        graph_filter_panel = QFrame()
+        graph_filter_panel.setObjectName("graphFilterPanel")
+        graph_filter_layout = QVBoxLayout(graph_filter_panel)
+        graph_filter_layout.setContentsMargins(10, 10, 10, 10)
+        graph_filter_layout.setSpacing(8)
+        graph_filter_layout.addWidget(self.graph_search_input)
         self.graph_type_filter.setVisible(False)
         self.graph_relation_filter.setVisible(False)
         type_label = QLabel("节点类型")
         type_label.setObjectName("graphSubTitle")
-        graph_side_layout.addWidget(type_label)
+        graph_filter_layout.addWidget(type_label)
         type_chip_widget = QWidget()
         self.graph_type_chip_layout = QGridLayout(type_chip_widget)
         self.graph_type_chip_layout.setContentsMargins(0, 0, 0, 0)
         self.graph_type_chip_layout.setHorizontalSpacing(6)
         self.graph_type_chip_layout.setVerticalSpacing(6)
-        graph_side_layout.addWidget(type_chip_widget)
+        graph_filter_layout.addWidget(type_chip_widget)
         relation_label = QLabel("关系类型")
         relation_label.setObjectName("graphSubTitle")
-        graph_side_layout.addWidget(relation_label)
+        graph_filter_layout.addWidget(relation_label)
         relation_chip_widget = QWidget()
         self.graph_relation_chip_layout = QGridLayout(relation_chip_widget)
         self.graph_relation_chip_layout.setContentsMargins(0, 0, 0, 0)
         self.graph_relation_chip_layout.setHorizontalSpacing(6)
         self.graph_relation_chip_layout.setVerticalSpacing(6)
-        graph_side_layout.addWidget(relation_chip_widget)
-        graph_button_layout = QHBoxLayout()
-        graph_button_layout.setContentsMargins(0, 0, 0, 0)
-        graph_button_layout.setSpacing(8)
-        graph_button_layout.addWidget(self.graph_reset_button)
-        graph_button_layout.addWidget(self.graph_zoom_in_button)
-        graph_button_layout.addWidget(self.graph_zoom_out_button)
-        graph_button_layout.addWidget(self.graph_label_button)
-        graph_button_layout.addStretch(1)
-        graph_side_layout.addLayout(graph_button_layout)
-        graph_side_layout.addWidget(self.graph_detail_browser, 1)
+        graph_filter_layout.addWidget(relation_chip_widget)
+        graph_layout.addWidget(graph_filter_panel, 0)
+        graph_layout.addWidget(self.graph_view, 1)
 
-        graph_splitter = QSplitter(Qt.Orientation.Horizontal)
-        graph_splitter.addWidget(self.graph_view)
-        graph_splitter.addWidget(graph_side_panel)
-        graph_splitter.setChildrenCollapsible(False)
-        graph_splitter.setSizes([840, 330])
-        graph_splitter.setStretchFactor(0, 1)
-        graph_splitter.setStretchFactor(1, 0)
-        graph_layout.addWidget(graph_splitter, 1)
-
-        evidence_panel = QWidget()
+        evidence_panel = QFrame()
+        evidence_panel.setObjectName("knowledgeEvidencePanel")
         evidence_layout = QVBoxLayout(evidence_panel)
-        evidence_layout.setContentsMargins(0, 0, 0, 0)
+        evidence_layout.setContentsMargins(12, 12, 12, 12)
         evidence_layout.setSpacing(8)
-        evidence_label = QLabel("检索证据 · EVIDENCE")
+        evidence_label = QLabel("图谱审计与检索证据 · EVIDENCE")
         evidence_label.setObjectName("sectionTitle")
         evidence_layout.addWidget(evidence_label)
-        evidence_layout.addWidget(self.evidence_browser, 1)
+        evidence_splitter = QSplitter(Qt.Orientation.Horizontal)
+        evidence_splitter.addWidget(titled_panel("图谱审计", self.graph_detail_browser))
+        evidence_splitter.addWidget(titled_panel("混合检索结果", self.evidence_browser))
+        evidence_splitter.setChildrenCollapsible(False)
+        evidence_splitter.setSizes([360, 720])
+        evidence_splitter.setStretchFactor(0, 0)
+        evidence_splitter.setStretchFactor(1, 1)
+        evidence_layout.addWidget(evidence_splitter, 1)
 
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(overview_splitter)
-        splitter.addWidget(graph_panel)
-        splitter.addWidget(evidence_panel)
-        splitter.setChildrenCollapsible(False)
-        splitter.setSizes([260, 520, 150])
-        splitter.setStretchFactor(0, 0)
-        splitter.setStretchFactor(1, 1)
-        splitter.setStretchFactor(2, 0)
+        main = QWidget()
+        main.setMinimumWidth(740)
+        main_layout = QVBoxLayout(main)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(10)
+        main_layout.addWidget(overview_panel, 0)
+        main_layout.addWidget(graph_panel, 1)
+        main_layout.addWidget(evidence_panel, 0)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -1394,7 +1448,7 @@ class KnowledgeWidget(QWidget):
         layout.addLayout(top_layout)
         layout.addLayout(action_layout)
         layout.addLayout(pill_layout)
-        layout.addWidget(splitter, 1)
+        layout.addWidget(main, 1)
 
     def _connect_signals(self) -> None:
         self.search_button.clicked.connect(self._search_from_input)
@@ -1437,7 +1491,7 @@ class KnowledgeWidget(QWidget):
 
     def toHtml(self) -> str:
         """兼容测试和外部读取当前 HTML 摘要。"""
-        return self.summary_browser.toHtml() + self.evidence_browser.toHtml()
+        return (self._summary_html_cache or self.summary_label.text()) + self.evidence_browser.toHtml()
 
     def _select_and_ingest_file(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
@@ -1472,7 +1526,7 @@ class KnowledgeWidget(QWidget):
             return
         self._set_operation_buttons_enabled(False)
         self.parser_pill.set_state("解析运行中", "running")
-        self.pipeline_widget.set_steps(
+        self._set_pipeline_steps(
             [
                 {"name": "MinerU / Docling 文档解析", "status": "running", "message": "正在解析上传资料"},
                 {"name": "语义分块", "status": "pending", "message": "等待解析输出"},
@@ -1570,7 +1624,7 @@ class KnowledgeWidget(QWidget):
         def add_chip(layout: QGridLayout | None, button: QPushButton, index: int) -> None:
             if layout is None:
                 return
-            layout.addWidget(button, index // 2, index % 2)
+            layout.addWidget(button, index // 4, index % 4)
 
         for index, (name, count) in enumerate(type_entries[:8]):
             color = self.graph_view._type_color(name).name()
@@ -1649,7 +1703,7 @@ class KnowledgeWidget(QWidget):
         self._update_graph_detail("")
 
     def _on_ingest_progress(self, steps: list) -> None:
-        self.pipeline_widget.set_steps(steps)
+        self._set_pipeline_steps(steps)
         active_step = next((step for step in steps if isinstance(step, dict) and step.get("status") == "running"), None)
         if isinstance(active_step, dict):
             self.parser_pill.set_state(str(active_step.get("name") or "入库运行中"), "running")
@@ -1658,7 +1712,7 @@ class KnowledgeWidget(QWidget):
         results = payload.get("results") if isinstance(payload.get("results"), list) else []
         last_result = results[-1] if results else payload
         steps = last_result.get("steps") if isinstance(last_result.get("steps"), list) else []
-        self.pipeline_widget.set_steps(steps)
+        self._set_pipeline_steps(steps)
         success_count = int(payload.get("batch_success_count") or (1 if payload.get("success") else 0))
         failed_count = int(payload.get("batch_failed_count") or 0)
         status = "warning" if failed_count else "success"
@@ -1675,7 +1729,7 @@ class KnowledgeWidget(QWidget):
 
     def _on_ingest_failed(self, message: str) -> None:
         self.parser_pill.set_state("解析失败", "failed")
-        self.pipeline_widget.set_steps(
+        self._set_pipeline_steps(
             [
                 {"name": "MinerU / Docling 文档解析", "status": "failed", "message": message},
                 {"name": "语义分块", "status": "pending", "message": "解析失败，未生成文本块"},
@@ -1692,7 +1746,7 @@ class KnowledgeWidget(QWidget):
         self._set_operation_buttons_enabled(False)
         if operation == "rebuild":
             self.parser_pill.set_state("重建索引中", "running")
-            self.pipeline_widget.set_steps(
+            self._set_pipeline_steps(
                 [
                     {"name": "MinerU / Docling 文档解析", "status": "success", "message": "复用已解析资料"},
                     {"name": "语义分块", "status": "running", "message": "读取并去重文本块"},
@@ -1727,7 +1781,7 @@ class KnowledgeWidget(QWidget):
             result = payload.get("result") if isinstance(payload.get("result"), dict) else {}
             steps = result.get("pipeline") if isinstance(result.get("pipeline"), list) else []
             if steps:
-                self.pipeline_widget.set_steps(steps)
+                self._set_pipeline_steps(steps)
             self.refresh(query_text=self.search_input.text().strip() or DEFAULT_EVIDENCE_QUERY)
             self.parser_pill.set_state("索引重建完成", "success")
             return
@@ -1907,7 +1961,7 @@ class KnowledgeWidget(QWidget):
             relation_name = str(relation.get("relation") or "RELATED_TO")
             relation_counts[relation_name] = relation_counts.get(relation_name, 0) + 1
 
-        html = ["<h3>图谱审计</h3>"]
+        html: list[str] = []
         if selected_name:
             entity_type = node_types.get(selected_name, "Entity")
             related = [
@@ -1968,7 +2022,7 @@ class KnowledgeWidget(QWidget):
                         f"<span style='float:right;color:{muted};'>{count}</span>"
                         "</div>"
                     )
-        self.graph_detail_browser.setHtml("".join(html))
+        self.graph_detail_browser.setHtml(self._browser_html("".join(html)))
 
     def _update_status_pills(self, status: dict[str, Any]) -> None:
         ready = bool(status.get("ready"))
@@ -2001,54 +2055,39 @@ class KnowledgeWidget(QWidget):
         runtime_chunks = int(status.get("runtime_rag_chunk_count", 0) or 0)
         builtin_relations = int(status.get("builtin_kg_relation_count", 0) or 0)
         runtime_relations = int(status.get("runtime_kg_relation_count", 0) or 0)
-        html = [
-            "<h2>项目知识库状态</h2>",
-            "<p>项目知识库由内置数据和用户增量组成。用户上传资料后进入解析、分块、索引、实体关系抽取和检索验证流程，最终检索入口读取合并后的总 RAG/KG。检索证据用于 LLM 工程上下文和人工审计，不替代代理公式或 FEM 结果。</p>",
-            "<div style='display:grid;grid-template-columns:repeat(2,1fr);gap:8px;'>",
-            self._summary_card("内置数据", f"{builtin_chunks} 文本块", f"{status.get('builtin_kg_entity_count', 0)} 实体 / {builtin_relations} 关系"),
-            self._summary_card("用户增量", f"{doc_count} 文档", f"{runtime_chunks} 文本块 / {runtime_relations} 关系"),
-            self._summary_card("合并 RAG", f"{status.get('rag_chunk_count', 0)} 文本块"),
-            self._summary_card(
-                "Vector",
-                f"{status.get('vector_chunk_count', 0)} 向量块",
-                f"后端 {status.get('vector_backend') or '-'}；状态 {status.get('vector_status') or '-'}",
-            ),
-            self._summary_card("合并 KG", f"{status.get('kg_entity_count', 0)} 实体 / {status.get('kg_relation_count', 0)} 关系"),
-            self._summary_card("分块", f"{chunk_size} token / overlap {overlap}"),
-            self._summary_card("案例", f"会话 {len(archive_cases)} / 正式 {len(formal_cases)}"),
-            self._summary_card("FEM", f"ODB {odb_count} / 云图 {vis_count}"),
-            "</div>",
-            f"<p><b>最后入库：</b>{escape(str(last.get('title') or '-'))}；<b>解析器：</b>{escape(str(last.get('parser_backend') or '-'))}</p>",
-            f"<p><b>向量索引：</b>{escape(str(status.get('vector_status') or '-'))}；{escape(str(status.get('vector_message') or '-'))}</p>",
-            f"<p><b>检索验证：</b>{escape(str(verification.get('message') or '-'))}</p>",
-            f"<p><b>用户增量清单：</b>{escape(str(status.get('manifest_path') or '-'))}</p>",
-            f"<p><b>内置数据清单：</b>{escape(str(status.get('builtin_manifest_path') or '-'))}</p>",
+        display_lines = [
+            "项目知识库由内置数据和用户增量组成，检索入口读取合并后的总 RAG/KG。",
+            f"内置数据：{builtin_chunks} 文本块，{status.get('builtin_kg_entity_count', 0)} 实体，{builtin_relations} 关系。",
+            f"用户增量：{doc_count} 文档，{runtime_chunks} 文本块，{runtime_relations} 关系。",
+            f"合并索引：{status.get('rag_chunk_count', 0)} 文本块，{status.get('kg_entity_count', 0)} 实体，"
+            f"{status.get('kg_relation_count', 0)} 关系。",
+        ]
+        display_html = [
+            "<p>项目知识库由内置数据和用户增量组成，检索入口读取合并后的总 RAG/KG。</p>",
+            f"<p><b>内置数据：</b><span class='metric'>{builtin_chunks}</span> 文本块，"
+            f"{status.get('builtin_kg_entity_count', 0)} 实体，{builtin_relations} 关系。</p>",
+            f"<p><b>用户增量：</b>{doc_count} 文档，{runtime_chunks} 文本块，{runtime_relations} 关系。</p>",
+            f"<p><b>合并索引：</b>{status.get('rag_chunk_count', 0)} 文本块，"
+            f"{status.get('kg_entity_count', 0)} 实体，{status.get('kg_relation_count', 0)} 关系。</p>",
+        ]
+        full_html = [
+            *display_html,
+            f"<p><b>分块：</b>{chunk_size} token / overlap {overlap}；"
+            f"<b>Vector：</b>{status.get('vector_status') or '-'}。</p>",
+            f"<p><b>案例/FEM：</b>会话 {len(archive_cases)} / 正式 {len(formal_cases)}；"
+            f"ODB {odb_count} / 云图 {vis_count}。</p>",
+            f"<p><b>最后入库：</b>{escape(str(last.get('title') or '-'))}；"
+            f"<b>检索验证：</b>{escape(str(verification.get('message') or '-'))}</p>",
+            f"<p class='muted'><b>清单：</b>{escape(str(status.get('manifest_path') or '-'))}；"
+            f"内置 {escape(str(status.get('builtin_manifest_path') or '-'))}</p>",
         ]
         if metrics:
-            html.append(
+            full_html.append(
                 "<p><b>代理模型：</b>"
                 f"{escape(str(metrics.get('selected_model', '-')))}，训练样本 {escape(str(metrics.get('training_size', '-')))}</p>"
             )
-        self.summary_browser.setHtml("".join(html))
-
-    def _summary_card(self, title: str, value: str, detail: str = "") -> str:
-        if self.theme == "light":
-            border = "#c8d2df"
-            background = "#f8fafc"
-            muted = "#64748b"
-            foreground = "#172033"
-        else:
-            border = "#2b3a52"
-            background = "#111a28"
-            muted = "#64748b"
-            foreground = "#dbe4ef"
-        detail_html = f"<br><span style='color:{muted};font-size:11px;'>{escape(detail)}</span>" if detail else ""
-        return (
-            f"<div style='border:1px solid {border};border-radius:8px;padding:8px 10px;background:{background};'>"
-            f"<span style='color:{muted};font-size:12px;'>{escape(title)}</span><br>"
-            f"<span style='font-size:18px;font-weight:800;color:{foreground};'>{escape(value)}</span>"
-            f"{detail_html}</div>"
-        )
+        self._summary_html_cache = self._panel_html("".join(full_html))
+        self.summary_label.setText("\n".join(display_lines))
 
     def _update_source_overview(self, status: dict[str, Any]) -> None:
         builtin_chunks = int(status.get("builtin_rag_chunk_count", 0) or 0)
@@ -2058,16 +2097,18 @@ class KnowledgeWidget(QWidget):
         runtime_chunks = int(status.get("runtime_rag_chunk_count", 0) or 0)
         runtime_relations = int(status.get("runtime_kg_relation_count", 0) or 0)
         vector_status = status.get("vector_status") or "pending"
-        html = [
-            "<h3>知识来源与索引</h3>",
-            "<ul>",
-            f"<li><b>系统资料包：</b>{builtin_chunks} 文本块，{builtin_entities} 实体，{builtin_relations} 关系。</li>",
-            f"<li><b>用户增量：</b>{runtime_docs} 文档，{runtime_chunks} 文本块，{runtime_relations} 关系。</li>",
-            f"<li><b>合并索引：</b>{status.get('rag_chunk_count', 0)} 文本块，{status.get('kg_entity_count', 0)} 实体，{status.get('kg_relation_count', 0)} 关系。</li>",
-            f"<li><b>向量状态：</b>{escape(str(vector_status))}；chunk {escape(str(status.get('chunk_token_size', '-')))} / overlap {escape(str(status.get('chunk_overlap_tokens', '-')))}。</li>",
-            "</ul>",
-        ]
-        self.source_overview_browser.setHtml("".join(html))
+        self.source_overview_label.setText(
+            "\n".join(
+                [
+                    f"系统资料包：{builtin_chunks} 文本块，{builtin_entities} 实体，{builtin_relations} 关系。",
+                    f"用户增量：{runtime_docs} 文档，{runtime_chunks} 文本块，{runtime_relations} 关系。",
+                    f"合并索引：{status.get('rag_chunk_count', 0)} 文本块，{status.get('kg_entity_count', 0)} 实体，"
+                    f"{status.get('kg_relation_count', 0)} 关系。",
+                    f"向量状态：{vector_status}；chunk {status.get('chunk_token_size', '-')} / "
+                    f"overlap {status.get('chunk_overlap_tokens', '-')}。",
+                ]
+            )
+        )
 
     def _html_card_style(self) -> str:
         if self.theme == "light":
@@ -2090,13 +2131,8 @@ class KnowledgeWidget(QWidget):
                         rows.append(payload)
         self.document_table.setRowCount(len(rows))
         if not rows:
-            self.document_stack.setCurrentIndex(0)
-            self.document_stack.setMaximumHeight(132)
-            self.document_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            self._set_document_empty_html()
             return
-        self.document_stack.setCurrentIndex(1)
-        self.document_stack.setMaximumHeight(420)
-        self.document_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         for row_index, item in enumerate(rows):
             values = [
                 item.get("title") or item.get("file_name") or item.get("document_id") or "",
@@ -2109,13 +2145,27 @@ class KnowledgeWidget(QWidget):
             for col_index, value in enumerate(values):
                 self.document_table.setItem(row_index, col_index, QTableWidgetItem(str(value)))
         self.document_table.resizeRowsToContents()
+        latest = rows[-1]
+        latest_title = latest.get("title") or latest.get("file_name") or latest.get("document_id") or "-"
+        latest_parser = latest.get("parser_backend") or "-"
+        latest_chunks = latest.get("chunk_count") or 0
+        latest_hash = str(latest.get("file_sha256") or "")[:12] or "-"
+        self.document_overview_label.setText(
+            "\n".join(
+                [
+                    f"已入库资料：{len(rows)} 个文档，最近记录 {latest_title}。",
+                    f"最近解析：{latest_parser}，{latest_chunks} 个 Chunk。",
+                    f"内容指纹：{latest_hash}。",
+                ]
+            )
+        )
 
     def _update_pipeline(self, status: dict[str, Any]) -> None:
         pipeline = status.get("pipeline") if isinstance(status.get("pipeline"), list) else []
         if pipeline:
-            self.pipeline_widget.set_steps(pipeline)
+            self._set_pipeline_steps(pipeline)
             return
-        self.pipeline_widget.set_steps(
+        self._set_pipeline_steps(
             [
                 {"name": "MinerU / Docling 文档解析", "status": "pending", "message": "等待用户上传资料"},
                 {"name": "语义分块", "status": "pending", "message": "chunk_token_size / overlap 由配置控制"},
@@ -2156,7 +2206,6 @@ class KnowledgeWidget(QWidget):
         chunks = payload.get("chunks") if isinstance(payload.get("chunks"), list) else []
         relations = payload.get("relations") if isinstance(payload.get("relations"), list) else []
         lines = [
-            "<h3>混合检索结果</h3>",
             f"<p><b>检索词：</b>{escape(query or '-')}</p>",
         ]
         lines.append("<h4>RAG 文本块</h4>")
@@ -2207,7 +2256,7 @@ class KnowledgeWidget(QWidget):
         policy = Qt.ScrollBarPolicy.ScrollBarAsNeeded if scrollable else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
         self.evidence_browser.setVerticalScrollBarPolicy(policy)
         self.evidence_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.evidence_browser.setHtml(html)
+        self.evidence_browser.setHtml(self._browser_html(html))
 
     def _page_text(self, item: dict[str, Any]) -> str:
         page_start = item.get("page_start")

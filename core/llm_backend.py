@@ -86,8 +86,8 @@ def auto_llm_enabled() -> bool:
 
 
 def llm_user_agent() -> str:
-    value = os.getenv("LLM_USER_AGENT", "CSGPT/1.0").strip()
-    return value or "CSGPT/1.0"
+    value = os.getenv("LLM_USER_AGENT", "CSAgent/1.0").strip()
+    return value or "CSAgent/1.0"
 
 
 class LLMBackend:

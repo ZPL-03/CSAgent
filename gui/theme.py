@@ -36,6 +36,8 @@ FONT_FAMILIES = [
     "Arial",
 ]
 
+GUI_ASSET_DIR = Path(__file__).resolve().parent / "assets"
+
 
 def install_application_font(app: QApplication | None = None) -> str:
     """加载中英文字体并返回实际选用的字体族。"""
@@ -199,7 +201,9 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         f'"{safe_font}", "Segoe UI Variable Text", "Segoe UI", '
         '"Microsoft YaHei UI", "Microsoft YaHei", "Noto Sans SC", "Arial"'
     )
-    color = _theme_palette(resolve_theme(theme))
+    resolved_theme = resolve_theme(theme)
+    color = _theme_palette(resolved_theme)
+    combo_arrow_icon = (GUI_ASSET_DIR / f"chevron-down-{resolved_theme}.svg").as_posix()
     return f"""
     QMainWindow, QWidget {{
         background: {color["app_bg"]};
@@ -427,21 +431,28 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
     QComboBox::drop-down {{
         subcontrol-origin: padding;
         subcontrol-position: top right;
-        width: 28px;
-        border-left: 1px solid {color["border_soft"]};
+        width: 24px;
+        border: none;
         border-top-right-radius: 8px;
         border-bottom-right-radius: 8px;
         background: transparent;
     }}
     QComboBox::down-arrow {{
-        image: none;
-        width: 0;
-        height: 0;
+        image: url("{combo_arrow_icon}");
+        width: 10px;
+        height: 10px;
+        border: none;
+        margin-right: 8px;
     }}
     QLineEdit#settingsInput, QComboBox#settingsInput {{
         min-height: 34px;
         padding: 2px 10px;
         padding-right: 28px;
+    }}
+    QComboBox#settingsInput::drop-down {{
+        width: 24px;
+        border: none;
+        background: transparent;
     }}
     QTableWidget {{
         gridline-color: {color["border_soft"]};
@@ -561,8 +572,23 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         border-color: {color["accent"]};
         color: {color["accent"]};
     }}
-    QWidget#graphSidePanel {{
+    QFrame#knowledgeSidePanel, QFrame#knowledgeOverviewPanel, QFrame#knowledgeGraphPanel, QFrame#knowledgeEvidencePanel {{
         background: {color["surface_alt"]};
+        border: 1px solid {color["border_soft"]};
+        border-radius: 12px;
+    }}
+    QFrame#knowledgeMiniPanel {{
+        background: {color["surface"]};
+        border: 1px solid {color["border_soft"]};
+        border-radius: 10px;
+    }}
+    QFrame#graphFilterPanel {{
+        background: {color["surface"]};
+        border: 1px solid {color["border_soft"]};
+        border-radius: 10px;
+    }}
+    QWidget#graphSidePanel, QFrame#graphSidePanel {{
+        background: {color["surface"]};
         border: 1px solid {color["border_soft"]};
         border-radius: 12px;
     }}
@@ -572,6 +598,29 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         font-size: 12px;
         font-weight: 600;
         padding: 0 4px;
+    }}
+    QLabel#knowledgePanelTitle {{
+        background: transparent;
+        color: {color["section"]};
+        font-size: 12px;
+        font-weight: 800;
+        padding: 0;
+    }}
+    QLabel#knowledgeBodyLabel {{
+        background: transparent;
+        color: {color["text"]};
+        font-size: 13px;
+        padding: 0;
+    }}
+    QScrollArea#knowledgeTextScroll {{
+        background: transparent;
+        border: none;
+    }}
+    QScrollArea#knowledgeTextScroll > QWidget {{
+        background: transparent;
+    }}
+    QScrollArea#knowledgeTextScroll QWidget {{
+        background: transparent;
     }}
     QLabel#graphSubTitle {{
         background: transparent;
@@ -585,11 +634,16 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         padding: 5px 10px;
         padding-right: 10px;
     }}
-    QTextBrowser#graphDetailBrowser {{
-        background: {color["surface"]};
-        border: 1px solid {color["border_soft"]};
-        border-radius: 10px;
-        padding: 8px;
+    QTextBrowser#knowledgePanelBrowser {{
+        background: transparent;
+        border: none;
+        padding: 2px;
+    }}
+    QTextBrowser#knowledgePanelBrowser QWidget {{
+        background: transparent;
+    }}
+    QTextBrowser#knowledgePanelBrowser > QWidget {{
+        background: transparent;
     }}
     QComboBox#graphFilterCombo {{
         min-height: 30px;

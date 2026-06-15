@@ -134,7 +134,7 @@ def test_knowledge_widget_renders_runtime_pipeline_and_evidence(monkeypatch, tmp
     try:
         widget.refresh(query_text="外压圆柱壳 屈曲")
         html = widget.toHtml()
-        assert "项目知识库状态" in html
+        assert "内置数据" in html
         assert "knowledge/runtime/manifest.json" in html
         assert "检索命中 3 个当前文档证据" in html
         assert "Composite pressure hull buckling evidence" in html
@@ -210,7 +210,6 @@ def test_knowledge_widget_graph_search_filters_visible_graph(monkeypatch, tmp_pa
         relation_chip.setChecked(True)
         app.processEvents()
         assert widget.graph_view.active_relation_types == {"CO_OCCURS_WITH"}
-        assert "图谱审计" in widget.graph_detail_browser.toHtml()
         assert "总实体" in widget.graph_detail_browser.toHtml()
 
         widget.graph_view._selected_node_name = "Initial Imperfection"
@@ -441,7 +440,7 @@ def test_knowledge_graph_view_default_layout_fits_canvas() -> None:
         graph.set_graph(entities=entities, relations=relations)
         _nodes, visible_relations, _total_nodes, total_relations = graph._node_payload()
         assert total_relations == 90
-        assert len(visible_relations) <= 20
+        assert len(visible_relations) <= 16
 
         graph.set_filter_text("Node")
         _nodes, filtered_relations, _total_nodes, _total_relations = graph._node_payload()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import tempfile
 import json
+import re
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -486,8 +487,9 @@ class ReleaseAudit:
         previous_llm_auto = os.environ.get("CSDM_cph_DISABLE_LLM_AUTO")
         os.environ["CSDM_cph_DISABLE_LLM_AUTO"] = "1"
 
+        from PyQt6.QtCore import QRect, Qt
         from PyQt6.QtGui import QColor
-        from PyQt6.QtWidgets import QApplication, QPushButton
+        from PyQt6.QtWidgets import QApplication, QLabel, QPushButton
 
         from gui.main_window import MainWindow
 
@@ -522,6 +524,38 @@ class ReleaseAudit:
                         return True
             return len(samples) >= 8
 
+        def plain_text(value: str) -> str:
+            text = re.sub(r"<br\s*/?>", "\n", value, flags=re.IGNORECASE)
+            text = re.sub(r"<[^>]+>", "", text)
+            return re.sub(r"\s+", " ", text).strip()
+
+        def check_label_geometry(theme: str, page_name: str) -> None:
+            for label in window.findChildren(QLabel):
+                if not label.isVisible():
+                    continue
+                text = plain_text(label.text())
+                if not text:
+                    continue
+                available_width = max(0, label.width() - 8)
+                if available_width <= 0 or label.height() <= 0:
+                    errors.append(f"{theme}/{page_name} 标签区域异常：{text[:24]}")
+                    if len(errors) >= 12:
+                        return
+                    continue
+                metrics = label.fontMetrics()
+                if label.wordWrap():
+                    bounds = metrics.boundingRect(
+                        QRect(0, 0, available_width, 4000),
+                        Qt.TextFlag.TextWordWrap,
+                        text,
+                    )
+                    if bounds.height() > label.height() + max(8, metrics.lineSpacing()):
+                        errors.append(f"{theme}/{page_name} 标签高度不足：{text[:32]}")
+                elif metrics.horizontalAdvance(text) > available_width:
+                    errors.append(f"{theme}/{page_name} 标签文本溢出：{text[:32]}")
+                if len(errors) >= 12:
+                    return
+
         screenshot_root: Path | None = None
         temp_dir: tempfile.TemporaryDirectory[str] | None = None
         if self.keep_gui_screenshots:
@@ -552,6 +586,7 @@ class ReleaseAudit:
                     center_widget = window.stack.currentWidget()
                     if center_widget is None or center_widget.width() < 760 or center_widget.height() < 620:
                         errors.append(f"{theme}/{page_name} 中央页尺寸异常")
+                    check_label_geometry(theme, page_name)
 
             window._switch_workspace_page(2)
             app.processEvents()
