@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QLineF, QObject, QPointF, QRectF, QSize, QThread, Qt, pyqtSignal
-from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPolygonF
+from PyQt6.QtGui import QBrush, QColor, QFont, QFontMetrics, QPainter, QPainterPath, QPen, QPolygonF, QRadialGradient
 from PyQt6.QtWidgets import (
     QFileDialog,
     QHeaderView,
@@ -68,6 +68,7 @@ class KnowledgeGraphView(QWidget):
         self._last_node_positions: dict[str, QPointF] = {}
         self._last_node_radii: dict[str, float] = {}
         self._selected_node_name = ""
+        self._hovered_node_name = ""
         self.setMinimumHeight(300)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMouseTracking(True)
@@ -161,6 +162,8 @@ class KnowledgeGraphView(QWidget):
                 "grid": QColor(100, 116, 139, 28),
                 "label_bg": QColor(255, 255, 255, 205),
                 "selected": QColor("#0f766e"),
+                "node_ring": QColor("#ffffff"),
+                "node_shadow": QColor(15, 23, 42, 34),
             }
         return {
             "bg": QColor("#101821"),
@@ -168,11 +171,13 @@ class KnowledgeGraphView(QWidget):
             "border": QColor("#2b3a52"),
             "text": QColor("#dbe4ef"),
             "muted": QColor("#94a3b8"),
-                "edge": QColor("#52647e"),
+            "edge": QColor("#52647e"),
             "highlight": QColor("#a78bfa"),
             "grid": QColor(148, 163, 184, 24),
             "label_bg": QColor(15, 23, 42, 210),
             "selected": QColor("#38bdf8"),
+            "node_ring": QColor("#0f172a"),
+            "node_shadow": QColor(0, 0, 0, 96),
         }
 
     def _type_color(self, entity_type: str) -> QColor:
@@ -459,6 +464,71 @@ class KnowledgeGraphView(QWidget):
             y += spacing
         painter.restore()
 
+    def _draw_background(self, painter: QPainter, panel: QRectF, graph_rect: QRectF, colors: dict[str, QColor]) -> None:
+        painter.save()
+        painter.setPen(QPen(colors["border"], 1.0))
+        painter.setBrush(QBrush(colors["panel"]))
+        painter.drawRoundedRect(panel, 12, 12)
+
+        glow = QRadialGradient(graph_rect.center(), max(graph_rect.width(), graph_rect.height()) * 0.62)
+        if self.theme == "light":
+            glow.setColorAt(0.0, QColor(219, 234, 254, 92))
+            glow.setColorAt(0.48, QColor(248, 251, 255, 28))
+            glow.setColorAt(1.0, QColor(248, 251, 255, 0))
+        else:
+            glow.setColorAt(0.0, QColor(37, 99, 235, 38))
+            glow.setColorAt(0.46, QColor(56, 189, 248, 12))
+            glow.setColorAt(1.0, QColor(15, 23, 42, 0))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(glow))
+        painter.drawRoundedRect(graph_rect, 10, 10)
+        painter.restore()
+
+    def _draw_node(
+        self,
+        painter: QPainter,
+        point: QPointF,
+        radius: float,
+        color: QColor,
+        colors: dict[str, QColor],
+        selected: bool,
+        hovered: bool,
+    ) -> None:
+        painter.save()
+        if selected or hovered:
+            halo = QColor(colors["selected"] if selected else color)
+            halo.setAlpha(70 if selected else 42)
+            painter.setBrush(QBrush(halo))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawEllipse(point, radius + (9.0 if selected else 6.0), radius + (9.0 if selected else 6.0))
+
+        shadow = QColor(colors["node_shadow"])
+        painter.setBrush(QBrush(shadow))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QPointF(point.x() + 1.2, point.y() + 2.0), radius + 2.0, radius + 2.0)
+
+        gradient = QRadialGradient(QPointF(point.x() - radius * 0.35, point.y() - radius * 0.38), radius * 1.9)
+        lighter = QColor(color)
+        lighter = lighter.lighter(145 if self.theme == "light" else 130)
+        darker = QColor(color)
+        darker = darker.darker(118)
+        gradient.setColorAt(0.0, lighter)
+        gradient.setColorAt(0.62, color)
+        gradient.setColorAt(1.0, darker)
+        painter.setBrush(QBrush(gradient))
+        ring = QColor(colors["selected"] if selected else colors["node_ring"])
+        if not selected and hovered:
+            ring = QColor(color).lighter(155)
+        painter.setPen(QPen(ring, 2.6 if selected else (2.0 if hovered else 1.25)))
+        painter.drawEllipse(point, radius, radius)
+
+        inner = QColor("#ffffff" if self.theme == "light" else "#e2e8f0")
+        inner.setAlpha(66)
+        painter.setBrush(QBrush(inner))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QPointF(point.x() - radius * 0.32, point.y() - radius * 0.34), max(2.0, radius * 0.18), max(2.0, radius * 0.18))
+        painter.restore()
+
     def _draw_edge(
         self,
         painter: QPainter,
@@ -594,10 +664,8 @@ class KnowledgeGraphView(QWidget):
         painter.fillRect(self.rect(), colors["bg"])
 
         panel = QRectF(1, 1, self.width() - 2, self.height() - 2)
-        painter.setBrush(QBrush(colors["panel"]))
-        painter.setPen(QPen(colors["border"], 1.0))
-        painter.drawRoundedRect(panel, 12, 12)
-        graph_rect = panel.adjusted(16, 42, -16, -18)
+        graph_rect = panel.adjusted(16, 42, -16, -16)
+        self._draw_background(painter, panel, graph_rect, colors)
         self._draw_grid(painter, graph_rect, colors["grid"])
 
         visible_nodes, visible_relations, total_nodes, total_relations = self._node_payload()
@@ -667,18 +735,13 @@ class KnowledgeGraphView(QWidget):
                 radius += 2.0
             self._last_node_radii[name] = radius
             is_selected = name == self._selected_node_name
-            if is_selected:
-                halo = QColor(colors["selected"])
-                halo.setAlpha(74)
-                painter.setBrush(QBrush(halo))
-                painter.setPen(Qt.PenStyle.NoPen)
-                painter.drawEllipse(point, radius + 8.0, radius + 8.0)
-            painter.setBrush(QBrush(color))
-            painter.setPen(QPen(colors["selected"] if is_selected or name in ranked_label_names else colors["panel"], 2.6 if is_selected else 1.8))
-            painter.drawEllipse(point, radius, radius)
+            is_hovered = name == self._hovered_node_name
+            self._draw_node(painter, point, radius, color, colors, is_selected, is_hovered)
             should_label = is_selected or (self.show_labels and name in ranked_label_names) or (
                 self.filter_text and self.filter_text in name.lower()
-            )
+            ) or is_hovered
+            if self.show_labels is False:
+                should_label = is_selected or is_hovered or (self.filter_text and self.filter_text in name.lower())
             if should_label:
                 self._draw_label(
                     painter,
@@ -745,8 +808,17 @@ class KnowledgeGraphView(QWidget):
             event.accept()
             return
         hovered = self._hovered_node(event.position())
+        if hovered != self._hovered_node_name:
+            self._hovered_node_name = hovered
+            self.update()
         self.setToolTip(hovered or "")
         super().mouseMoveEvent(event)
+
+    def leaveEvent(self, event) -> None:
+        if self._hovered_node_name:
+            self._hovered_node_name = ""
+            self.update()
+        super().leaveEvent(event)
 
     def mouseReleaseEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self._drag_node_name is not None:
@@ -1527,10 +1599,10 @@ class KnowledgeWidget(QWidget):
                 for entity_type, count in sorted(type_counts.items(), key=lambda item: (-item[1], item[0]))[:8]:
                     color = self.graph_view._type_color(entity_type).name()
                     html.append(
-                        f"<div style='display:flex;align-items:center;gap:7px;margin:5px 0;color:{foreground};'>"
+                        f"<div style='margin:5px 0;color:{foreground};'>"
                         f"<span style='display:inline-block;width:8px;height:8px;border-radius:4px;background:{color};'></span>"
-                        f"<span>{escape(entity_type)}</span>"
-                        f"<span style='margin-left:auto;color:{muted};'>{count}</span>"
+                        f"<span style='margin-left:7px;'>{escape(entity_type)}</span>"
+                        f"<span style='color:{muted};'>&nbsp;&nbsp;{count}</span>"
                         "</div>"
                     )
             if relation_counts:

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import argparse
+import tempfile
 import json
 import subprocess
 import sys
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Iterable
 
@@ -96,8 +98,15 @@ class AuditItem:
 
 
 class ReleaseAudit:
-    def __init__(self, with_llm_health: bool = False) -> None:
+    def __init__(
+        self,
+        with_llm_health: bool = False,
+        with_gui_render: bool = False,
+        keep_gui_screenshots: bool = False,
+    ) -> None:
         self.with_llm_health = with_llm_health
+        self.with_gui_render = with_gui_render
+        self.keep_gui_screenshots = keep_gui_screenshots
         self.items: list[AuditItem] = []
 
     def add(self, name: str, passed: bool, detail: str) -> None:
@@ -114,6 +123,8 @@ class ReleaseAudit:
         self.check_knowledge_pipeline_contract()
         self.check_knowledge_file_type_contract()
         self.check_gui_workbench_contract()
+        if self.with_gui_render:
+            self.check_gui_render_contract()
         self.check_ui_assets()
         self.check_cases()
         self.check_latest_report()
@@ -443,8 +454,12 @@ class ReleaseAudit:
             ],
             "knowledge": [
                 "graph_search_input",
+                "graph_type_filter",
+                "graph_relation_filter",
                 "graph_reset_button",
                 "set_filter_text",
+                "set_type_filter",
+                "set_relation_filter",
                 "wheelEvent",
                 "mousePressEvent",
                 "mouseMoveEvent",
@@ -463,6 +478,121 @@ class ReleaseAudit:
                     missing.append(f"{name}:{token}")
         detail = "五页导航、六智能体 DAG、对话区、实时视口、知识图谱交互和设置页配置入口齐备" if not missing else "; ".join(missing[:12])
         self.add("GUI 工作台契约", not missing, detail)
+
+    def check_gui_render_contract(self) -> None:
+        import os
+
+        os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+        previous_llm_auto = os.environ.get("CSDM_cph_DISABLE_LLM_AUTO")
+        os.environ["CSDM_cph_DISABLE_LLM_AUTO"] = "1"
+
+        from PyQt6.QtGui import QColor
+        from PyQt6.QtWidgets import QApplication, QPushButton
+
+        from gui.main_window import MainWindow
+
+        app = QApplication.instance() or QApplication([])
+        window = MainWindow()
+        errors: list[str] = []
+
+        def set_runtime_theme(theme: str) -> None:
+            window.locale.theme = theme
+            window.theme_selector.blockSignals(True)
+            index = window.theme_selector.findData(theme)
+            if index >= 0:
+                window.theme_selector.setCurrentIndex(index)
+            window.theme_selector.blockSignals(False)
+            window._apply_styles()
+            window._update_overview_cards()
+
+        def image_has_content(image) -> bool:
+            width = image.width()
+            height = image.height()
+            if width < 1200 or height < 800:
+                errors.append(f"截图尺寸过小 {width}x{height}")
+                return False
+            samples: set[tuple[int, int, int]] = set()
+            x_step = max(1, width // 24)
+            y_step = max(1, height // 18)
+            for x in range(0, width, x_step):
+                for y in range(0, height, y_step):
+                    color = QColor(image.pixel(x, y))
+                    samples.add((color.red(), color.green(), color.blue()))
+                    if len(samples) >= 8:
+                        return True
+            return len(samples) >= 8
+
+        screenshot_root: Path | None = None
+        temp_dir: tempfile.TemporaryDirectory[str] | None = None
+        if self.keep_gui_screenshots:
+            screenshot_root = ROOT / "data/runtime/release_gui_audit" / datetime.now().strftime("RUN_%Y%m%d_%H%M%S")
+            screenshot_root.mkdir(parents=True, exist_ok=True)
+        else:
+            temp_dir = tempfile.TemporaryDirectory(prefix="csagent_gui_audit_")
+            screenshot_root = Path(temp_dir.name)
+
+        page_names = ["workbench", "project", "knowledge", "monitor", "settings"]
+        try:
+            window.resize(1680, 1060)
+            window.show()
+            app.processEvents()
+            screenshots = 0
+            for theme in ["dark", "light"]:
+                set_runtime_theme(theme)
+                for index, page_name in enumerate(page_names):
+                    window._switch_workspace_page(index)
+                    app.processEvents()
+                    pixmap = window.grab()
+                    image = pixmap.toImage()
+                    screenshots += 1
+                    if not image_has_content(image):
+                        errors.append(f"{theme}/{page_name} 渲染内容异常")
+                    if screenshot_root is not None:
+                        pixmap.save(str(screenshot_root / f"{theme}_{page_name}.png"), "PNG")
+                    center_widget = window.stack.currentWidget()
+                    if center_widget is None or center_widget.width() < 760 or center_widget.height() < 620:
+                        errors.append(f"{theme}/{page_name} 中央页尺寸异常")
+
+            window._switch_workspace_page(2)
+            app.processEvents()
+            graph_view = window.knowledge_widget.graph_view
+            if graph_view.width() < 520 or graph_view.height() < 300:
+                errors.append(f"知识图谱画布尺寸异常 {graph_view.width()}x{graph_view.height()}")
+            if window.knowledge_widget.graph_detail_browser.width() < 220:
+                errors.append("知识图谱详情栏宽度异常")
+            if window.knowledge_widget.graph_type_filter.count() < 1 or window.knowledge_widget.graph_relation_filter.count() < 1:
+                errors.append("知识图谱过滤控件未初始化")
+
+            for button in window.findChildren(QPushButton):
+                if not button.isVisible():
+                    continue
+                text = button.text().strip()
+                if not text:
+                    continue
+                available_width = max(0, button.width() - 18)
+                if button.fontMetrics().horizontalAdvance(text) > available_width:
+                    errors.append(f"按钮文本溢出：{text}")
+                    if len(errors) >= 12:
+                        break
+        except Exception as exc:
+            errors.append(f"GUI 渲染异常：{exc}")
+        finally:
+            window.close()
+            app.processEvents()
+            if temp_dir is not None:
+                temp_dir.cleanup()
+            if previous_llm_auto is None:
+                os.environ.pop("CSDM_cph_DISABLE_LLM_AUTO", None)
+            else:
+                os.environ["CSDM_cph_DISABLE_LLM_AUTO"] = previous_llm_auto
+
+        detail = (
+            f"深浅主题五页渲染通过，截图 {screenshots} 张"
+            + (f"，保留目录 {screenshot_root.relative_to(ROOT).as_posix()}" if self.keep_gui_screenshots and screenshot_root else "")
+            if not errors
+            else "; ".join(errors[:12])
+        )
+        self.add("GUI 渲染审计", not errors, detail)
 
     def check_ui_assets(self) -> None:
         missing = [asset for asset in REQUIRED_UI_ASSETS if not (ROOT / asset).is_file()]
@@ -545,8 +675,14 @@ class ReleaseAudit:
 def main() -> int:
     parser = argparse.ArgumentParser(description="CSAgent 交付一致性检查")
     parser.add_argument("--with-llm-health", action="store_true", help="同时检查 LLM 主/回退模型连通性")
+    parser.add_argument("--with-gui-render", action="store_true", help="同时渲染主窗口并检查五页布局")
+    parser.add_argument("--keep-gui-screenshots", action="store_true", help="保留 GUI 渲染审计截图到 data/runtime")
     args = parser.parse_args()
-    return ReleaseAudit(with_llm_health=args.with_llm_health).run()
+    return ReleaseAudit(
+        with_llm_health=args.with_llm_health,
+        with_gui_render=args.with_gui_render,
+        keep_gui_screenshots=args.keep_gui_screenshots,
+    ).run()
 
 
 if __name__ == "__main__":
