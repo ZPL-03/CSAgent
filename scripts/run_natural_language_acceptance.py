@@ -29,10 +29,39 @@ from core.task_contract import requested_candidate_pool_size, requested_screen_t
 from workflow.event_store import WorkflowEventStore
 
 
-DEFAULT_INSTRUCTIONS = [
-    "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 8 个候选，初筛保留 3 个候选",
-    "请为深海潜器复合材料外压圆柱耐压壳设计方案，外压 28 MPa，极限压力不低于 36 MPa，生成 8 个候选，初筛保留 3 个候选，两端简支",
-    "Design a composite external-pressure cylindrical pressure hull, external pressure 25 MPa, ultimate pressure at least 40 MPa, generate 8 candidates, keep 3 after screening, simply supported ends",
+DEFAULT_INSTRUCTION_CASES = [
+    {
+        "instruction": "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 8 个候选，初筛保留 3 个候选",
+        "expected": {"external_pressure_MPa": 30.0, "ultimate_pressure_min_MPa": 35.0, "candidate_count": 8, "screened_count": 3},
+    },
+    {
+        "instruction": "面向深海设备舱的复合材料圆柱耐压壳，外压 28 MPa，极限压力目标不低于 36 MPa，两端简支，生成 8 个候选，初筛保留 3 个候选",
+        "expected": {"external_pressure_MPa": 28.0, "ultimate_pressure_min_MPa": 36.0, "candidate_count": 8, "screened_count": 3},
+    },
+    {
+        "instruction": "Design a composite external-pressure cylindrical pressure hull for 25 MPa hydrostatic pressure, ultimate pressure at least 40 MPa, simply supported ends, generate 8 candidates and retain 3 screened candidates.",
+        "expected": {"external_pressure_MPa": 25.0, "ultimate_pressure_min_MPa": 40.0, "candidate_count": 8, "screened_count": 3},
+    },
+    {
+        "instruction": "复合材料外压圆柱壳耐压设计，外压 32 MPa，极限压力不低于 42 MPa，可参考长度 520 mm、半径 105 mm、厚度 11 mm，但候选参数允许优化，生成 8 个候选，初筛保留 3 个候选",
+        "expected": {"external_pressure_MPa": 32.0, "ultimate_pressure_min_MPa": 42.0, "candidate_count": 8, "screened_count": 3},
+    },
+    {
+        "instruction": "请生成无人潜航器用复合材料耐压圆柱壳方案，外压 22 MPa，极限压力不低于 33 MPa，生成 8 个候选，初筛保留 3 个候选",
+        "expected": {"external_pressure_MPa": 22.0, "ultimate_pressure_min_MPa": 33.0, "candidate_count": 8, "screened_count": 3},
+    },
+    {
+        "instruction": "复合材料外压圆柱耐压壳，目标工况外压 35 MPa，极限压力不少于 45 MPa，要求两端固支，生成 8 个候选，初筛保留 3 个候选",
+        "expected": {"external_pressure_MPa": 35.0, "ultimate_pressure_min_MPa": 45.0, "candidate_count": 8, "screened_count": 3},
+    },
+    {
+        "instruction": "为轻量化深海耐压舱设计复合材料圆柱壳，外压 18 MPa，极限压力不低于 30 MPa，生成 8 个候选，初筛保留 3 个候选",
+        "expected": {"external_pressure_MPa": 18.0, "ultimate_pressure_min_MPa": 30.0, "candidate_count": 8, "screened_count": 3},
+    },
+    {
+        "instruction": "Composite pressure hull preliminary design: external pressure 40 MPa, required ultimate pressure no less than 52 MPa, generate 8 candidate designs and retain 3 screened candidates.",
+        "expected": {"external_pressure_MPa": 40.0, "ultimate_pressure_min_MPa": 52.0, "candidate_count": 8, "screened_count": 3},
+    },
 ]
 
 
@@ -146,7 +175,53 @@ def _attach_deterministic_downstream(orchestrator: OrchestratorAgent, output_dir
     orchestrator.generate_report = generate_report  # type: ignore[method-assign]
 
 
-def _validate_completed_state(state: ConversationState, instruction: str) -> dict[str, Any]:
+def _expected_float(expected: dict[str, Any], *keys: str) -> float | None:
+    for key in keys:
+        if expected.get(key) is not None:
+            return float(expected[key])
+    return None
+
+
+def _expected_int(expected: dict[str, Any], *keys: str) -> int | None:
+    for key in keys:
+        if expected.get(key) is not None:
+            return int(expected[key])
+    return None
+
+
+def _assert_close(name: str, actual: float | int | None, expected: float | None) -> None:
+    if expected is None:
+        return
+    if actual is None or abs(float(actual) - expected) > 1e-6:
+        raise AssertionError(f"{name} 解析不符合期望：{actual} != {expected}")
+
+
+def _validate_expected_contract(summary: dict[str, Any], expected: dict[str, Any] | None) -> None:
+    if not expected:
+        return
+    _assert_close(
+        "外部静水压力",
+        summary.get("external_pressure_MPa"),
+        _expected_float(expected, "external_pressure_MPa", "pressure"),
+    )
+    _assert_close(
+        "目标极限压力",
+        summary.get("ultimate_pressure_min_MPa"),
+        _expected_float(expected, "ultimate_pressure_min_MPa", "target"),
+    )
+    expected_candidates = _expected_int(expected, "candidate_count", "total_candidates", "total")
+    if expected_candidates is not None and int(summary.get("candidate_count", -1)) != expected_candidates:
+        raise AssertionError(f"候选数量不符合期望：{summary.get('candidate_count')} != {expected_candidates}")
+    expected_screened = _expected_int(expected, "screened_count", "top_k_candidates", "top_k")
+    if expected_screened is not None and int(summary.get("screened_count", -1)) != expected_screened:
+        raise AssertionError(f"初筛数量不符合期望：{summary.get('screened_count')} != {expected_screened}")
+
+
+def _validate_completed_state(
+    state: ConversationState,
+    instruction: str,
+    expected: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     if state.stage != "completed":
         raise AssertionError(f"工作流未完成：{state.stage}")
     if state.task is None:
@@ -175,7 +250,7 @@ def _validate_completed_state(state: ConversationState, instruction: str) -> dic
         raise AssertionError(f"初筛数量不符合任务契约：{len(state.evaluated_candidates)} != {target_top_k}")
 
     generation_audit = dict(state.candidates[0].get("generation_audit") or {}) if state.candidates else {}
-    return {
+    summary = {
         "instruction": instruction,
         "run_id": state.workflow_run_id,
         "stage": state.stage,
@@ -192,9 +267,15 @@ def _validate_completed_state(state: ConversationState, instruction: str) -> dic
         },
         "generation_audit": generation_audit,
     }
+    _validate_expected_contract(summary, expected)
+    if expected:
+        summary["expected"] = expected
+    return summary
 
 
-def _run_case(instruction: str, output_dir: Path, use_real_fem: bool) -> dict[str, Any]:
+def _run_case(case: dict[str, Any], output_dir: Path, use_real_fem: bool) -> dict[str, Any]:
+    instruction = str(case["instruction"])
+    expected = case.get("expected") if isinstance(case.get("expected"), dict) else None
     orchestrator = OrchestratorAgent()
     if not use_real_fem:
         _attach_deterministic_downstream(orchestrator, output_dir)
@@ -210,7 +291,7 @@ def _run_case(instruction: str, output_dir: Path, use_real_fem: bool) -> dict[st
     state = controller.continue_after_confirmation(state, True)
     state = controller.continue_after_confirmation(state, True)
     state = controller.continue_after_confirmation(state, True)
-    summary = _validate_completed_state(state, instruction)
+    summary = _validate_completed_state(state, instruction, expected=expected)
 
     snapshot = store.load_snapshot(state.workflow_run_id)
     if snapshot.get("stage") != "completed":
@@ -230,15 +311,34 @@ def _run_case(instruction: str, output_dir: Path, use_real_fem: bool) -> dict[st
     return summary
 
 
-def _load_instructions(path: Path | None) -> list[str]:
+def _normalize_instruction_case(item: Any) -> dict[str, Any] | None:
+    if isinstance(item, str):
+        instruction = item.strip()
+        return {"instruction": instruction} if instruction else None
+    if isinstance(item, dict):
+        instruction = str(item.get("instruction") or item.get("text") or "").strip()
+        if not instruction:
+            return None
+        expected = item.get("expected")
+        return {"instruction": instruction, "expected": expected} if isinstance(expected, dict) else {"instruction": instruction}
+    return None
+
+
+def _load_instruction_cases(path: Path | None) -> list[dict[str, Any]]:
     if path is None:
-        return list(DEFAULT_INSTRUCTIONS)
+        return [dict(case, expected=dict(case["expected"])) for case in DEFAULT_INSTRUCTION_CASES]
     payload = json.loads(path.read_text(encoding="utf-8-sig"))
+    raw_items: list[Any]
     if isinstance(payload, list):
-        return [str(item).strip() for item in payload if str(item).strip()]
-    if isinstance(payload, dict) and isinstance(payload.get("instructions"), list):
-        return [str(item).strip() for item in payload["instructions"] if str(item).strip()]
-    raise ValueError("自然语言验收输入文件必须是字符串数组，或包含 instructions 数组的 JSON 对象")
+        raw_items = payload
+    elif isinstance(payload, dict) and isinstance(payload.get("instructions"), list):
+        raw_items = payload["instructions"]
+    else:
+        raise ValueError("自然语言验收输入文件必须是字符串数组、对象数组，或包含 instructions 数组的 JSON 对象")
+    cases = [case for item in raw_items if (case := _normalize_instruction_case(item))]
+    if not cases:
+        raise ValueError("自然语言验收输入文件没有有效指令")
+    return cases
 
 
 def main() -> int:
@@ -261,8 +361,8 @@ def main() -> int:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     summaries = []
-    for instruction in _load_instructions(args.instructions):
-        summaries.append(_run_case(instruction, output_dir, use_real_fem=args.real_fem))
+    for case in _load_instruction_cases(args.instructions):
+        summaries.append(_run_case(case, output_dir, use_real_fem=args.real_fem))
 
     report = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
