@@ -957,7 +957,6 @@ class MainWindow(QMainWindow):
         self.knowledge_right_pipeline.setMinimumHeight(260)
         self.knowledge_right_pipeline.setMaximumHeight(310)
         layout.addWidget(self.knowledge_right_pipeline)
-        layout.addStretch(1)
 
         self.knowledge_right_rebuild_button = QPushButton("重建全部索引")
         self.knowledge_right_snapshot_button = QPushButton("导出图谱快照")
@@ -967,6 +966,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(self.refresh_button)
         layout.addWidget(self.knowledge_right_rebuild_button)
         layout.addWidget(self.knowledge_right_snapshot_button)
+        layout.addStretch(1)
         return page
 
     def _build_monitor_right_page(self) -> QWidget:
