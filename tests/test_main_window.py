@@ -380,6 +380,53 @@ def test_main_window_routes_runtime_events_to_logs_without_chat_noise(monkeypatc
         app.processEvents()
 
 
+def test_main_window_routes_runtime_events_across_all_agents(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window.session.task = TaskParser().parse_instruction("外压 30 MPa，生成 4 个候选，初筛保留 2 个候选")
+        event_pairs = [
+            ("node_started", "parse_task", "parse_task", "ORCHESTRATOR", "active"),
+            ("node_completed", "parse_task", "parse_task", "ORCHESTRATOR", "done"),
+            ("node_started", "generate_candidates", "generate_candidates", "CANDIDATE_GEN", "active"),
+            ("tool_completed", "generate_candidates", "candidate_generator", "CANDIDATE_GEN", "done"),
+            ("node_started", "screen_candidates", "screen_candidates", "SCREENER", "active"),
+            ("node_completed", "screen_candidates", "screen_candidates", "SCREENER", "done"),
+            ("simulation_job_started", "evaluate_candidates", "SimulationQueue", "FEM_AGENT", "active"),
+            ("simulation_job_completed", "evaluate_candidates", "SimulationQueue", "FEM_AGENT", "done"),
+            ("node_started", "persist_knowledge", "persist_knowledge", "KNOWLEDGE_AGENT", "active"),
+            ("node_completed", "persist_knowledge", "persist_knowledge", "KNOWLEDGE_AGENT", "done"),
+            ("node_started", "generate_report", "generate_report", "REPORT_GEN", "active"),
+            ("node_failed", "generate_report", "generate_report", "REPORT_GEN", "failed"),
+        ]
+
+        for runtime_type, stage, runtime_agent, ui_agent, expected_state in event_pairs:
+            window._handle_message(
+                "FLOW",
+                f"{runtime_type}: {stage}",
+                {
+                    "event_type": "workflow_runtime_event",
+                    "payload": {
+                        "runtime_event_type": runtime_type,
+                        "runtime_stage": stage,
+                        "runtime_agent": runtime_agent,
+                    },
+                },
+            )
+            assert window.runtime_agent_states[ui_agent] == expected_state
+            assert window.flow_dag_widget.agent_states[ui_agent] == expected_state
+            assert f"{runtime_type} @ {stage}" in window.log_widget.toPlainText()
+            assert f"{runtime_type}: {stage}" not in window.chat_widget.toPlainText()
+
+        assert window.agent_cards["REPORT_GEN"].state == "failed"
+        assert window.flow_dag_widget.stage_text == "失败 · 报告失败"
+        assert "REPORT_GEN" in window.log_widget.toPlainText()
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_main_window_shell_layout_keeps_reference_workbench_structure(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()

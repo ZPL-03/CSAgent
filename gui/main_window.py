@@ -1952,7 +1952,9 @@ class MainWindow(QMainWindow):
             self.runtime_stage_text = runtime_stage or runtime_type
         elif runtime_type in {"node_failed", "tool_failed", "simulation_job_failed"}:
             self.runtime_agent_states[ui_agent] = "failed"
-            self.runtime_stage_text = runtime_stage or runtime_type
+            self.runtime_stage_text = (
+                runtime_stage if runtime_stage.endswith("_failed") else f"{runtime_stage}_failed"
+            ) if runtime_stage else runtime_type
         self._update_runtime_panel()
 
     def _failed_agent_for_stage(self, stage: str) -> str | None:
@@ -2029,11 +2031,15 @@ class MainWindow(QMainWindow):
             + f"Relations {knowledge_payload.get('kg_relation_count', 0)}"
         )
         active_stage = self._display_stage(self.runtime_stage_text or self.session.stage)
-        stage_text = (
-            f"{self.locale.text('agent.active')} · {active_stage}"
-            if self.session.task or self.runtime_stage_text
-            else self.locale.text("queue.idle")
-        )
+        if self.session.task or self.runtime_stage_text:
+            stage_prefix = (
+                self.locale.text("agent.failed")
+                if "failed" in state_map.values()
+                else self.locale.text("agent.active")
+            )
+            stage_text = f"{stage_prefix} · {active_stage}"
+        else:
+            stage_text = self.locale.text("queue.idle")
         self.flow_dag_widget.update_state(state_map, stage_text)
 
     def _run_action(self, action: str, payload: dict, status_text: str) -> None:
@@ -2522,8 +2528,9 @@ class MainWindow(QMainWindow):
             if run_id and not self.session.workflow_run_id:
                 self.session.workflow_run_id = run_id
             self._handle_runtime_state_event(runtime_type, runtime_stage, runtime_agent)
-            self.log_widget.append_log(runtime_agent, f"[{runtime_type}{suffix}] {message}")
-            self.monitor_log_widget.append_log(runtime_agent, f"[{runtime_type}{suffix}] {message}")
+            ui_agent = self._ui_agent_for_runtime_stage(runtime_stage, runtime_agent)
+            self.log_widget.append_log(ui_agent, f"[{runtime_type}{suffix}] {message}")
+            self.monitor_log_widget.append_log(ui_agent, f"[{runtime_type}{suffix}] {message}")
             self._refresh_run_selector()
             if run_id:
                 self.workflow_widget.refresh(run_id, runtime_stage, self.session.pending_confirmation)
