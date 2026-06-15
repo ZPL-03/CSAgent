@@ -792,7 +792,7 @@ class KnowledgeIngestionService:
                 errors.append(f"Docling: {exc}")
         if suffix in PDF_SUFFIXES:
             try:
-                return self._parse_pdf_text(path), "pypdf_text"
+                return self._parse_pdf_text(path), "pdf_text"
             except Exception as exc:
                 errors.append(f"PDF 文本层: {exc}")
         if suffix in DOCX_SUFFIXES:
@@ -892,6 +892,33 @@ class KnowledgeIngestionService:
         return str(document.export_to_markdown() or "")
 
     def _parse_pdf_text(self, path: Path) -> str:
+        errors: list[str] = []
+        try:
+            return self._parse_pdf_text_with_pymupdf(path)
+        except Exception as exc:
+            errors.append(f"PyMuPDF: {exc}")
+        try:
+            return self._parse_pdf_text_with_pypdf(path)
+        except Exception as exc:
+            errors.append(f"pypdf: {exc}")
+        raise RuntimeError("；".join(errors) if errors else "PDF 文本层为空。")
+
+    def _parse_pdf_text_with_pymupdf(self, path: Path) -> str:
+        try:
+            import fitz
+        except ModuleNotFoundError as exc:
+            raise RuntimeError("当前环境没有 PyMuPDF，无法读取 PDF 文本层。") from exc
+        parts: list[str] = []
+        with fitz.open(str(path)) as document:
+            for index, page in enumerate(document, start=1):
+                text = page.get_text("text") or ""
+                if text.strip():
+                    parts.append(f"## Page {index}\n\n{text.strip()}")
+        if not parts:
+            raise RuntimeError("PDF 文本层为空。")
+        return "\n\n".join(parts)
+
+    def _parse_pdf_text_with_pypdf(self, path: Path) -> str:
         try:
             from pypdf import PdfReader
         except ModuleNotFoundError as exc:

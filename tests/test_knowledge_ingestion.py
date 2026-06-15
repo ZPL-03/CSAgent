@@ -97,6 +97,70 @@ def test_runtime_knowledge_ingestion_builds_chunks_kg_vector_index_and_dedupes(t
     assert all(item["evidence_chunk_id"] in chunk_ids for item in relations)
 
 
+def test_runtime_knowledge_ingestion_accepts_office_table_and_pdf_text_layers(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_USE_HASH_EMBEDDING", "1")
+
+    def external_parser_unavailable(self, path):
+        raise RuntimeError("external parser disabled for test")
+
+    monkeypatch.setattr(KnowledgeIngestionService, "_parse_with_mineru", external_parser_unavailable)
+    monkeypatch.setattr(KnowledgeIngestionService, "_parse_with_docling", external_parser_unavailable)
+
+    import docx
+    import openpyxl
+    from pptx import Presentation
+    from reportlab.pdfgen import canvas
+
+    docx_path = tmp_path / "pressure_hull_report.docx"
+    document = docx.Document()
+    document.add_paragraph("T700 composite pressure hull uses ASME RD-1172, PBIPF and Abaqus Riks verification.")
+    document.add_paragraph("Filament winding and curing quality control reduce imperfection and delamination risk.")
+    document.save(str(docx_path))
+
+    pptx_path = tmp_path / "pressure_hull_review.pptx"
+    presentation = Presentation()
+    slide = presentation.slides.add_slide(presentation.slide_layouts[5])
+    slide.shapes.title.text = "Composite pressure hull review"
+    text_box = slide.shapes.add_textbox(914400, 1371600, 7315200, 914400)
+    text_box.text = "Buckling, PBIPF and finite element verification evidence."
+    presentation.save(str(pptx_path))
+
+    xlsx_path = tmp_path / "pressure_hull_table.xlsx"
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    sheet.title = "design"
+    sheet.append(["material", "formula", "verification"])
+    sheet.append(["T800G", "ASME RD-1172", "Abaqus"])
+    workbook.save(xlsx_path)
+
+    pdf_path = tmp_path / "pressure_hull_notes.pdf"
+    pdf = canvas.Canvas(str(pdf_path))
+    pdf.drawString(72, 720, "Composite pressure hull PDF text layer: ASME RD-1172, PBIPF, Abaqus Riks.")
+    pdf.drawString(72, 700, "Manufacturing evidence includes filament winding and curing control.")
+    pdf.save()
+
+    service = KnowledgeIngestionService(base_dir=tmp_path / "knowledge", chunk_token_size=48, chunk_overlap_tokens=8)
+    results = {
+        path.suffix: service.ingest_file(path)
+        for path in [docx_path, pptx_path, xlsx_path, pdf_path]
+    }
+
+    assert results[".docx"].success
+    assert results[".docx"].parser_backend == "python_docx_text"
+    assert results[".pptx"].success
+    assert results[".pptx"].parser_backend == "python_pptx_text"
+    assert results[".xlsx"].success
+    assert results[".xlsx"].parser_backend == "openpyxl_table"
+    assert results[".pdf"].success
+    assert results[".pdf"].parser_backend == "pdf_text"
+
+    manifest = json.loads(service.manifest_path.read_text(encoding="utf-8"))
+    assert manifest["document_count"] == 4
+    assert manifest["rag_chunk_count"] >= 4
+    assert manifest["kg_relation_count"] >= 1
+    assert manifest["last_retrieval_verification"]["evidence_chunks"]
+
+
 def test_runtime_knowledge_ingestion_marks_vector_status_warning_when_backend_fails(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_USE_HASH_EMBEDDING", "1")
 

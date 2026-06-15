@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.paths import ABAQUS_DIR, ABAQUS_RUNS_DIR, CHROMA_DIR, DATA_DIR, RESULTS_DIR
+from core.paths import ABAQUS_DIR, ABAQUS_RUNS_DIR, CHROMA_DIR, DATA_DIR, RESULTS_DIR, RUNTIME_DIR
 
 
 IO_DIR = DATA_DIR / "io"
@@ -128,6 +128,11 @@ def clean_contaminated_vector_index() -> None:
             return
 
 
+def clean_gui_audit_artifacts() -> None:
+    """清理 GUI 渲染审计保留的临时截图目录。"""
+    remove_path(RUNTIME_DIR / "release_gui_audit")
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--purge-prefix", action="append", default=[])
@@ -138,6 +143,7 @@ def main() -> int:
     clean_python_caches()
     clean_abaqus_session_files()
     clean_contaminated_vector_index()
+    clean_gui_audit_artifacts()
     purge_business_records(args.candidate_id, args.case_id)
     purge_problem_prefixes(args.purge_prefix)
     return 0

@@ -9,6 +9,8 @@ import shutil
 import sys
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+
 ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
@@ -39,6 +41,16 @@ def check_pyqt6_runtime() -> tuple[bool, str]:
         return True, f"PyQt6.QtCore Qt={QT_VERSION_STR}"
     except Exception as exc:
         return False, f"PyQt6.QtCore 导入失败: {exc}"
+
+
+def check_pymupdf_runtime() -> tuple[bool, str]:
+    try:
+        import fitz
+
+        version = getattr(fitz, "__version__", None) or getattr(fitz, "VersionBind", None) or "unknown"
+        return True, f"PyMuPDF {version}"
+    except Exception as exc:
+        return False, f"PyMuPDF 导入失败: {exc}"
 
 
 def torch_runtime_detail() -> tuple[bool, str]:
@@ -86,6 +98,8 @@ def main() -> int:
 
     pyqt_ok, pyqt_detail = check_pyqt6_runtime()
     checks.append(("PyQt6.QtCore", pyqt_ok, pyqt_detail))
+    pymupdf_ok, pymupdf_detail = check_pymupdf_runtime()
+    checks.append(("PyMuPDF", pymupdf_ok, pymupdf_detail))
 
     for module_name in [
         "jinja2",

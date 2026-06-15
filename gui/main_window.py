@@ -476,7 +476,7 @@ class MainWindow(QMainWindow):
         stats_layout.addWidget(self.pass_card, 1, 1)
 
         agent_layout = QVBoxLayout()
-        agent_layout.setContentsMargins(14, 14, 14, 14)
+        agent_layout.setContentsMargins(14, 14, 14, 8)
         agent_layout.setSpacing(10)
         agent_layout.addWidget(self.agent_header)
         for agent_name, description_key in self.AGENT_DESCRIPTIONS:
@@ -492,7 +492,7 @@ class MainWindow(QMainWindow):
             agent_layout.addWidget(card)
 
         queue_layout = QVBoxLayout()
-        queue_layout.setContentsMargins(14, 14, 14, 14)
+        queue_layout.setContentsMargins(14, 8, 14, 14)
         queue_layout.setSpacing(10)
         queue_layout.addWidget(self.queue_header)
         queue_layout.addWidget(self.queue_progress)
@@ -579,8 +579,10 @@ class MainWindow(QMainWindow):
         left_layout.setSpacing(0)
         agent_widget = QWidget()
         agent_widget.setLayout(agent_layout)
+        agent_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         queue_widget = QWidget()
         queue_widget.setLayout(queue_layout)
+        queue_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         left_layout.addWidget(agent_widget)
         left_layout.addWidget(queue_widget)
         left_layout.addStretch(1)
