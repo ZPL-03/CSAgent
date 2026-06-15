@@ -75,7 +75,18 @@ EXCLUDED_SCAN_FILES = {
 }
 
 REQUIRED_UI_ASSETS = [
-    "docs/assets/ui_workbench_dark.png",
+    "assets/screenshots/dark_workbench.png",
+    "assets/screenshots/dark_workbench_runtime.png",
+    "assets/screenshots/dark_project.png",
+    "assets/screenshots/dark_knowledge.png",
+    "assets/screenshots/dark_monitor.png",
+    "assets/screenshots/dark_settings.png",
+    "assets/screenshots/light_workbench.png",
+    "assets/screenshots/light_workbench_runtime.png",
+    "assets/screenshots/light_project.png",
+    "assets/screenshots/light_knowledge.png",
+    "assets/screenshots/light_monitor.png",
+    "assets/screenshots/light_settings.png",
 ]
 
 UI_ASSET_SOURCES = [
@@ -744,7 +755,7 @@ class ReleaseAudit:
             if len(data) < 4096 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
                 invalid_assets.append(path.relative_to(ROOT).as_posix())
         errors = [*missing_sources, *invalid_assets]
-        detail = "主工作台深色展示图和 UI 源文件齐备" if not errors else "; ".join(errors)
+        detail = f"深浅主题工作台、运行态、项目、知识库、监控和设置页面截图齐备：{len(asset_paths)} 张" if not errors else "; ".join(errors)
         self.add("UI 展示资产", not errors, detail)
 
     def check_cases(self) -> None:
