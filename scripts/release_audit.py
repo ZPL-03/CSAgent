@@ -680,6 +680,8 @@ class ReleaseAudit:
             screenshots = 0
             for theme in ["dark", "light"]:
                 set_runtime_theme(theme)
+                window._reset_session()
+                app.processEvents()
                 for index, page_name in enumerate(page_names):
                     window._switch_workspace_page(index)
                     app.processEvents()
@@ -754,6 +756,11 @@ class ReleaseAudit:
             data = path.read_bytes()
             if len(data) < 4096 or not data.startswith(b"\x89PNG\r\n\x1a\n"):
                 invalid_assets.append(path.relative_to(ROOT).as_posix())
+        for theme in ("dark", "light"):
+            idle_path = ROOT / f"assets/screenshots/{theme}_workbench.png"
+            runtime_path = ROOT / f"assets/screenshots/{theme}_workbench_runtime.png"
+            if idle_path.read_bytes() == runtime_path.read_bytes():
+                invalid_assets.append(f"{theme}_workbench.png 与 {theme}_workbench_runtime.png 内容相同")
         errors = [*missing_sources, *invalid_assets]
         detail = f"深浅主题工作台、运行态、项目、知识库、监控和设置页面截图齐备：{len(asset_paths)} 张" if not errors else "; ".join(errors)
         self.add("UI 展示资产", not errors, detail)
