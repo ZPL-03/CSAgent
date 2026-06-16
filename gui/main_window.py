@@ -365,6 +365,8 @@ class MainWindow(QMainWindow):
         self.queue_header.setObjectName("sectionTitle")
         self.knowledge_status_header = QLabel(self.locale.text("section.knowledge_status"))
         self.knowledge_status_header.setObjectName("sectionTitle")
+        self.run_audit_header = QLabel(self.locale.text("section.run_audit"))
+        self.run_audit_header.setObjectName("sectionTitle")
         self.workbench_header = QLabel(self.locale.text("section.workbench"))
         self.workbench_header.setObjectName("sectionTitle")
         self.dialog_header = QLabel(self.locale.text("section.dialog"))
@@ -379,6 +381,7 @@ class MainWindow(QMainWindow):
             self.agent_header,
             self.queue_header,
             self.knowledge_status_header,
+            self.run_audit_header,
             self.workbench_header,
             self.dialog_header,
             self.details_header,
@@ -395,6 +398,9 @@ class MainWindow(QMainWindow):
         self.knowledge_status_label = QLabel("")
         self.knowledge_status_label.setObjectName("statusLabel")
         self.knowledge_status_label.setWordWrap(True)
+        self.run_audit_label = QLabel("")
+        self.run_audit_label.setObjectName("statusLabel")
+        self.run_audit_label.setWordWrap(True)
 
         self.candidate_widget = CandidateWidget(language=self.locale.language)
         self.abaqus_widget = AbaqusWidget(language=self.locale.language)
@@ -499,6 +505,8 @@ class MainWindow(QMainWindow):
         queue_layout.addWidget(self.queue_label)
         queue_layout.addWidget(self.knowledge_status_header)
         queue_layout.addWidget(self.knowledge_status_label)
+        queue_layout.addWidget(self.run_audit_header)
+        queue_layout.addWidget(self.run_audit_label)
 
         workflow_panel = QWidget()
         workflow_panel.setObjectName("centerWorkbench")
@@ -1889,6 +1897,7 @@ class MainWindow(QMainWindow):
         self.agent_header.setText(self.locale.text("section.agents"))
         self.queue_header.setText(self.locale.text("section.queue"))
         self.knowledge_status_header.setText(self.locale.text("section.knowledge_status"))
+        self.run_audit_header.setText(self.locale.text("section.run_audit"))
         self.workbench_header.setText(self.locale.text("section.workbench"))
         self.dialog_header.setText(self.locale.text("section.dialog"))
         self.details_header.setText(self.locale.text("section.details"))
@@ -2093,6 +2102,14 @@ class MainWindow(QMainWindow):
             return 18
         return 0
 
+    def _display_confirmation_gate(self, gate: str | None) -> str:
+        mapping = {
+            "screen_candidates": "audit.confirm_screen",
+            "fem_evaluation": "audit.confirm_fem",
+            "export_report": "audit.confirm_report",
+        }
+        return self.locale.text(mapping.get(str(gate or ""), "audit.none"))
+
     def _agent_state_map(self) -> dict[str, str]:
         states = {agent_name: "waiting" for agent_name, _ in self.AGENT_DESCRIPTIONS}
         stage = self.session.stage or "idle"
@@ -2236,6 +2253,23 @@ class MainWindow(QMainWindow):
             + f"Chunks {knowledge_payload.get('rag_chunk_count', 0)} · "
             + f"Relations {knowledge_payload.get('kg_relation_count', 0)}"
         )
+        run_id = self.session.workflow_run_id or self.locale.text("audit.no_run")
+        audit_lines = [
+            self.locale.text("audit.run", run_id=run_id),
+            self.locale.text("audit.stage", stage=self._display_stage(self.session.stage or "idle")),
+            self.locale.text(
+                "audit.confirmation",
+                confirmation=self._display_confirmation_gate(self.session.pending_confirmation),
+            ),
+            self.locale.text(
+                "audit.artifacts",
+                candidates=len(self.session.candidates),
+                screened=len(self.session.screened_candidates),
+                results=len(self.session.results_by_session_id),
+                knowledge=len(self.session.knowledge_updates),
+            ),
+        ]
+        self.run_audit_label.setText("\n".join(audit_lines))
         active_stage = self._display_stage(self.runtime_stage_text or self.session.stage)
         if self.session.task or self.runtime_stage_text:
             stage_prefix = (
