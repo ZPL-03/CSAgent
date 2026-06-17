@@ -192,7 +192,7 @@ class ResultTraceWidget(QWidget):
             f"<p>来源：{escape(row['source'])}<br>"
             f"代理极限压力：{escape(_fmt(row['predicted_pressure']))} MPa<br>"
             f"ASME RD-1172 线性屈曲压力：{escape(_fmt(candidate.get('asme_linear_buckling_pressure_MPa')))} MPa<br>"
-            f"PBIPF 公式：{escape(_fmt(candidate.get('surrogate_PBIPF_MPa')))} MPa<br>"
+            f"PBIPF 预测极限压力：{escape(_fmt(candidate.get('surrogate_PBIPF_MPa')))} MPa<br>"
             f"排序分数：{escape(_fmt(candidate.get('rank_score'), 4))}</p>"
             "<h4>有限元结果</h4>"
             f"<p>状态：{escape(str(result.get('status') or '-'))}<br>"

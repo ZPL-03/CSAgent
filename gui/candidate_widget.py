@@ -413,7 +413,7 @@ class CandidateWidget(QWidget):
             f"{generation_audit_html}"
             f"<p><b>代理预测：</b> 极限压力={_format_number(candidate.get('surrogate_ultimate_pressure_MPa'))} MPa，"
             f"ASME RD-1172线性屈曲压力={_format_number(candidate.get('asme_linear_buckling_pressure_MPa'))} MPa，"
-            f"PBIPF公式={_format_number(candidate.get('surrogate_PBIPF_MPa'))} MPa，"
+            f"PBIPF 预测极限压力为 {_format_number(candidate.get('surrogate_PBIPF_MPa'))} MPa，"
             f"面密度={_format_number(candidate.get('surrogate_weight'))} kg/m^2，"
             f"评分={_format_number(candidate.get('rank_score'), 4)}<br>"
             f"线性屈曲压力来源：{candidate.get('linear_buckling_source') or '-'}</p>"
