@@ -450,8 +450,13 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         padding-right: 28px;
     }}
     QComboBox#settingsInput::drop-down {{
+        subcontrol-origin: padding;
+        subcontrol-position: top right;
         width: 24px;
-        border: none;
+        border: 0px;
+        border-left: 0px;
+        border-top-right-radius: 8px;
+        border-bottom-right-radius: 8px;
         background: transparent;
     }}
     QTableWidget {{

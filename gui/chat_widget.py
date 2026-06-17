@@ -27,8 +27,8 @@ class ChatWidget(QWidget):
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.content = QWidget()
         self.content_layout = QVBoxLayout(self.content)
-        self.content_layout.setContentsMargins(18, 6, 18, 6)
-        self.content_layout.setSpacing(4)
+        self.content_layout.setContentsMargins(16, 4, 16, 4)
+        self.content_layout.setSpacing(3)
         self.scroll_area.setWidget(self.content)
 
         root_layout = QVBoxLayout(self)
@@ -236,12 +236,12 @@ class ChatWidget(QWidget):
             f"QFrame#chatBubble {{ background:{bg}; border:1px solid {border}; border-radius:14px; }}"
         )
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(12, 5, 12, 5)
+        layout.setContentsMargins(10, 4, 10, 4)
         layout.setSpacing(2)
         text_label = self._label(text, fg, 13)
-        text_label.setFixedWidth(max(120, bubble_width - 24))
+        text_label.setFixedWidth(max(120, bubble_width - 20))
         layout.addWidget(text_label)
-        frame.setFixedHeight(max(32, self._wrapped_text_height(text, bubble_width - 24) + 12))
+        frame.setFixedHeight(max(28, self._wrapped_text_height(text, bubble_width - 20) + 10))
         return frame
 
     def _avatar_label(self, text: str, bg: str, fg: str) -> QLabel:

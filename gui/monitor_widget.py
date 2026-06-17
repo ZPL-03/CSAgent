@@ -268,9 +268,9 @@ class ParetoPlotWidget(QWidget):
         painter.setPen(colors["muted"])
         painter.drawText(QRectF(plot.left(), plot.bottom() + 8, plot.width(), 18), Qt.AlignmentFlag.AlignCenter, x_label)
         painter.save()
-        painter.translate(16, plot.center().y() + 40)
+        painter.translate(plot.left() - 42, plot.center().y())
         painter.rotate(-90)
-        painter.drawText(QRectF(0, 0, 120, 18), Qt.AlignmentFlag.AlignCenter, y_label)
+        painter.drawText(QRectF(-plot.height() / 2.0, -9, plot.height(), 18), Qt.AlignmentFlag.AlignCenter, y_label)
         painter.restore()
 
     def _draw_annotation(self, painter: QPainter, colors: dict[str, QColor], point: QPointF, best: MonitorCasePoint) -> None:

@@ -131,6 +131,6 @@ D:\anaconda3\envs\GPT\python.exe scripts\build_initial_cases.py --reset --count 
 
 ## 有限元说明
 
-自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出。流程先执行单位外压线性屈曲分析并提取一阶模态云图，再以一阶模态缺陷进入 Static Riks 后屈曲分析，极限压力取最大 LPF 与基准外压的乘积。GUI 的右侧实时视口、“候选”页和“FEM”页优先使用 `pyvistaqt` 显示可旋转、缩放、平移的三维几何模型和模态云图；没有候选或结果时，真实交互环境显示参考耐压壳模型。交互式 OpenGL 视图不可用、`QT_QPA_PLATFORM=offscreen`、`CSDM_cph_DISABLE_INTERACTIVE_3D=1` 或离线审计环境中，界面使用与当前主题一致的 Matplotlib 静态工程预览显示参考几何、候选几何或一阶模态云图。离线图注跟随界面语言，并在详情中展示模态数据路径、点面数量和可用性状态。
+自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出。流程先执行单位外压线性屈曲分析并提取一阶模态云图，再以一阶模态缺陷进入 Static Riks 后屈曲分析，极限压力取最大 LPF 与基准外压的乘积。GUI 的工作台候选池、右侧实时视口和监控页 FEM 指标区读取候选几何、有限元结果和 `visualization_json`；右侧实时视口优先使用 `pyvistaqt` 显示可旋转、缩放、平移的三维几何模型和模态云图，没有候选或结果时显示参考耐压壳模型。交互式 OpenGL 视图不可用、`QT_QPA_PLATFORM=offscreen`、`CSDM_cph_DISABLE_INTERACTIVE_3D=1` 或离线审计环境中，界面使用与当前主题一致的 Matplotlib 静态工程预览显示参考几何、候选几何或一阶模态云图。离线图注跟随界面语言，并在详情中展示模态数据路径、点面数量和可用性状态。
 
 `reference/wangge.py` 与 `reference/zhangusdfld.for` 只作为人工建模和用户子程序参考，不属于主流程必需资产。`reference/zhangusdfld.for` 通过 `config/app_config.yaml` 的 `abaqus.use_user_subroutine` 显式启用，默认关闭以避免本机用户子程序编译环境阻断主流程。未找到 ABAQUS 命令时返回带诊断信息的失败结果，不伪造有限元通过。

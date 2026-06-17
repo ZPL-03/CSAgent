@@ -46,7 +46,7 @@ from PyQt6.QtWidgets import (
 from agents.orchestrator import OrchestratorAgent
 from core.config_loader import load_app_config, load_llm_config
 from core.conversation_flow import ConversationFlowController, ConversationState
-from core.paths import ASSETS_DIR, CONFIG_DIR, RESULTS_DIR, ensure_project_dirs
+from core.paths import ASSETS_DIR, CASE_LIBRARY_DIR, CASES_DIR, CONFIG_DIR, RESULTS_DIR, ensure_project_dirs
 from core.task_contract import (
     describe_boundary_conditions,
     describe_load_conditions,
@@ -317,7 +317,7 @@ class MainWindow(QMainWindow):
             self.theme_selector.setCurrentIndex(current_theme_index)
 
         self.chat_widget = ChatWidget()
-        self.chat_widget.setMinimumHeight(150)
+        self.chat_widget.setMinimumHeight(130)
         self.chat_widget.set_empty_text(self.locale.text("chat.empty"))
         self._apply_chat_empty_state()
         self.status_label = QLabel(self.locale.text("status.waiting"))
@@ -413,7 +413,7 @@ class MainWindow(QMainWindow):
         self.run_audit_label.setWordWrap(True)
 
         self.workbench_candidate_widget = CandidateWidget(language=self.locale.language)
-        self.workbench_candidate_widget.setMinimumHeight(180)
+        self.workbench_candidate_widget.setMinimumHeight(300)
         self.knowledge_widget = KnowledgeWidget()
         self.result_trace_widget = ResultTraceWidget()
         self.log_widget = LogWidget()
@@ -490,12 +490,8 @@ class MainWindow(QMainWindow):
         input_action_layout.addWidget(self.example_button)
         input_action_layout.addWidget(self.input_line, 1)
         input_action_layout.addWidget(self.generate_button)
-
-        hitl_layout = QHBoxLayout()
-        hitl_layout.setSpacing(10)
-        hitl_layout.addStretch(1)
-        hitl_layout.addWidget(self.confirm_yes_button)
-        hitl_layout.addWidget(self.confirm_no_button)
+        input_action_layout.addWidget(self.confirm_yes_button)
+        input_action_layout.addWidget(self.confirm_no_button)
 
         stats_layout = QGridLayout()
         stats_layout.setHorizontalSpacing(10)
@@ -544,8 +540,8 @@ class MainWindow(QMainWindow):
         chat_panel = QWidget()
         chat_panel.setObjectName("conversationPanel")
         chat_layout = QVBoxLayout(chat_panel)
-        chat_layout.setContentsMargins(12, 12, 12, 12)
-        chat_layout.setSpacing(12)
+        chat_layout.setContentsMargins(10, 10, 10, 10)
+        chat_layout.setSpacing(8)
         chat_title_layout = QHBoxLayout()
         chat_title_layout.setSpacing(10)
         chat_title_layout.addWidget(self.dialog_header)
@@ -555,13 +551,12 @@ class MainWindow(QMainWindow):
         chat_layout.addWidget(self.chat_widget, 1)
         chat_layout.addWidget(self.status_label)
         chat_layout.addLayout(input_action_layout)
-        chat_layout.addLayout(hitl_layout)
 
         workbench_splitter = QSplitter(Qt.Orientation.Vertical)
         workbench_splitter.addWidget(workflow_panel)
         workbench_splitter.addWidget(self.workbench_candidate_widget)
         workbench_splitter.addWidget(chat_panel)
-        workbench_splitter.setSizes([170, 180, 500])
+        workbench_splitter.setSizes([150, 360, 350])
         self.workbench_splitter = workbench_splitter
 
         workbench_page = QWidget()
@@ -754,6 +749,7 @@ class MainWindow(QMainWindow):
             ("merged", "合并知识库", "RAG/KG 总量等待刷新"),
             ("builtin", "系统资料", "默认工程知识等待载入"),
             ("runtime", "用户资料", "上传解析后的增量资料"),
+            ("cases", "案例记忆", "会话与正式案例等待刷新"),
             ("retrieval", "检索验证", "文本块 + 图谱关系 + 溯源"),
             ("config", "分块参数", "chunk / overlap / top_k"),
         ]:
@@ -818,6 +814,8 @@ class MainWindow(QMainWindow):
         runtime_docs = int(merged_status.get("runtime_document_count", merged_status.get("document_count", 0)) or 0)
         runtime_chunks = int(merged_status.get("runtime_rag_chunk_count", 0) or 0)
         runtime_relations = int(merged_status.get("runtime_kg_relation_count", 0) or 0)
+        archive_cases = len(list(CASES_DIR.glob("CASE_*.json"))) if CASES_DIR.exists() else 0
+        formal_cases = len(list(CASE_LIBRARY_DIR.glob("CASE_*.json"))) if CASE_LIBRARY_DIR.exists() else 0
         total_chunks = int(merged_status.get("rag_chunk_count", 0) or 0)
         total_entities = int(merged_status.get("kg_entity_count", 0) or 0)
         total_relations = int(merged_status.get("kg_relation_count", 0) or 0)
@@ -836,6 +834,7 @@ class MainWindow(QMainWindow):
             "merged": ("合并知识库", f"RAG {total_chunks} 块 · KG {total_entities}/{total_relations}"),
             "builtin": ("系统资料", f"{builtin_chunks} 块 · {builtin_entities} 实体 · {builtin_relations} 关系"),
             "runtime": ("用户资料", f"{runtime_docs} 文档 · {runtime_chunks} 块 · {runtime_relations} 关系"),
+            "cases": ("案例记忆", f"会话 {archive_cases} · 正式 {formal_cases}"),
             "retrieval": ("检索验证", f"Vector {vector_status} · 文本与图谱联合检索"),
             "config": ("分块参数", f"chunk {chunk_size} / overlap {overlap} · top_k {top_k}/{kg_top_k}"),
         }
@@ -1252,22 +1251,22 @@ class MainWindow(QMainWindow):
                 ],
             ),
         ]
-        forms_columns = QHBoxLayout()
-        forms_columns.setContentsMargins(0, 0, 0, 0)
-        forms_columns.setSpacing(12)
-        left_column = QVBoxLayout()
-        right_column = QVBoxLayout()
-        for column in [left_column, right_column]:
-            column.setContentsMargins(0, 0, 0, 0)
-            column.setSpacing(12)
-            column.setAlignment(Qt.AlignmentFlag.AlignTop)
-        for card in [cards[0], cards[2]]:
-            left_column.addWidget(card)
-        for card in [cards[1], cards[3]]:
-            right_column.addWidget(card)
-        forms_columns.addLayout(left_column, 1)
-        forms_columns.addLayout(right_column, 1)
-        content_layout.addLayout(forms_columns)
+        for row_cards in [(cards[0], cards[1]), (cards[2], cards[3])]:
+            row_height = max(card.minimumHeight() for card in row_cards)
+            for card in row_cards:
+                card.setMinimumHeight(row_height)
+                card.setMaximumHeight(row_height)
+        forms_grid = QGridLayout()
+        forms_grid.setContentsMargins(0, 0, 0, 0)
+        forms_grid.setHorizontalSpacing(12)
+        forms_grid.setVerticalSpacing(12)
+        forms_grid.addWidget(cards[0], 0, 0)
+        forms_grid.addWidget(cards[1], 0, 1)
+        forms_grid.addWidget(cards[2], 1, 0)
+        forms_grid.addWidget(cards[3], 1, 1)
+        forms_grid.setColumnStretch(0, 1)
+        forms_grid.setColumnStretch(1, 1)
+        content_layout.addLayout(forms_grid)
         content_layout.addWidget(self._settings_runtime_card())
         content_layout.addWidget(self._settings_validation_card())
 
@@ -1893,6 +1892,7 @@ class MainWindow(QMainWindow):
         self.report_type_selector.currentIndexChanged.connect(lambda: self._update_button_states())
         self.reset_view_button.clicked.connect(self.live_result_view.reset_view)
         self.fit_view_button.clicked.connect(self.live_result_view.fit_view)
+        self.workbench_candidate_widget.candidateSelected.connect(self.live_result_view.show_candidate)
         self.refresh_runs_button.clicked.connect(self._refresh_run_selector)
         self.restore_run_button.clicked.connect(self._restore_selected_run)
         self.run_selector.currentIndexChanged.connect(lambda: self._update_button_states())
@@ -2333,8 +2333,8 @@ class MainWindow(QMainWindow):
             self.locale.text("knowledge.status", status=knowledge_status, cases=cases, runs=len(runs))
             + "\n"
             + f"文档 {knowledge_payload.get('document_count', 0)} · "
-            + f"Chunks {knowledge_payload.get('rag_chunk_count', 0)} · "
-            + f"Relations {knowledge_payload.get('kg_relation_count', 0)}"
+            + f"块 {knowledge_payload.get('rag_chunk_count', 0)} · "
+            + f"关系 {knowledge_payload.get('kg_relation_count', 0)}"
         )
         run_id = self.session.workflow_run_id or self.locale.text("audit.no_run")
         audit_lines = [

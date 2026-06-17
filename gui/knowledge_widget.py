@@ -123,6 +123,7 @@ class KnowledgeGraphView(QWidget):
         self.active_node_types: set[str] = set()
         self.active_relation_types: set[str] = set()
         self.show_labels = True
+        self.show_relations = True
         self._scale = 1.0
         self._pan = QPointF(0.0, 0.0)
         self._drag_start: QPointF | None = None
@@ -214,6 +215,12 @@ class KnowledgeGraphView(QWidget):
         """设置节点标签显示状态。"""
 
         self.show_labels = bool(enabled)
+        self.update()
+
+    def set_show_relations(self, enabled: bool) -> None:
+        """设置关系线显示状态。"""
+
+        self.show_relations = bool(enabled)
         self.update()
 
     def _colors(self) -> dict[str, QColor]:
@@ -544,7 +551,7 @@ class KnowledgeGraphView(QWidget):
         available_height = max(1.0, graph_rect.height() - padding * 2.0)
         factor = min(1.0, available_width / width, available_height / height)
         current_center = QPointF((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
-        target_center = graph_rect.center()
+        target_center = QPointF(graph_rect.center().x(), graph_rect.center().y() - min(14.0, graph_rect.height() * 0.08))
         fitted: dict[str, QPointF] = {}
         for name, point in positions.items():
             fitted[name] = QPointF(
@@ -853,7 +860,7 @@ class KnowledgeGraphView(QWidget):
         painter.fillRect(self.rect(), colors["bg"])
 
         panel = QRectF(1, 1, self.width() - 2, self.height() - 2)
-        graph_rect = panel.adjusted(18, 34, -18, -38)
+        graph_rect = panel.adjusted(18, 24, -18, -56)
         self._draw_background(painter, panel, graph_rect, colors)
         self._draw_grid(painter, graph_rect, colors["grid"])
 
@@ -898,22 +905,30 @@ class KnowledgeGraphView(QWidget):
             )
             for relation in self.highlight_relations
         }
-        for relation in visible_relations:
-            source = str(relation.get("source") or "")
-            target = str(relation.get("target") or "")
-            if source not in positions or target not in positions:
-                continue
-            key = (source, str(relation.get("relation") or ""), target)
-            selected_edge = bool(self._selected_node_name and self._selected_node_name in {source, target})
-            highlight = key in highlighted or selected_edge
-            edge_color = QColor(colors["highlight"]) if highlight else QColor("#9aa9bb" if self.theme == "light" else "#4d5d73")
-            edge_color.setAlpha(218 if key in highlighted else (164 if selected_edge else 14))
-            source_radius = self._node_radius(source, degrees, counts) + 3.0
-            target_radius = self._node_radius(target, degrees, counts) + 5.0
-            edge_source, edge_target = self._trim_edge(positions[source], positions[target], source_radius, target_radius)
-            self._draw_edge(painter, edge_source, edge_target, edge_color, highlight, show_arrow=highlight)
-            if key in highlighted or selected_edge:
-                self._draw_edge_label(painter, edge_source, edge_target, str(relation.get("relation") or ""), graph_rect, colors)
+        if self.show_relations:
+            for relation in visible_relations:
+                source = str(relation.get("source") or "")
+                target = str(relation.get("target") or "")
+                if source not in positions or target not in positions:
+                    continue
+                key = (source, str(relation.get("relation") or ""), target)
+                selected_edge = bool(self._selected_node_name and self._selected_node_name in {source, target})
+                highlight = key in highlighted or selected_edge
+                edge_color = QColor(colors["highlight"]) if highlight else QColor("#9aa9bb" if self.theme == "light" else "#4d5d73")
+                edge_color.setAlpha(218 if key in highlighted else (164 if selected_edge else 14))
+                source_radius = self._node_radius(source, degrees, counts) + 3.0
+                target_radius = self._node_radius(target, degrees, counts) + 5.0
+                edge_source, edge_target = self._trim_edge(positions[source], positions[target], source_radius, target_radius)
+                self._draw_edge(painter, edge_source, edge_target, edge_color, highlight, show_arrow=highlight)
+                if key in highlighted or selected_edge:
+                    self._draw_edge_label(
+                        painter,
+                        edge_source,
+                        edge_target,
+                        str(relation.get("relation") or ""),
+                        graph_rect,
+                        colors,
+                    )
 
         label_font = QFont(self.font())
         label_font.setPointSize(8)
@@ -1196,11 +1211,16 @@ class KnowledgeWidget(QWidget):
         self.graph_label_button.setToolTip("显示或隐藏节点标签")
         self.graph_label_button.setCheckable(True)
         self.graph_label_button.setChecked(True)
+        self.graph_relation_button = QPushButton("线")
+        self.graph_relation_button.setToolTip("显示或隐藏关系线")
+        self.graph_relation_button.setCheckable(True)
+        self.graph_relation_button.setChecked(True)
         for button in [
             self.graph_reset_button,
             self.graph_zoom_in_button,
             self.graph_zoom_out_button,
             self.graph_label_button,
+            self.graph_relation_button,
         ]:
             button.setObjectName("graphToolButton")
             button.setFixedSize(34, 32)
@@ -1208,7 +1228,7 @@ class KnowledgeWidget(QWidget):
         self.graph_detail_browser.setOpenExternalLinks(False)
         self._configure_panel_browser(self.graph_detail_browser)
         self.graph_detail_browser.setMinimumWidth(220)
-        self.graph_detail_browser.setMinimumHeight(96)
+        self.graph_detail_browser.setMinimumHeight(118)
         self.graph_type_chip_layout: QGridLayout | None = None
         self.graph_relation_chip_layout: QGridLayout | None = None
         self.graph_type_chip_buttons: list[QPushButton] = []
@@ -1216,13 +1236,13 @@ class KnowledgeWidget(QWidget):
         self.evidence_browser = QTextBrowser()
         self.evidence_browser.setOpenExternalLinks(True)
         self._configure_panel_browser(self.evidence_browser)
-        self.evidence_browser.setMinimumHeight(96)
+        self.evidence_browser.setMinimumHeight(118)
         self.summary_label = self._make_panel_label()
         self.summary_scroll = self._scrollable_panel(self.summary_label)
         self._summary_html_cache = ""
         for overview_scroll in [self.summary_scroll, self.source_overview_scroll, self.document_overview_scroll]:
-            overview_scroll.setMinimumHeight(76)
-            overview_scroll.setMaximumHeight(92)
+            overview_scroll.setMinimumHeight(68)
+            overview_scroll.setMaximumHeight(84)
             overview_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self._build_layout()
@@ -1251,6 +1271,7 @@ class KnowledgeWidget(QWidget):
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setAutoFillBackground(False)
         scroll.viewport().setAutoFillBackground(False)
+        scroll.setStyleSheet("background: transparent; border: none;")
         scroll.setWidget(label)
         return scroll
 
@@ -1365,8 +1386,8 @@ class KnowledgeWidget(QWidget):
 
         overview_panel = QFrame()
         overview_panel.setObjectName("knowledgeOverviewPanel")
-        overview_panel.setMinimumHeight(132)
-        overview_panel.setMaximumHeight(148)
+        overview_panel.setMinimumHeight(122)
+        overview_panel.setMaximumHeight(138)
         overview_layout = QHBoxLayout(overview_panel)
         overview_layout.setContentsMargins(10, 10, 10, 10)
         overview_layout.setSpacing(10)
@@ -1392,11 +1413,12 @@ class KnowledgeWidget(QWidget):
         graph_header.addWidget(self.graph_zoom_in_button)
         graph_header.addWidget(self.graph_zoom_out_button)
         graph_header.addWidget(self.graph_label_button)
+        graph_header.addWidget(self.graph_relation_button)
         graph_layout.addLayout(graph_header)
 
         graph_filter_panel = QFrame()
         graph_filter_panel.setObjectName("graphFilterPanel")
-        graph_filter_panel.setMaximumHeight(58)
+        graph_filter_panel.setMaximumHeight(52)
         graph_filter_layout = QHBoxLayout(graph_filter_panel)
         graph_filter_layout.setContentsMargins(10, 9, 10, 9)
         graph_filter_layout.setSpacing(8)
@@ -1422,20 +1444,21 @@ class KnowledgeWidget(QWidget):
 
         evidence_panel = QFrame()
         evidence_panel.setObjectName("knowledgeEvidencePanel")
-        evidence_panel.setMinimumHeight(174)
-        evidence_panel.setMaximumHeight(190)
+        evidence_panel.setMinimumHeight(194)
+        evidence_panel.setMaximumHeight(224)
         evidence_layout = QVBoxLayout(evidence_panel)
-        evidence_layout.setContentsMargins(12, 10, 12, 10)
-        evidence_layout.setSpacing(6)
+        evidence_layout.setContentsMargins(12, 12, 12, 12)
+        evidence_layout.setSpacing(8)
         evidence_label = QLabel("图谱审计与检索证据 · EVIDENCE")
         evidence_label.setObjectName("sectionTitle")
-        evidence_label.setFixedHeight(22)
+        evidence_label.setMinimumHeight(24)
         evidence_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         evidence_layout.addWidget(evidence_label)
         evidence_splitter = QSplitter(Qt.Orientation.Horizontal)
         evidence_splitter.addWidget(titled_panel("图谱审计", self.graph_detail_browser))
         evidence_splitter.addWidget(titled_panel("混合检索结果", self.evidence_browser))
         evidence_splitter.setChildrenCollapsible(False)
+        evidence_splitter.setMinimumHeight(144)
         evidence_splitter.setSizes([360, 720])
         evidence_splitter.setStretchFactor(0, 0)
         evidence_splitter.setStretchFactor(1, 1)
@@ -1474,6 +1497,7 @@ class KnowledgeWidget(QWidget):
         self.graph_zoom_in_button.clicked.connect(lambda: self.graph_view.zoom_by(1.18))
         self.graph_zoom_out_button.clicked.connect(lambda: self.graph_view.zoom_by(0.84))
         self.graph_label_button.toggled.connect(self.graph_view.set_show_labels)
+        self.graph_relation_button.toggled.connect(self.graph_view.set_show_relations)
         self.graph_view.nodeSelected.connect(self._update_graph_detail)
 
     def refresh(
@@ -1576,6 +1600,7 @@ class KnowledgeWidget(QWidget):
             self.graph_zoom_in_button,
             self.graph_zoom_out_button,
             self.graph_label_button,
+            self.graph_relation_button,
         ]:
             button.setEnabled(enabled)
 
@@ -2069,6 +2094,7 @@ class KnowledgeWidget(QWidget):
             f"用户增量：{doc_count} 文档，{runtime_chunks} 文本块，{runtime_relations} 关系。",
             f"合并索引：{status.get('rag_chunk_count', 0)} 文本块，{status.get('kg_entity_count', 0)} 实体，"
             f"{status.get('kg_relation_count', 0)} 关系。",
+            f"案例记忆：会话案例 {len(archive_cases)}，正式案例 {len(formal_cases)}，ODB {odb_count}，云图 {vis_count}。",
         ]
         display_html = [
             "<p>项目知识库由内置数据和用户增量组成，检索入口读取合并后的总 RAG/KG。</p>",
@@ -2077,13 +2103,13 @@ class KnowledgeWidget(QWidget):
             f"<p><b>用户增量：</b>{doc_count} 文档，{runtime_chunks} 文本块，{runtime_relations} 关系。</p>",
             f"<p><b>合并索引：</b>{status.get('rag_chunk_count', 0)} 文本块，"
             f"{status.get('kg_entity_count', 0)} 实体，{status.get('kg_relation_count', 0)} 关系。</p>",
+            f"<p><b>案例记忆：</b>会话案例 {len(archive_cases)}，正式案例 {len(formal_cases)}；"
+            f"ODB {odb_count}，云图 {vis_count}。</p>",
         ]
         full_html = [
             *display_html,
             f"<p><b>分块：</b>{chunk_size} token / overlap {overlap}；"
             f"<b>Vector：</b>{status.get('vector_status') or '-'}。</p>",
-            f"<p><b>案例/FEM：</b>会话 {len(archive_cases)} / 正式 {len(formal_cases)}；"
-            f"ODB {odb_count} / 云图 {vis_count}。</p>",
             f"<p><b>最后入库：</b>{escape(str(last.get('title') or '-'))}；"
             f"<b>检索验证：</b>{escape(str(verification.get('message') or '-'))}</p>",
             f"<p class='muted'><b>清单：</b>{escape(str(status.get('manifest_path') or '-'))}；"
@@ -2261,8 +2287,7 @@ class KnowledgeWidget(QWidget):
         self._set_evidence_html(self._evidence_html(payload), scrollable=scrollable)
 
     def _set_evidence_html(self, html: str, scrollable: bool) -> None:
-        policy = Qt.ScrollBarPolicy.ScrollBarAsNeeded if scrollable else Qt.ScrollBarPolicy.ScrollBarAlwaysOff
-        self.evidence_browser.setVerticalScrollBarPolicy(policy)
+        self.evidence_browser.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.evidence_browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.evidence_browser.setHtml(self._browser_html(html))
 

@@ -470,9 +470,11 @@ class ReleaseAudit:
                 "graph_type_filter",
                 "graph_relation_filter",
                 "graph_reset_button",
+                "graph_relation_button",
                 "set_filter_text",
                 "set_type_filter",
                 "set_relation_filter",
+                "set_show_relations",
                 "wheelEvent",
                 "mousePressEvent",
                 "mouseMoveEvent",
@@ -501,7 +503,7 @@ class ReleaseAudit:
 
         from PyQt6.QtCore import QPoint, QRect, Qt
         from PyQt6.QtGui import QColor
-        from PyQt6.QtWidgets import QApplication, QLabel, QPushButton
+        from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QPushButton
 
         from agents.screener import ScreenerAgent
         from core.doe_sampler import DOESampler
@@ -627,6 +629,7 @@ class ReleaseAudit:
                 ("知识图谱-放大", window.knowledge_widget, "graph_zoom_in_button"),
                 ("知识图谱-缩小", window.knowledge_widget, "graph_zoom_out_button"),
                 ("知识图谱-标签", window.knowledge_widget, "graph_label_button"),
+                ("知识图谱-关系", window.knowledge_widget, "graph_relation_button"),
             ]
             for label, owner, attr in critical_specs:
                 button = getattr(owner, attr, None)
@@ -642,6 +645,53 @@ class ReleaseAudit:
                     errors.append(f"{label} 未绑定动作")
                 if len(errors) >= 12:
                     return
+
+        def check_chat_bubble_geometry(theme: str, page_name: str) -> None:
+            bubbles = [
+                bubble
+                for bubble in window.chat_widget.findChildren(QFrame)
+                if bubble.objectName() == "chatBubble" and bubble.isVisible()
+            ]
+            if len(bubbles) < 4:
+                errors.append(f"{theme}/{page_name} 对话气泡数量异常：{len(bubbles)}")
+                return
+            mapped = sorted(
+                ((bubble.mapTo(window.chat_widget, QPoint(0, 0)).y(), bubble) for bubble in bubbles),
+                key=lambda item: item[0],
+            )
+            previous_bottom: int | None = None
+            for top, bubble in mapped:
+                text_labels = [
+                    label
+                    for label in bubble.findChildren(QLabel)
+                    if plain_text(label.text()) and label.isVisible()
+                ]
+                if not text_labels:
+                    errors.append(f"{theme}/{page_name} 对话气泡缺少文本")
+                    return
+                text_label = text_labels[0]
+                text = plain_text(text_label.text())
+                metrics = text_label.fontMetrics()
+                available_width = max(120, text_label.width())
+                bounds = metrics.boundingRect(
+                    QRect(0, 0, available_width, 4000),
+                    Qt.TextFlag.TextWordWrap,
+                    text,
+                )
+                wrapped_lines = max(1, round(bounds.height() / max(1, metrics.lineSpacing())))
+                natural_width = max(
+                    [metrics.horizontalAdvance(line.rstrip()) for line in text.splitlines() if line.strip()],
+                    default=0,
+                ) + 32
+                if wrapped_lines == 1 and bubble.width() > natural_width + 88:
+                    errors.append(f"{theme}/{page_name} 对话气泡横向留白异常：{text[:32]}")
+                    return
+                if previous_bottom is not None:
+                    gap = top - previous_bottom
+                    if gap > 48:
+                        errors.append(f"{theme}/{page_name} 对话气泡纵向间距异常：{gap}px")
+                        return
+                previous_bottom = top + bubble.height()
 
         def build_runtime_session() -> PipelineSession:
             instruction = "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
@@ -700,6 +750,7 @@ class ReleaseAudit:
             if screenshot_root is not None:
                 pixmap.save(str(screenshot_root / f"{theme}_workbench_runtime.png"), "PNG")
             check_label_geometry(theme, "workbench_runtime")
+            check_chat_bubble_geometry(theme, "workbench_runtime")
 
         screenshot_root: Path | None = None
         temp_dir: tempfile.TemporaryDirectory[str] | None = None
@@ -775,7 +826,7 @@ class ReleaseAudit:
                 os.environ["CSDM_cph_DISABLE_LLM_AUTO"] = previous_llm_auto
 
         detail = (
-            f"深浅主题四页渲染通过，截图 {screenshots} 张，关键按钮绑定完整"
+            f"深浅主题四页渲染通过，截图 {screenshots} 张，关键按钮绑定完整，对话气泡布局紧凑"
             + (f"，保留目录 {screenshot_root.relative_to(ROOT).as_posix()}" if self.keep_gui_screenshots and screenshot_root else "")
             if not errors
             else "; ".join(errors[:12])

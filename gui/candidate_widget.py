@@ -5,7 +5,7 @@ from __future__ import annotations
 from html import escape
 from typing import Iterable
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QGridLayout,
@@ -25,7 +25,6 @@ from PyQt6.QtWidgets import (
 )
 
 from gui.i18n import DEFAULT_LANGUAGE, text as tr
-from gui.interactive_view import InteractivePlotWidget
 from core.pressure_hull_profile import GEOMETRY_LABELS, TYPE_DISPLAY_NAMES
 from core.task_contract import describe_boundary_conditions, describe_load_conditions
 
@@ -64,9 +63,10 @@ def _count_map_text(payload: dict | None) -> str:
 
 
 class CandidateWidget(QWidget):
-    """展示候选方案表格、设计细节与交互式几何视图。"""
+    """展示候选方案表格、设计细节与来源审计。"""
 
     COLUMN_COUNT = 8
+    candidateSelected = pyqtSignal(dict)
 
     def __init__(self, language: str = DEFAULT_LANGUAGE) -> None:
         super().__init__()
@@ -95,12 +95,8 @@ class CandidateWidget(QWidget):
         self.empty_body = QLabel(tr("candidate.empty_body", language=self.language))
         self.empty_body.setObjectName("configSubtitle")
         self.empty_body.setWordWrap(True)
-        self.empty_flow = QLabel("来源比例 LLM:案例迁移:DOE = 2:1:1；结构签名去重；候选阶段使用 TMP 编号；FEM 后分配正式 C 编号。")
-        self.empty_flow.setObjectName("configSubtitle")
-        self.empty_flow.setWordWrap(True)
         empty_layout.addWidget(self.empty_title)
         empty_layout.addWidget(self.empty_body)
-        empty_layout.addWidget(self.empty_flow)
 
         self.table_stack = QStackedWidget()
         self.table_stack.addWidget(self.empty_state)
@@ -117,47 +113,50 @@ class CandidateWidget(QWidget):
         self.doe_metric = self._metric_label()
         self.evaluated_metric = self._metric_label()
         metric_layout = QGridLayout()
+        metric_layout.setContentsMargins(0, 0, 0, 0)
         metric_layout.setHorizontalSpacing(8)
         metric_layout.setVerticalSpacing(8)
         metric_cards = [self.total_metric, self.llm_metric, self.case_metric, self.doe_metric, self.evaluated_metric]
         for index, card in enumerate(metric_cards):
-            metric_layout.addWidget(card, index // 3, index % 3)
+            metric_layout.addWidget(card, 0, index)
+            metric_layout.setColumnStretch(index, 1)
+        self.metric_widget = QWidget()
+        self.metric_widget.setLayout(metric_layout)
 
         self.detail_browser = QTextBrowser()
         self.audit_browser = QTextBrowser()
-        self.preview_widget = InteractivePlotWidget(
-            tr("candidate.preview_empty", language=self.language),
-            language=self.language,
-        )
         self.detail_tabs = QTabWidget()
         self.detail_tabs.addTab(self.detail_browser, tr("candidate.tab.detail", language=self.language))
         self.detail_tabs.addTab(self.audit_browser, tr("candidate.tab.audit", language=self.language))
-        self.detail_tabs.addTab(self.preview_widget, tr("candidate.tab.preview", language=self.language))
         self.detail_tabs.setMaximumHeight(300)
 
         left_layout = QVBoxLayout()
         left_layout.setContentsMargins(0, 0, 0, 0)
         left_layout.setSpacing(8)
-        left_layout.addLayout(metric_layout)
-        left_layout.addWidget(self.table_stack)
-        left_layout.addStretch(1)
+        left_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        left_layout.addWidget(self.metric_widget, 0)
+        left_layout.addWidget(self.table_stack, 1)
         left_widget = QWidget()
         left_widget.setLayout(left_layout)
+        left_widget.setMinimumWidth(560)
+        self.left_widget = left_widget
 
         right_layout = QVBoxLayout()
         right_layout.setContentsMargins(0, 0, 0, 0)
         right_layout.setSpacing(8)
-        right_layout.addWidget(self.summary_label)
+        right_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         right_layout.addWidget(self.detail_tabs, 1)
 
         right_widget = QWidget()
         right_widget.setLayout(right_layout)
+        right_widget.setMinimumWidth(360)
         self.right_widget = right_widget
 
         splitter = QSplitter()
         splitter.addWidget(left_widget)
         splitter.addWidget(right_widget)
-        splitter.setSizes([720, 620])
+        splitter.setSizes([860, 500])
+        self.splitter = splitter
 
         layout = QHBoxLayout(self)
         layout.addWidget(splitter)
@@ -178,24 +177,13 @@ class CandidateWidget(QWidget):
         self.table.setHorizontalHeaderLabels(self._headers())
         self.detail_tabs.setTabText(0, tr("candidate.tab.detail", language=self.language))
         self.detail_tabs.setTabText(1, tr("candidate.tab.audit", language=self.language))
-        self.detail_tabs.setTabText(2, tr("candidate.tab.preview", language=self.language))
-        self.preview_widget.set_language(
-            language,
-            tr("candidate.preview_empty", language=self.language),
-        )
         self.empty_title.setText(tr("candidate.empty", language=self.language))
         self.empty_body.setText(tr("candidate.empty_body", language=self.language))
-        self.empty_flow.setText(
-            "Source ratio LLM:case transfer:DOE = 2:1:1; structural signature deduplication; TMP IDs before FEM; formal C IDs after FEM."
-            if self.language == "en"
-            else "来源比例 LLM:案例迁移:DOE = 2:1:1；结构签名去重；候选阶段使用 TMP 编号；FEM 后分配正式 C 编号。"
-        )
         self._update_metric_cards()
         if not self.candidates:
             self.summary_label.setText(tr("candidate.empty", language=self.language))
             self.detail_browser.setHtml(f"<p>{tr('candidate.empty', language=self.language)}</p>")
             self.audit_browser.setHtml(self._generation_audit_html({}))
-            self.preview_widget.clear_scene(tr("candidate.no_geometry", language=self.language))
 
     def _source_counter(self) -> dict[str, int]:
         counter = {"LLM": 0, "CASE_TRANSFER": 0, "DOE": 0}
@@ -282,19 +270,25 @@ class CandidateWidget(QWidget):
         self.table.setRowCount(len(self.candidates))
         self.table_stack.setCurrentIndex(1 if self.candidates else 0)
         if self.candidates:
+            self.setMinimumHeight(260)
+            self.setMaximumHeight(16777215)
+            self.metric_widget.setVisible(True)
             self.table_stack.setMaximumHeight(16777215)
             self.table_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             self.detail_tabs.setMaximumHeight(16777215)
-            self.summary_label.setVisible(True)
             self.detail_tabs.setVisible(True)
             self.right_widget.setVisible(True)
+            self.splitter.setSizes([860, 500])
         else:
+            self.setMinimumHeight(132)
+            self.setMaximumHeight(156)
+            self.metric_widget.setVisible(False)
             self.table_stack.setMaximumHeight(130)
             self.table_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            self.detail_tabs.setMaximumHeight(300)
-            self.summary_label.setVisible(False)
+            self.detail_tabs.setMaximumHeight(16777215)
             self.detail_tabs.setVisible(False)
             self.right_widget.setVisible(False)
+            self.splitter.setSizes([1200, 0])
         source_counter: dict[str, int] = {}
 
         for row, candidate in enumerate(self.candidates):
@@ -342,12 +336,12 @@ class CandidateWidget(QWidget):
         else:
             self.detail_browser.setHtml(f"<p>{tr('candidate.empty', language=self.language)}</p>")
             self.audit_browser.setHtml(self._generation_audit_html({}))
-            self.preview_widget.clear_scene(tr("candidate.no_geometry", language=self.language))
 
     def reset_view(self) -> None:
         if hasattr(self, "detail_browser"):
-            self.detail_browser.clear()
-        self.preview_widget.reset_plotter()
+            self.detail_browser.setHtml(f"<p>{tr('candidate.empty', language=self.language)}</p>")
+        if hasattr(self, "audit_browser"):
+            self.audit_browser.setHtml(self._generation_audit_html({}))
 
     def selected_candidates(self) -> list[dict]:
         rows = sorted({index.row() for index in self.table.selectionModel().selectedRows()})
@@ -357,10 +351,10 @@ class CandidateWidget(QWidget):
         selected = self.selected_candidates()
         if not selected:
             self.detail_browser.setHtml(f"<p>{tr('candidate.no_detail', language=self.language)}</p>")
-            self.preview_widget.clear_scene(tr("candidate.no_preview", language=self.language))
             return
 
         candidate = selected[0]
+        self.candidateSelected.emit(candidate)
         result = self._result_for_candidate(candidate)
         geometry = candidate.get("geometry", {})
         layup = candidate.get("layup", {})
@@ -445,4 +439,3 @@ class CandidateWidget(QWidget):
             f"{result_html}"
         )
         self.detail_browser.setHtml(html)
-        self.preview_widget.show_candidate(candidate)

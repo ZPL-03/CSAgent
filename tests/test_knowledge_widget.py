@@ -149,6 +149,7 @@ def test_knowledge_widget_renders_runtime_pipeline_and_evidence(monkeypatch, tmp
         assert widget.graph_zoom_in_button.toolTip()
         assert widget.graph_zoom_out_button.toolTip()
         assert widget.graph_label_button.isChecked() is True
+        assert widget.graph_relation_button.isChecked() is True
         assert widget.graph_type_filter.count() >= 2
         assert widget.graph_relation_filter.count() >= 2
         assert widget.graph_type_chip_buttons
@@ -212,6 +213,12 @@ def test_knowledge_widget_graph_search_filters_visible_graph(monkeypatch, tmp_pa
         app.processEvents()
         assert widget.graph_view.active_relation_types == {"CO_OCCURS_WITH"}
         assert "总实体" in widget.graph_detail_browser.toHtml()
+        widget.graph_relation_button.setChecked(False)
+        app.processEvents()
+        assert widget.graph_view.show_relations is False
+        widget.graph_relation_button.setChecked(True)
+        app.processEvents()
+        assert widget.graph_view.show_relations is True
 
         widget.graph_view._selected_node_name = "Initial Imperfection"
         widget._update_graph_detail("Initial Imperfection")

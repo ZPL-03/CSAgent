@@ -59,8 +59,9 @@ def _candidate() -> dict:
 def test_candidate_widget_renders_generation_audit() -> None:
     app = _app()
     widget = CandidateWidget()
+    selected: list[dict] = []
     try:
-        widget.preview_widget.show_candidate = lambda _candidate: None
+        widget.candidateSelected.connect(lambda candidate: selected.append(candidate))
         widget.update_candidates([_candidate()])
         html = widget.audit_browser.toHtml()
 
@@ -72,6 +73,8 @@ def test_candidate_widget_renders_generation_audit() -> None:
         assert "DOE 补足" in html
         assert widget.total_metric.text().endswith("1")
         assert widget.llm_metric.text().endswith("1")
+        assert widget.detail_tabs.count() == 2
+        assert selected and selected[-1]["candidate_id"] == "TMP_1"
     finally:
         widget.close()
         app.processEvents()
