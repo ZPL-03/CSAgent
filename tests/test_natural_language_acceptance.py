@@ -74,11 +74,31 @@ def _patch_deterministic_downstream(monkeypatch, orchestrator: OrchestratorAgent
         pdf_path = tmp_path / "acceptance_report.pdf"
         markdown_path.write_text("# CSAgent 耐压壳设计报告\n\n验收报告。", encoding="utf-8")
         pdf_path.write_bytes(b"%PDF-1.4\n% acceptance\n")
+        report_outputs = {}
+        for key, title in {
+            "overall": "CSAgent 总体设计报告",
+            "fem": "CSAgent FEM 校核报告",
+            "design_solution": "CSAgent 推荐设计方案",
+        }.items():
+            artifact_markdown = tmp_path / f"{key}_acceptance.md"
+            artifact_pdf = tmp_path / f"{key}_acceptance.pdf"
+            artifact_markdown.write_text(f"# {title}\n\n验收交付件。", encoding="utf-8")
+            artifact_pdf.write_bytes(b"%PDF-1.4\n% acceptance artifact\n")
+            report_outputs[key] = {
+                "markdown_path": str(artifact_markdown),
+                "pdf_path": str(artifact_pdf),
+                "title": title,
+                "report_kind": key,
+                "markdown_generated": True,
+                "pdf_generated": True,
+            }
         return {
             "markdown_path": str(markdown_path),
             "pdf_path": str(pdf_path),
             "content": markdown_path.read_text(encoding="utf-8"),
             "llm_explanation_used": False,
+            "report_kind": "all",
+            "report_outputs": report_outputs,
         }
 
     monkeypatch.setattr(orchestrator, "prepare_candidate_for_fem", prepare_candidate_for_fem)
@@ -265,6 +285,10 @@ def test_natural_language_inputs_complete_runtime_workflow_with_real_candidate_s
     assert state.stage == "completed"
     assert state.pending_confirmation is None
     assert state.report and state.report["markdown_path"].endswith("acceptance_report.md")
+    assert set(state.report["report_outputs"]) == {"overall", "fem", "design_solution"}
+    for payload in state.report["report_outputs"].values():
+        assert os.path.exists(payload["markdown_path"])
+        assert os.path.exists(payload["pdf_path"])
 
     snapshot = store.load_snapshot(state.workflow_run_id)
     assert snapshot["stage"] == "completed"

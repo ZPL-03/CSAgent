@@ -733,6 +733,45 @@ def test_report_falls_back_to_structured_engineering_explanation(monkeypatch):
     assert agent._last_llm_explanation_used is False
 
 
+def test_report_all_generates_overall_fem_and_solution_artifacts(monkeypatch, tmp_path):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, results, candidates = _report_sample()
+    agent = ReportGenAgent()
+
+    report = agent.run(
+        {
+            "task": task,
+            "results": results,
+            "candidates": candidates,
+            "report_kind": "all",
+            "output_dir": str(tmp_path),
+        }
+    )
+
+    assert report["report_kind"] == "all"
+    assert set(report["report_outputs"]) == {"overall", "fem", "design_solution"}
+    assert report["markdown_path"].endswith("latest_report.md")
+    assert (tmp_path / "latest_report.md").is_file()
+    for key, title in {
+        "overall": "CSAgent 总体设计报告",
+        "fem": "CSAgent FEM 校核报告",
+        "design_solution": "CSAgent 推荐设计方案",
+    }.items():
+        payload = report["report_outputs"][key]
+        stem = ReportGenAgent.REPORT_ARTIFACTS[key][0]
+        markdown_path = tmp_path / f"{stem}.md"
+        assert payload["title"] == title
+        assert payload["report_kind"] == key
+        assert payload["markdown_path"] == str(markdown_path)
+        assert markdown_path.is_file()
+        assert title in markdown_path.read_text(encoding="utf-8")
+        if payload["pdf_generated"]:
+            assert payload["pdf_path"]
+            assert (tmp_path / f"{stem}.pdf").is_file()
+        else:
+            assert payload["pdf_path"] is None
+
+
 def test_report_uses_llm_only_for_grounded_engineering_explanation(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task, results, candidates = _report_sample()
