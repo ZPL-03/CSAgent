@@ -16,7 +16,8 @@ def main() -> int:
     app = QApplication(sys.argv)
     install_application_font(app)
     window = MainWindow()
-    window.showMaximized()
+    window._ensure_window_within_work_area()
+    window.show()
     return app.exec()
 
 

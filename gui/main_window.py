@@ -252,7 +252,7 @@ class MainWindow(QMainWindow):
         self._brand_badge_path = ASSETS_DIR / "csagent_badge.png"
         if self._app_icon_path.exists():
             self.setWindowIcon(QIcon(str(self._app_icon_path)))
-        self.resize(1680, 980)
+        self._resize_to_available_work_area()
         self.ui_state_settings = QSettings("CSAgent", "Workbench")
         self.session = PipelineSession()
         self.worker_thread: QThread | None = None
@@ -1781,9 +1781,42 @@ class MainWindow(QMainWindow):
         painter.end()
         return QIcon(pixmap)
 
+    def _target_window_size(self) -> QSize:
+        screen = QApplication.primaryScreen()
+        if screen is None:
+            return QSize(1440, 900)
+        available = screen.availableGeometry()
+        width = min(available.width(), min(1600, max(1024, available.width() - 80)))
+        height = min(available.height(), min(900, max(680, available.height() - 96)))
+        return QSize(width, height)
+
+    def _resize_to_available_work_area(self) -> None:
+        self.resize(self._target_window_size())
+
+    def _ensure_window_within_work_area(self) -> None:
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return
+        available = screen.availableGeometry()
+        if self.width() > available.width() or self.height() > available.height():
+            self.resize(
+                min(self.width(), available.width()),
+                min(self.height(), available.height()),
+            )
+        frame = self.frameGeometry()
+        if available.contains(frame):
+            return
+        frame.moveCenter(available.center())
+        max_x = available.x() + max(0, available.width() - frame.width())
+        max_y = available.y() + max(0, available.height() - frame.height())
+        x = min(max(frame.x(), available.x()), max_x)
+        y = min(max(frame.y(), available.y()), max_y)
+        self.move(x, y)
+
     def _restore_window_layout(self) -> None:
         if int(self.ui_state_settings.value("layout_version", 0) or 0) != UI_LAYOUT_VERSION:
             self.ui_state_settings.clear()
+            self._ensure_window_within_work_area()
             return
         geometry = self.ui_state_settings.value("window_geometry")
         state = self.ui_state_settings.value("window_state")
@@ -1791,6 +1824,7 @@ class MainWindow(QMainWindow):
             self.restoreGeometry(geometry)
         if state:
             self.restoreState(state)
+        self._ensure_window_within_work_area()
 
     def _save_window_layout(self) -> None:
         self.ui_state_settings.setValue("layout_version", UI_LAYOUT_VERSION)
@@ -2961,7 +2995,8 @@ def main() -> int:
     app = QApplication(sys.argv)
     install_application_font(app)
     window = MainWindow()
-    window.showMaximized()
+    window._ensure_window_within_work_area()
+    window.show()
     return app.exec()
 
 

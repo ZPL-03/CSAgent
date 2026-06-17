@@ -674,7 +674,7 @@ class ReleaseAudit:
 
         page_names = ["workbench", "project", "knowledge", "monitor", "settings"]
         try:
-            window.resize(1680, 1060)
+            window.resize(1600, 900)
             window.show()
             app.processEvents()
             screenshots = 0

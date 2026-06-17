@@ -482,6 +482,23 @@ def test_main_window_shell_layout_keeps_reference_workbench_structure(monkeypatc
         app.processEvents()
 
 
+def test_main_window_initial_geometry_fits_available_work_area(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        available = app.primaryScreen().availableGeometry()
+        target = window._target_window_size()
+
+        assert target.width() <= available.width()
+        assert target.height() <= available.height()
+        assert window.width() <= available.width()
+        assert window.height() <= available.height()
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_status_pill_centers_status_dot_and_text_group() -> None:
     app = _app()
     _ = app
