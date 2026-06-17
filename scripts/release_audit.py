@@ -44,6 +44,12 @@ FORBIDDEN_TEXT = [
     _join("CSDM_cph ", "\u8010\u538b\u58f3\u8bbe\u8ba1\u62a5\u544a"),
     _join("Neo", "4j"),
     _join("\u5916\u90e8", "\u77e5\u8bc6\u5e93"),
+    _join("\u4e2d\u592e\u201c\u9879\u76ee\u201d", "\u9875"),
+    _join("\u53f3\u4fa7\u201c\u5019\u9009\u201d", "\u9875"),
+    _join("\u53f3\u4fa7\u201c\u8ffd\u8e2a\u201d", "\u9875"),
+    _join("\u53f3\u4fa7\u201c\u62a5\u544a\u201d", "\u9875"),
+    _join("CASE_1` \u81f3 `CASE_13", "`"),
+    _join("\u5171 13 \u6761\u771f\u5b9e", " Abaqus"),
 ]
 
 TEXT_SUFFIXES = {
