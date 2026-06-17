@@ -6,6 +6,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTextBrowser, QVBoxLayout, QWidget
 
 from core.llm_status import configured_llm_backends, probe_llm_backends
@@ -63,6 +64,7 @@ class WorkflowWidget(QWidget):
         self.audit_status_label = QLabel("")
         self.audit_status_label.setWordWrap(True)
         self.browser = QTextBrowser()
+        self.browser.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         layout = QVBoxLayout()
         button_layout = QHBoxLayout()
         button_layout.addWidget(self.health_button)
@@ -213,9 +215,10 @@ class WorkflowWidget(QWidget):
             f"body{{font-size:13px;color:{color['text']};}}"
             "h3{margin:0 0 8px 0;font-size:17px;}"
             f"h4{{margin:4px 0 8px 0;font-size:14px;color:{color['text']};}}"
-            "table{border-collapse:collapse;width:100%;}"
+            "table{border-collapse:collapse;width:100%;table-layout:fixed;}"
             f"th{{background:{color['head']};text-align:left;}}"
-            f"th,td{{border:1px solid {color['border']};padding:6px 8px;vertical-align:top;}}"
+            f"th,td{{border:1px solid {color['border']};padding:6px 8px;vertical-align:top;word-wrap:break-word;}}"
+            "pre{white-space:pre-wrap;word-wrap:break-word;margin:0;}"
             ".cards{display:flex;gap:8px;margin:8px 0 14px 0;}"
             f".card{{border:1px solid {color['border']};border-left:4px solid {color['active']};background:{color['surface_alt']};padding:8px 10px;min-width:118px;}}"
             f".card .label{{color:{color['muted']};font-size:12px;}}"

@@ -611,6 +611,16 @@ class CandidateGenAgent(BaseAgent):
                         self.llm_backend,
                         {"purpose": "candidate_generation", "desired_count": desired_count},
                     )
+                    excerpt = str(answer).strip()
+                    if excerpt:
+                        self.emit_event(
+                            "llm_candidate_answer",
+                            "领域大模型已返回候选方案提案，系统正在解析候选表。",
+                            {
+                                "desired_count": desired_count,
+                                "answer_excerpt": excerpt[:1800],
+                            },
+                        )
                     items = self._extract_candidates_from_natural_answer(answer)
                     if not items:
                         self._record_llm_generation_diagnostic(

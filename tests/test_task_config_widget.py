@@ -6,8 +6,8 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication
 
+from core.task_contract import task_payload_from_request
 from core.task_parser import TaskParser
-from gui.main_window import MainWindow
 from gui.task_config_widget import TaskConfigWidget
 
 
@@ -18,7 +18,7 @@ def _app() -> QApplication:
     return app
 
 
-def test_task_config_widget_renders_reference_geometry(monkeypatch) -> None:
+def test_task_config_widget_renders_fixed_geometry_from_explicit_user_values(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
     task = TaskParser().parse_instruction(
@@ -32,7 +32,7 @@ def test_task_config_widget_renders_reference_geometry(monkeypatch) -> None:
 
         assert "任务配置" in text
         assert "用户已给事实" in text
-        assert "普通几何参考" in text
+        assert "参考几何" in text
         assert "固定几何约束" in text
         assert "候选池总数" in text
         assert "12" in text
@@ -44,7 +44,37 @@ def test_task_config_widget_renders_reference_geometry(monkeypatch) -> None:
         assert "100.0" in text
         assert "thickness_mm" in text
         assert "10.0" in text
-        assert "fixed_geometry" not in str(task.get("user_input_facts", {}))
+        facts = task_payload_from_request(task).get("user_input_facts", {})
+        assert "fixed_geometry" in str(facts)
+        assert "geometry_reference" not in str(facts)
+        assert "会覆盖候选对应参数" in text
+    finally:
+        widget.close()
+        app.processEvents()
+
+
+def test_task_config_widget_renders_reference_geometry_when_user_marks_reference(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    task = TaskParser().parse_instruction(
+        "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，参考长度 500 mm，半径约 100 mm，"
+        "厚度大约 10 mm，极限压力不低于 35 MPa，生成 12 个候选，初筛保留 5 个候选"
+    )
+    widget = TaskConfigWidget()
+    try:
+        widget.update_task(task)
+        text = widget.toPlainText()
+
+        assert "参考几何" in text
+        assert "length_mm" in text
+        assert "500.0" in text
+        assert "radius_mm" in text
+        assert "100.0" in text
+        assert "thickness_mm" in text
+        assert "10.0" in text
+        facts = task_payload_from_request(task).get("user_input_facts", {})
+        assert "geometry_reference" in str(facts)
+        assert "fixed_geometry" not in str(facts)
         assert "不强制候选方案等于该数值" in text
     finally:
         widget.close()
@@ -70,60 +100,9 @@ def test_task_config_widget_renders_fixed_geometry(monkeypatch) -> None:
         assert "100.0" in text
         assert "thickness_mm" in text
         assert "10.0" in text
-        assert "geometry_reference" not in str(task.get("user_input_facts", {}))
+        facts = task_payload_from_request(task).get("user_input_facts", {})
+        assert "geometry_reference" not in str(facts)
         assert "会覆盖候选对应参数" in text
     finally:
         widget.close()
-        app.processEvents()
-
-
-def test_main_window_syncs_task_config_page(monkeypatch) -> None:
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    app = _app()
-    task = TaskParser().parse_instruction(
-        "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
-    )
-    window = MainWindow()
-    try:
-        assert window.task_config_widget.parentWidget() is window.stack.widget(1)
-        assert window.nav_buttons[1].text() == "项目"
-
-        window.session.task = task
-        window._refresh_design_views()
-
-        text = window.task_config_widget.toPlainText()
-        assert "候选池总数" in text
-        assert "6" in text
-        assert "初筛保留数量" in text
-        assert "3" in text
-
-        window._reset_session()
-        reset_text = window.task_config_widget.toPlainText()
-        assert "输入自然语言设计需求" in reset_text
-        assert "user_input_facts" in reset_text
-        assert "geometry_reference" in reset_text
-        assert "generation / screening" in reset_text
-    finally:
-        window.close()
-        app.processEvents()
-
-
-def test_project_page_gives_task_contract_enough_initial_height(monkeypatch) -> None:
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    app = _app()
-    window = MainWindow()
-    try:
-        window.resize(1680, 980)
-        window.show()
-        app.processEvents()
-
-        window._switch_workspace_page(1)
-        app.processEvents()
-
-        project_splitter = window.stack.widget(1)
-        top_height, bottom_height = project_splitter.sizes()
-        assert top_height >= 300
-        assert bottom_height >= 480
-    finally:
-        window.close()
         app.processEvents()

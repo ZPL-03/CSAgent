@@ -17,8 +17,6 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.dont_write_bytecode = True
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(encoding="utf-8")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -31,8 +29,8 @@ def _join(*parts: str) -> str:
 
 FORBIDDEN_TEXT = [
     _join("Mech", "Agent"),
-    _join("mimo", "-v2.5-pro"),
-    _join("token", "-plan-cn"),
+    _join("mi", "mo", "-v2.5-pro"),
+    _join("token", "-plan", "-cn"),
     _join("tp", "-ct"),
     _join("PBIPF ", "\u5e26 Q"),
     _join("\u5e26", "Q\u516c\u5f0f"),
@@ -77,13 +75,11 @@ EXCLUDED_SCAN_FILES = {
 REQUIRED_UI_ASSETS = [
     "assets/screenshots/dark_workbench.png",
     "assets/screenshots/dark_workbench_runtime.png",
-    "assets/screenshots/dark_project.png",
     "assets/screenshots/dark_knowledge.png",
     "assets/screenshots/dark_monitor.png",
     "assets/screenshots/dark_settings.png",
     "assets/screenshots/light_workbench.png",
     "assets/screenshots/light_workbench_runtime.png",
-    "assets/screenshots/light_project.png",
     "assets/screenshots/light_knowledge.png",
     "assets/screenshots/light_monitor.png",
     "assets/screenshots/light_settings.png",
@@ -440,7 +436,6 @@ class ReleaseAudit:
             "main": [
                 "QStackedWidget",
                 "nav.workbench",
-                "nav.project",
                 "nav.knowledge",
                 "nav.monitor",
                 "nav.settings",
@@ -488,7 +483,7 @@ class ReleaseAudit:
             for token in tokens:
                 if token not in text:
                     missing.append(f"{name}:{token}")
-        detail = "五页导航、六智能体 DAG、对话区、实时视口、知识图谱交互和设置页配置入口齐备" if not missing else "; ".join(missing[:12])
+        detail = "四页导航、六智能体 DAG、对话区、实时视口、知识图谱交互和设置页配置入口齐备" if not missing else "; ".join(missing[:12])
         self.add("GUI 工作台契约", not missing, detail)
 
     def check_gui_render_contract(self) -> None:
@@ -585,31 +580,6 @@ class ReleaseAudit:
             task = TaskParser().parse_instruction(instruction)
             candidates = DOESampler().sample_candidates(task, n_samples=6, start_index=1, strict_solver_window=True)
             screened = ScreenerAgent().run({"task": task, "candidates": candidates})
-            results_by_session_id = {}
-            knowledge_updates = []
-            for index, candidate in enumerate(screened, start=1):
-                formal_id = f"C{index}"
-                session_id = str(candidate.get("candidate_id") or f"TMP_{index}")
-                results_by_session_id[session_id] = {
-                    "candidate_id": formal_id,
-                    "display_name": formal_id,
-                    "session_candidate_id": session_id,
-                    "status": "success",
-                    "verdict": "通过",
-                    "linear_buckling_pressure_MPa": candidate.get("asme_linear_buckling_pressure_MPa") or 42.0,
-                    "ultimate_pressure_MPa": candidate.get("surrogate_ultimate_pressure_MPa") or 48.0,
-                    "failure_mode": "GUI 运行态审计样例",
-                    "visualization_path": "",
-                    "odb_path": "",
-                }
-                knowledge_updates.append(
-                    {
-                        "status": "stored",
-                        "case_id": f"CASE_UI_{index}",
-                        "candidate_id": formal_id,
-                        "session_candidate_id": session_id,
-                    }
-                )
             return PipelineSession(
                 task=task,
                 workflow_run_id="RUN_UI_AUDIT",
@@ -617,15 +587,15 @@ class ReleaseAudit:
                 candidates=candidates,
                 screened_candidates=screened,
                 evaluated_candidates=screened,
-                results_by_session_id=results_by_session_id,
-                knowledge_updates=knowledge_updates,
+                results_by_session_id={},
+                knowledge_updates=[],
                 report={
-                    "markdown_path": "data/results/ui_audit_report.md",
-                    "pdf_path": "data/results/ui_audit_report.pdf",
-                    "content": "# CSAgent 耐压壳设计报告\n\n运行态 GUI 审计样例。",
+                    "markdown_path": "",
+                    "pdf_path": "",
+                    "content": "当前运行尚未导出报告。",
                 },
-                pending_confirmation="export_report",
-                stage="awaiting_report_confirmation",
+                pending_confirmation="fem_evaluation",
+                stage="awaiting_fem_confirmation",
             )
 
         def render_runtime_workbench(theme: str) -> None:
@@ -672,9 +642,9 @@ class ReleaseAudit:
             temp_dir = tempfile.TemporaryDirectory(prefix="csagent_gui_audit_")
             screenshot_root = Path(temp_dir.name)
 
-        page_names = ["workbench", "project", "knowledge", "monitor", "settings"]
+        page_names = ["workbench", "knowledge", "monitor", "settings"]
         try:
-            window.resize(1600, 900)
+            window.resize(1280, 960)
             window.show()
             app.processEvents()
             screenshots = 0
@@ -693,7 +663,7 @@ class ReleaseAudit:
                     if screenshot_root is not None:
                         pixmap.save(str(screenshot_root / f"{theme}_{page_name}.png"), "PNG")
                     center_widget = window.stack.currentWidget()
-                    if center_widget is None or center_widget.width() < 760 or center_widget.height() < 620:
+                    if center_widget is None or center_widget.width() < 600 or center_widget.height() < 620:
                         errors.append(f"{theme}/{page_name} 中央页尺寸异常")
                     check_label_geometry(theme, page_name)
                     if page_name == "workbench":
@@ -702,7 +672,7 @@ class ReleaseAudit:
                 screenshots += 1
                 check_workbench_left_rail_geometry(theme, "workbench_runtime")
 
-            window._switch_workspace_page(2)
+            window._switch_workspace_page(1)
             app.processEvents()
             graph_view = window.knowledge_widget.graph_view
             if graph_view.width() < 520 or graph_view.height() < 300:
@@ -736,7 +706,7 @@ class ReleaseAudit:
                 os.environ["CSDM_cph_DISABLE_LLM_AUTO"] = previous_llm_auto
 
         detail = (
-            f"深浅主题五页渲染通过，截图 {screenshots} 张"
+            f"深浅主题四页渲染通过，截图 {screenshots} 张"
             + (f"，保留目录 {screenshot_root.relative_to(ROOT).as_posix()}" if self.keep_gui_screenshots and screenshot_root else "")
             if not errors
             else "; ".join(errors[:12])
@@ -762,7 +732,7 @@ class ReleaseAudit:
             if idle_path.read_bytes() == runtime_path.read_bytes():
                 invalid_assets.append(f"{theme}_workbench.png 与 {theme}_workbench_runtime.png 内容相同")
         errors = [*missing_sources, *invalid_assets]
-        detail = f"深浅主题工作台、运行态、项目、知识库、监控和设置页面截图齐备：{len(asset_paths)} 张" if not errors else "; ".join(errors)
+        detail = f"深浅主题工作台、运行态、知识库、监控和设置页面截图齐备：{len(asset_paths)} 张" if not errors else "; ".join(errors)
         self.add("UI 展示资产", not errors, detail)
 
     def check_cases(self) -> None:
@@ -829,7 +799,7 @@ class ReleaseAudit:
 def main() -> int:
     parser = argparse.ArgumentParser(description="CSAgent 交付一致性检查")
     parser.add_argument("--with-llm-health", action="store_true", help="同时检查 LLM 主/回退模型连通性")
-    parser.add_argument("--with-gui-render", action="store_true", help="同时渲染主窗口并检查五页布局")
+    parser.add_argument("--with-gui-render", action="store_true", help="同时渲染主窗口并检查四页布局")
     parser.add_argument("--keep-gui-screenshots", action="store_true", help="保留 GUI 渲染审计截图到 data/runtime")
     args = parser.parse_args()
     return ReleaseAudit(

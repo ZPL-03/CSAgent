@@ -113,12 +113,13 @@ class DesignWorkflowRuntime:
                 agent=contracts["screen_candidates"].runtime_agent,
                 description=contracts["screen_candidates"].responsibility,
                 input_schema={"task": "dict", "candidates": "list"},
-                output_schema={"screened_candidates": "list"},
+                output_schema={"screened_candidates": "list", "ranked_candidates": "list"},
                 handler=lambda payload: {
                     "screened_candidates": self.orchestrator.screen_candidates(
                         payload["task"],
                         payload["candidates"],
-                    )
+                    ),
+                    "ranked_candidates": getattr(self.orchestrator, "last_ranked_candidates", []),
                 },
             )
         )
@@ -352,7 +353,9 @@ class DesignWorkflowRuntime:
             {"task": state["task"], "candidates": state.get("candidates", [])},
         )
         screened = result["screened_candidates"]
+        ranked = result.get("ranked_candidates") or state.get("candidates", [])
         return {
+            "candidates": ranked,
             "screened_candidates": screened,
             "evaluated_candidates": screened,
             "stage": "screened",

@@ -550,52 +550,44 @@ class FlowDagWidget(QWidget):
         title_font.setBold(True)
         body_font = QFont(self.font())
         body_font.setPointSize(7 if rect.width() < 136 else 8)
-        body_metrics = QFontMetrics(body_font)
         status_text = self._node_status_text(node, state, accent)
         side_margin = 14.0 if accent == "rag" else 10.0
         dot_diameter = 8.0
         dot_gap = 7.0
-        max_text_width = max(24.0, rect.width() - side_margin * 2.0 - dot_diameter - dot_gap)
-
-        title_lines = [node.name]
+        title_max_width = max(24.0, rect.width() - side_margin * 2.0 - dot_diameter - dot_gap)
+        subtitle_max_width = max(24.0, rect.width() - side_margin * 2.0)
         while title_font.pointSize() > 6:
             title_metrics = QFontMetrics(title_font)
-            if max(title_metrics.horizontalAdvance(line) for line in title_lines) <= max_text_width:
+            if title_metrics.horizontalAdvance(node.name) <= title_max_width:
                 break
             title_font.setPointSize(title_font.pointSize() - 1)
         title_metrics = QFontMetrics(title_font)
-        title_lines = [
-            title_metrics.elidedText(line, Qt.TextElideMode.ElideRight, int(max_text_width))
-            for line in title_lines
-        ]
-        subtitle_text = body_metrics.elidedText(status_text, Qt.TextElideMode.ElideRight, int(max_text_width))
-        text_width = max(
-            max(float(title_metrics.horizontalAdvance(line)) for line in title_lines),
-            float(body_metrics.horizontalAdvance(subtitle_text)),
-        )
-        content_width = dot_diameter + dot_gap + text_width
-        content_x = rect.left() + max(side_margin, (rect.width() - content_width) / 2.0)
-        content_x = min(content_x, rect.right() - side_margin - content_width)
-        line_height = max(12.0, float(title_metrics.height()) - 1.0)
-        title_block_height = line_height * len(title_lines)
-        block_height = title_block_height + 17.0
+        body_metrics = QFontMetrics(body_font)
+        title_text = title_metrics.elidedText(node.name, Qt.TextElideMode.ElideRight, int(title_max_width))
+        subtitle_text = body_metrics.elidedText(status_text, Qt.TextElideMode.ElideRight, int(subtitle_max_width))
+        title_width = float(title_metrics.horizontalAdvance(title_text))
+        subtitle_width = float(body_metrics.horizontalAdvance(subtitle_text))
+        title_group_width = dot_diameter + dot_gap + title_width
+        line_height = max(13.0, float(title_metrics.height()))
+        block_height = line_height + 17.0
         block_y = rect.top() + (rect.height() - block_height) / 2.0
-        dot_center = QPointF(content_x + dot_diameter / 2.0, block_y + title_block_height / 2.0)
+        title_group_x = rect.left() + max(side_margin, (rect.width() - title_group_width) / 2.0)
+        title_group_x = min(title_group_x, rect.right() - side_margin - title_group_width)
+        dot_center = QPointF(title_group_x + dot_diameter / 2.0, block_y + line_height / 2.0)
         painter.drawEllipse(dot_center, dot_diameter / 2.0, dot_diameter / 2.0)
 
-        text_x = content_x + dot_diameter + dot_gap
-        title_rect = QRectF(text_x, block_y, text_width + 2.0, title_block_height)
-        status_rect = QRectF(text_x, block_y + title_block_height + 1.0, text_width + 2.0, 16.0)
+        title_rect = QRectF(title_group_x + dot_diameter + dot_gap, block_y, title_width + 2.0, line_height)
+        status_x = rect.left() + max(side_margin, (rect.width() - subtitle_width) / 2.0)
+        status_x = min(status_x, rect.right() - side_margin - subtitle_width)
+        status_rect = QRectF(status_x, block_y + line_height + 1.0, subtitle_width + 2.0, 16.0)
 
         painter.setFont(title_font)
         painter.setPen(colors["text"])
-        for line_index, line in enumerate(title_lines):
-            line_rect = QRectF(title_rect.left(), title_rect.top() + line_index * line_height, title_rect.width(), line_height)
-            painter.drawText(line_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, line)
+        painter.drawText(title_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, title_text)
 
         painter.setFont(body_font)
         painter.setPen(state_color if state != "waiting" or accent == "rag" else colors["muted"])
-        painter.drawText(status_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, subtitle_text)
+        painter.drawText(status_rect, Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter, subtitle_text)
 
     @staticmethod
     def _elide(painter: QPainter, value: str, width: float) -> str:

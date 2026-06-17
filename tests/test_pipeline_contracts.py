@@ -43,13 +43,13 @@ def test_parser_reads_natural_language_pool_counts(monkeypatch):
     assert generation["source_allocation_mode"] == "ratio_2_1_1"
     facts = payload["user_input_facts"]
     assert facts["load_conditions"]["external_pressure_MPa"] == 30.0
-    assert facts["geometry_reference"]["length_mm"] == 500.0
-    assert facts["geometry_reference"]["radius_mm"] == 100.0
-    assert facts["geometry_reference"]["thickness_mm"] == 10.0
-    assert "fixed_geometry" not in facts
-    assert payload["geometry_envelope"]["length_mm"] == [440.0, 560.0]
-    assert payload["geometry_envelope"]["radius_mm"] == [80.0, 120.0]
-    assert payload["geometry_envelope"]["thickness_mm"] == [7.0, 13.0]
+    assert facts["fixed_geometry"]["length_mm"] == 500.0
+    assert facts["fixed_geometry"]["radius_mm"] == 100.0
+    assert facts["fixed_geometry"]["thickness_mm"] == 10.0
+    assert "geometry_reference" not in facts
+    assert payload["geometry_envelope"]["length_mm"] == [500.0, 500.0]
+    assert payload["geometry_envelope"]["radius_mm"] == [100.0, 100.0]
+    assert payload["geometry_envelope"]["thickness_mm"] == [10.0, 10.0]
     assert facts["design_targets"]["ultimate_pressure_min_MPa"] == 35.0
 
 
@@ -69,6 +69,24 @@ def test_parser_distinguishes_fixed_geometry_from_reference_geometry(monkeypatch
     assert payload["geometry_envelope"]["length_mm"] == [500.0, 500.0]
     assert payload["geometry_envelope"]["radius_mm"] == [100.0, 100.0]
     assert payload["geometry_envelope"]["thickness_mm"] == [10.0, 10.0]
+
+
+def test_parser_keeps_reference_geometry_when_user_marks_it_as_reference(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = TaskParser().parse_instruction(
+        "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，参考长度 500 mm，"
+        "半径约 100 mm，厚度大约 10 mm，极限压力不低于 35 MPa，生成 8 个候选，初筛保留 3 个候选"
+    )
+    payload = task_payload_from_request(task)
+    facts = payload["user_input_facts"]
+
+    assert facts["geometry_reference"]["length_mm"] == 500.0
+    assert facts["geometry_reference"]["radius_mm"] == 100.0
+    assert facts["geometry_reference"]["thickness_mm"] == 10.0
+    assert "fixed_geometry" not in facts
+    assert payload["geometry_envelope"]["length_mm"] == [440.0, 560.0]
+    assert payload["geometry_envelope"]["radius_mm"] == [80.0, 120.0]
+    assert payload["geometry_envelope"]["thickness_mm"] == [7.0, 13.0]
 
 
 def test_parser_accepts_field_level_fixed_geometry_phrasing(monkeypatch):
@@ -402,8 +420,8 @@ def test_candidate_generation_deduplicates_equivalent_designs(monkeypatch):
 def test_llm_candidates_are_extracted_from_engineering_natural_answer(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = TaskParser().parse_instruction(
-        "请为复合材料外压圆柱耐压壳设计方案，材料 T700/Epoxy，外压 30 MPa，长度 500 mm，"
-        "半径 100 mm，厚度 10 mm，初始缺陷比 0.5%，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
+        "请为复合材料外压圆柱耐压壳设计方案，材料 T700/Epoxy，外压 30 MPa，几何参考长度约 500 mm，"
+        "半径约 100 mm，厚度约 10 mm，初始缺陷比参考 0.5%，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
     )
     agent = CandidateGenAgent()
 

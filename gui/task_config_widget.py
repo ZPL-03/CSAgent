@@ -27,7 +27,7 @@ from gui.i18n import DEFAULT_LANGUAGE
 LABELS = {
     "zh": {
         "title": "任务配置",
-        "empty": "输入自然语言设计需求并完成任务解析后，这里会展示结构化任务契约、用户已给事实、几何参考、固定几何约束、候选生成控制参数和初筛控制参数。",
+        "empty": "输入自然语言设计需求并完成任务解析后，这里会展示结构化任务契约、用户已给事实、参考几何、固定几何约束、候选生成控制参数和初筛控制参数。",
         "contract": "任务契约",
         "task_id": "任务编号",
         "application": "应用对象",
@@ -46,16 +46,16 @@ LABELS = {
         "objective": "优化目标",
         "geometry_domain": "几何参数域",
         "facts": "用户已给事实",
-        "reference_geometry": "普通几何参考",
+        "reference_geometry": "参考几何",
         "fixed_geometry": "固定几何约束",
         "empty_fields": "等待解析字段",
         "none": "无",
         "unspecified": "未指定，按来源比例计算",
         "fact_title": "事实边界",
-        "fact_short": "用户事实、几何参考和固定约束分层记录；参数域、材料库、单位格式和有限元接口属于系统工程约束。",
+        "fact_short": "用户事实、参考几何和固定约束分层记录；参数域、材料库、单位格式和有限元接口属于系统工程约束。",
         "fact_user": "只保存用户自然语言明确给出的事实。",
-        "fact_reference": "作为设计中心和几何包络参考，不强制候选方案等于该数值。",
-        "fact_fixed": "明确固定、限定或必须保持不变的几何约束，会覆盖候选对应参数。",
+        "fact_reference": "用户明确表达为参考、约、附近时作为设计中心和几何包络参考，不强制候选方案等于该数值。",
+        "fact_fixed": "用户明确给出的几何参数作为固定几何约束，会覆盖候选对应参数；参考、约、附近等表达除外。",
         "fact_system": "参数域、材料库、单位格式和有限元接口字段不作为用户事实发送给 LLM。",
     },
     "en": {
@@ -143,8 +143,8 @@ class TaskConfigWidget(QWidget):
         else:
             empty_rows = {
                 "facts": "仅保存用户明确给出的事实",
-                "reference": "作为设计中心参考，不固定候选",
-                "fixed": "只有明确限定时才固定参数",
+                "reference": "参考、约、附近等表达作为设计中心",
+                "fixed": "明确给出的几何参数会固定候选",
                 "control": "候选总数和初筛数量来自用户输入",
                 "domain": "参数域用于规则、DOE 和 FEM 接口",
             }

@@ -36,6 +36,7 @@ class OrchestratorAgent(BaseAgent):
         self.fem_agent = FEMAgent(progress_callback)
         self.knowledge_agent = KnowledgeAgent(progress_callback)
         self.report_gen = ReportGenAgent(progress_callback)
+        self.last_ranked_candidates: List[Dict] = []
 
     def _task_payload(self, task: Dict) -> Dict:
         return task_payload_from_request(task)
@@ -145,7 +146,12 @@ class OrchestratorAgent(BaseAgent):
                 "effective_top_k_candidates": effective_top_k,
             },
         )
-        screened = self.screener.run({"task": task, "candidates": candidates})
+        ranked_candidates = [self._attach_task_context(task, candidate) for candidate in self.screener.rank_candidates(task, candidates)]
+        screened = [candidate for candidate in ranked_candidates if candidate.get("screening_selected")]
+        self.last_ranked_candidates = ranked_candidates
+        self.screener.emit(
+            f"已完成 {len(candidates)} 个候选的批量评分，请求保留 Top-{effective_top_k}，实际返回 {len(screened)} 个。"
+        )
         self.emit_event(
             "screening_completed",
             f"代理模型初筛完成，请求 Top-{requested_top_k}，实际输出 {len(screened)} 个。",
@@ -157,9 +163,10 @@ class OrchestratorAgent(BaseAgent):
                 "requested_top_k_candidates": requested_top_k,
                 "effective_top_k_candidates": effective_top_k,
                 "selected_candidates": screened,
+                "ranked_candidates": ranked_candidates,
             },
         )
-        return [self._attach_task_context(task, candidate) for candidate in screened]
+        return screened
 
     def prepare_candidate_for_fem(self, task: Dict, candidate: Dict) -> Dict:
         """生成正式有限元输入候选。"""
@@ -230,13 +237,28 @@ class OrchestratorAgent(BaseAgent):
             self.persist_knowledge_records(task, [fem_candidate], [result])
         return result
 
-    def generate_report(self, task: Dict, results: List[Dict], candidates: List[Dict] | None = None) -> Dict:
+    def generate_report(
+        self,
+        task: Dict,
+        results: List[Dict],
+        candidates: List[Dict] | None = None,
+        report_kind: str = "all",
+        output_dir: str | None = None,
+    ) -> Dict:
         self.emit_event(
             "report_started",
             "开始生成设计报告",
             {**self._task_event_context(task), "result_count": len(results)},
         )
-        return self.report_gen.run({"task": task, "results": results, "candidates": candidates or []})
+        return self.report_gen.run(
+            {
+                "task": task,
+                "results": results,
+                "candidates": candidates or [],
+                "report_kind": report_kind,
+                "output_dir": output_dir,
+            }
+        )
 
     def run(self, user_instruction: str, overrides: Dict | None = None) -> Dict:
         self.emit("正在解析用户需求")

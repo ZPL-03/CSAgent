@@ -54,8 +54,8 @@ def test_main_window_switches_primary_shell_language(monkeypatch, tmp_path) -> N
         assert window.generate_button.text() == "Send"
         assert window.restore_run_button.text() == "Restore Run State"
         assert "without re-running LLM or ABAQUS" in window.restore_run_button.toolTip()
-        assert window.tabs.tabText(window.tabs.indexOf(window.candidate_widget)) == "Candidates"
-        assert "Sample" in window.candidate_widget.table.horizontalHeaderItem(0).text()
+        assert window.nav_buttons[1].text() == "Knowledge"
+        assert "Sample" in window.workbench_candidate_widget.table.horizontalHeaderItem(0).text()
 
         light_index = window.theme_selector.findData("light")
         window.theme_selector.setCurrentIndex(light_index)

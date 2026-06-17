@@ -28,6 +28,9 @@ data/tasks/
 data/abaqus_runs/
 data/results/latest_report.md
 data/results/latest_report.pdf
+data/results/overall_design_report.*
+data/results/fem_verification_report.*
+data/results/recommended_design_solution.*
 data/results/batch_summary_*.json
 data/results/natural_language_acceptance_*.json
 data/runtime/

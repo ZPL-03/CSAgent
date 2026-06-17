@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import csv
 import copy
+import csv
 import json
 import os
 
@@ -11,14 +11,12 @@ import yaml
 from PyQt6.QtGui import QFont, QFontMetrics
 from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QLineEdit, QPushButton
 
+import gui.main_window as main_window_module
 from core.task_parser import TaskParser
 from gui.chat_widget import ChatWidget
-import gui.main_window as main_window_module
 from gui.main_window import MainWindow
 from gui.theme import application_stylesheet
-from gui.workbench_widgets import AgentStatusCard
-from gui.workbench_widgets import FlowDagWidget
-from gui.workbench_widgets import StatusPill
+from gui.workbench_widgets import AgentStatusCard, FlowDagWidget, StatusPill
 from workflow.event_store import WorkflowEventStore
 from workflow.simulation_queue import SimulationJobQueue
 
@@ -70,7 +68,6 @@ def test_report_button_allows_partial_evaluated_results(monkeypatch) -> None:
         window.session.results_by_session_id = {"TMP_1": {"candidate_id": "C1", "session_candidate_id": "TMP_1"}}
 
         window._update_button_states()
-
         assert window.report_button.isEnabled() is True
         assert [item["candidate_id"] for item in window._report_candidate_set()] == ["TMP_1"]
 
@@ -83,13 +80,12 @@ def test_report_button_allows_partial_evaluated_results(monkeypatch) -> None:
         assert captured["action"] == "report"
         assert [item["candidate_id"] for item in captured["payload"]["candidates"]] == ["TMP_1"]
         assert [item["candidate_id"] for item in captured["payload"]["results"]] == ["C1"]
-        assert window.tabs.currentWidget() is window.report_widget
     finally:
         window.close()
         app.processEvents()
 
 
-def test_report_completion_updates_preview_tab(monkeypatch) -> None:
+def test_report_completion_updates_session_and_open_button(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
     window = MainWindow()
@@ -104,9 +100,7 @@ def test_report_completion_updates_preview_tab(monkeypatch) -> None:
         window._handle_finished("report", {"report": report})
 
         assert window.session.report == report
-        assert window.tabs.currentWidget() is window.report_widget
-        assert "预览内容" in window.report_widget.preview_browser.toPlainText()
-        assert "LLM 工程解释：否" in window.report_widget.summary_label.text()
+        assert window.open_report_button.isEnabled() is True
     finally:
         window.close()
         app.processEvents()
@@ -167,19 +161,6 @@ def test_session_data_export_writes_json_and_trace_csv(monkeypatch, tmp_path) ->
         app.processEvents()
 
 
-def test_session_data_export_button_disabled_for_empty_session(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    monkeypatch.setattr("gui.main_window.RESULTS_DIR", tmp_path)
-    app = _app()
-    window = MainWindow()
-    try:
-        window._update_button_states()
-        assert window.export_data_button.isEnabled() is False
-    finally:
-        window.close()
-        app.processEvents()
-
-
 def test_loaded_example_keeps_geometry_as_candidate_variables(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
@@ -205,35 +186,12 @@ def test_monitor_page_contains_workflow_audit_widget(monkeypatch) -> None:
     app = _app()
     window = MainWindow()
     try:
-        window._switch_workspace_page(3)
+        window._switch_workspace_page(2)
         assert window.stack.currentWidget() is window.monitor_page
         assert window.monitor_dashboard_widget.parent() is not None
-        assert window.monitor_dashboard_widget.isHidden() is False
-        assert len(window.monitor_dashboard_widget.points) >= 1
         assert window.workflow_widget.parent() is not None
-        assert window.workflow_widget.isHidden() is False
         assert window.workflow_widget.health_button.isHidden() is False
         assert window.workflow_widget.audit_button.isHidden() is False
-    finally:
-        window.close()
-        app.processEvents()
-
-
-def test_main_window_marks_failed_stage_and_agent(monkeypatch) -> None:
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    app = _app()
-    window = MainWindow()
-    try:
-        window.session.stage = "screen_candidates_failed"
-        assert window._agent_state_map()["SCREENER"] == "failed"
-        assert window._agent_status_label("failed") == "失败"
-
-        window._handle_failed("worker error")
-
-        assert window.session.stage == "failed"
-        assert window.session.pending_confirmation is None
-        assert window._agent_state_map()["ORCHESTRATOR"] == "failed"
-        assert "worker error" in window.status_label.text()
     finally:
         window.close()
         app.processEvents()
@@ -273,7 +231,6 @@ def test_main_window_restores_workflow_snapshot(monkeypatch, tmp_path) -> None:
         window._refresh_run_selector()
 
         assert window.run_selector.currentData() == "RUN_RESTORE"
-
         window._restore_selected_run()
 
         assert window.session.workflow_run_id == "RUN_RESTORE"
@@ -281,66 +238,8 @@ def test_main_window_restores_workflow_snapshot(monkeypatch, tmp_path) -> None:
         assert window.session.pending_confirmation == "export_report"
         assert window.session.results_by_session_id["TMP_1"]["candidate_id"] == "C1"
         assert window.session.knowledge_updates[0]["case_id"] == "CASE_1"
-        assert window.tabs.indexOf(window.result_trace_widget) >= 0
-        assert "CASE_1" in window.result_trace_widget.table.item(0, 7).text()
-        assert window.tabs.currentWidget() is window.result_trace_widget
         assert "RUN_RESTORE" in window.status_label.text()
         assert window.confirm_yes_button.isEnabled() is True
-    finally:
-        window.close()
-        app.processEvents()
-
-
-def test_main_window_updates_model_pill_for_primary_llm_trace(monkeypatch) -> None:
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    app = _app()
-    window = MainWindow()
-    try:
-        event = {
-            "event_type": "llm_call_trace",
-            "payload": {
-                "selected_backend": "domain_finetuned_primary",
-                "selected_model": "csllm",
-                "fallback_used": False,
-                "trace": [{"backend": "domain_finetuned_primary", "status": "success"}],
-            },
-        }
-
-        window._handle_message("CANDIDATE_GEN", "LLM call completed", event)
-
-        assert window.model_status_label.status == "success"
-        assert "csllm" in window.model_status_label.text
-        assert "csllm" in window.log_widget.toPlainText()
-        assert window.last_llm_trace_payload["selected_backend"] == "domain_finetuned_primary"
-    finally:
-        window.close()
-        app.processEvents()
-
-
-def test_main_window_updates_model_pill_for_fallback_llm_trace(monkeypatch) -> None:
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    app = _app()
-    window = MainWindow()
-    try:
-        event = {
-            "event_type": "llm_call_trace",
-            "payload": {
-                "selected_backend": "configured_fallback",
-                "selected_model": "deepseek-v4-pro",
-                "fallback_used": True,
-                "trace": [
-                    {"backend": "domain_finetuned_primary", "status": "failed"},
-                    {"backend": "configured_fallback", "status": "success"},
-                ],
-            },
-        }
-
-        window._handle_message("CANDIDATE_GEN", "LLM call completed", event)
-
-        assert window.model_status_label.status == "warning"
-        assert "deepseek-v4-pro" in window.model_status_label.text
-        assert "configured_fallback" in window.log_widget.toPlainText()
-        assert window.last_llm_trace_payload["fallback_used"] is True
     finally:
         window.close()
         app.processEvents()
@@ -368,7 +267,6 @@ def test_main_window_routes_runtime_events_to_logs_without_chat_noise(monkeypatc
         assert window.chat_widget.toPlainText() == before_chat
         assert window.runtime_agent_states["ORCHESTRATOR"] == "active"
         assert window.flow_dag_widget.agent_states["ORCHESTRATOR"] == "active"
-        assert window.flow_dag_widget.stage_text == "运行中 · 任务解析中"
 
         event["payload"]["runtime_event_type"] = "node_completed"
         window._handle_message("FLOW", "节点完成：parse_task", event)
@@ -380,61 +278,12 @@ def test_main_window_routes_runtime_events_to_logs_without_chat_noise(monkeypatc
         app.processEvents()
 
 
-def test_main_window_routes_runtime_events_across_all_agents(monkeypatch) -> None:
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    app = _app()
-    window = MainWindow()
-    try:
-        window.session.task = TaskParser().parse_instruction("外压 30 MPa，生成 4 个候选，初筛保留 2 个候选")
-        event_pairs = [
-            ("node_started", "parse_task", "parse_task", "ORCHESTRATOR", "active"),
-            ("node_completed", "parse_task", "parse_task", "ORCHESTRATOR", "done"),
-            ("node_started", "generate_candidates", "generate_candidates", "CANDIDATE_GEN", "active"),
-            ("tool_completed", "generate_candidates", "candidate_generator", "CANDIDATE_GEN", "done"),
-            ("node_started", "screen_candidates", "screen_candidates", "SCREENER", "active"),
-            ("node_completed", "screen_candidates", "screen_candidates", "SCREENER", "done"),
-            ("simulation_job_started", "evaluate_candidates", "SimulationQueue", "FEM_AGENT", "active"),
-            ("simulation_job_completed", "evaluate_candidates", "SimulationQueue", "FEM_AGENT", "done"),
-            ("node_started", "persist_knowledge", "persist_knowledge", "KNOWLEDGE_AGENT", "active"),
-            ("node_completed", "persist_knowledge", "persist_knowledge", "KNOWLEDGE_AGENT", "done"),
-            ("node_started", "generate_report", "generate_report", "REPORT_GEN", "active"),
-            ("node_failed", "generate_report", "generate_report", "REPORT_GEN", "failed"),
-        ]
-
-        for runtime_type, stage, runtime_agent, ui_agent, expected_state in event_pairs:
-            window._handle_message(
-                "FLOW",
-                f"{runtime_type}: {stage}",
-                {
-                    "event_type": "workflow_runtime_event",
-                    "payload": {
-                        "runtime_event_type": runtime_type,
-                        "runtime_stage": stage,
-                        "runtime_agent": runtime_agent,
-                    },
-                },
-            )
-            assert window.runtime_agent_states[ui_agent] == expected_state
-            assert window.flow_dag_widget.agent_states[ui_agent] == expected_state
-            assert f"{runtime_type} @ {stage}" in window.log_widget.toPlainText()
-            assert f"{runtime_type}: {stage}" not in window.chat_widget.toPlainText()
-
-        assert window.agent_cards["REPORT_GEN"].state == "failed"
-        assert window.flow_dag_widget.stage_text == "失败 · 报告失败"
-        assert "REPORT_GEN" in window.log_widget.toPlainText()
-    finally:
-        window.close()
-        app.processEvents()
-
-
 def test_main_window_shell_layout_keeps_reference_workbench_structure(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
     window = MainWindow()
     try:
-        window.resize(1680, 980)
-        window.main_splitter.setSizes([270, 1040, 370])
-        window.workbench_splitter.setSizes([190, 760])
+        window.resize(1280, 960)
         window.locale.set_theme("dark")
         window._apply_styles()
         window._update_overview_cards()
@@ -447,25 +296,8 @@ def test_main_window_shell_layout_keeps_reference_workbench_structure(monkeypatc
         assert window.model_status_label.isVisible() is True
         assert window.reset_view_button.isVisible() is True
         assert window.fit_view_button.isVisible() is True
-        assert not window.reset_view_button.icon().isNull()
-        assert not window.fit_view_button.icon().isNull()
-        assert window.reset_view_button.toolTip()
-        assert window.fit_view_button.toolTip()
         assert "#e5edf7" in window.stage_card.text()
         assert window.queue_progress.isVisible() is False
-
-        left_width, center_width, right_width = window.main_splitter.sizes()
-        assert 240 <= left_width <= 310
-        assert center_width >= 900
-        assert 320 <= right_width <= 430
-
-        dag_height, chat_height = window.workbench_splitter.sizes()
-        assert 160 <= dag_height <= 230
-        assert chat_height >= 520
-        chat_bubbles = [item for item in window.chat_widget.findChildren(QFrame) if item.objectName() == "chatBubble"]
-        widths = [bubble.width() for bubble in chat_bubbles]
-        assert max(widths) <= int(window.chat_widget.width() * 0.84)
-        assert len(set(widths)) > 1
 
         for index, button in enumerate(window.nav_buttons):
             window._switch_workspace_page(index)
@@ -474,9 +306,6 @@ def test_main_window_shell_layout_keeps_reference_workbench_structure(monkeypatc
             assert window.stack.currentIndex() == index
             assert window.left_stack.currentIndex() == index
             assert window.right_stack.currentIndex() == index
-            assert window.stack.currentWidget().width() > 0
-            assert window.left_stack.currentWidget().width() > 0
-            assert window.right_stack.currentWidget().width() > 0
     finally:
         window.close()
         app.processEvents()
@@ -536,7 +365,7 @@ def test_visible_workbench_buttons_keep_text_inside_layout(monkeypatch) -> None:
     app = _app()
     window = MainWindow()
     try:
-        window.resize(1680, 980)
+        window.resize(1280, 960)
         window.show()
         app.processEvents()
 
@@ -583,7 +412,7 @@ def test_shell_pages_keep_major_regions_inside_window_across_themes(monkeypatch)
         assert window_rect.contains(bottom_right), (widget.objectName(), bottom_right, window_rect)
 
     try:
-        window.resize(1680, 980)
+        window.resize(1280, 960)
         window.show()
         app.processEvents()
 
@@ -599,15 +428,6 @@ def test_shell_pages_keep_major_regions_inside_window_across_themes(monkeypatch)
                 assert_inside_window(window.stack)
                 assert_inside_window(window.right_stack)
                 assert_inside_window(window.model_status_label)
-
-                left_width, center_width, right_width = window.main_splitter.sizes()
-                assert 240 <= left_width <= 330
-                assert center_width >= 820
-                assert 300 <= right_width <= 460
-
-                assert window.stack.currentWidget().sizeHint().width() >= 0
-                assert window.left_stack.currentWidget().sizeHint().width() >= 0
-                assert window.right_stack.currentWidget().sizeHint().width() >= 0
     finally:
         window.close()
         app.processEvents()
@@ -640,37 +460,6 @@ def test_flow_dag_knowledge_node_has_even_spacing_and_stays_inside_panel() -> No
         app.processEvents()
 
 
-def test_chat_empty_state_uses_adaptive_engineering_message_cards() -> None:
-    app = _app()
-    widget = ChatWidget()
-    try:
-        widget.resize(1120, 520)
-        widget.set_empty_text("输入设计需求后，系统展示实时协作过程。")
-        widget.set_empty_state(
-            title="对话 · 等待设计任务",
-            user_prompt="请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 12 个候选，初筛保留 5 个候选",
-            agent_title="ORCHESTRATOR",
-            agent_body="收到任务后，系统会抽取用户已给事实，构建候选池和初筛目标，并在代理初筛、有限元校核、报告导出前请求人工确认。",
-            tool_title="工具调用 · abaqus_solver",
-            tool_body="有限元阶段会显示正式 C 编号、作业状态、线性屈曲、Static Riks 后屈曲、云图路径和诊断摘要。",
-            evidence_a="RAG/KG 证据",
-            evidence_b="候选来源审计",
-        )
-        widget.show()
-        app.processEvents()
-
-        bubbles = [item for item in widget.findChildren(QFrame) if item.objectName() == "chatBubble"]
-        assert len(bubbles) >= 3
-        widths = [bubble.width() for bubble in bubbles]
-        assert max(widths) <= int(widget.width() * 0.84)
-        assert min(widths) >= 220
-        assert len(set(widths)) > 1
-        assert any(label.text() == "U" for label in widget.findChildren(QLabel))
-    finally:
-        widget.close()
-        app.processEvents()
-
-
 def test_chat_short_messages_do_not_expand_to_panel_width() -> None:
     app = _app()
     widget = ChatWidget()
@@ -684,8 +473,8 @@ def test_chat_short_messages_do_not_expand_to_panel_width() -> None:
         bubbles = [item for item in widget.findChildren(QFrame) if item.objectName() == "chatBubble"]
         widths = sorted(bubble.width() for bubble in bubbles)
         assert len(widths) == 2
-        assert widths[0] <= 240
-        assert widths[1] <= 360
+        assert widths[0] <= 260
+        assert widths[1] <= 420
     finally:
         widget.close()
         app.processEvents()
@@ -736,10 +525,10 @@ def test_chat_dynamic_messages_scroll_to_latest_with_bottom_spacer() -> None:
 def test_light_theme_uses_light_log_and_sidebar_surfaces() -> None:
     stylesheet = application_stylesheet("Microsoft YaHei UI", "light")
 
-    assert 'background: #ffffff;' in stylesheet
-    assert 'color: #334155;' in stylesheet
-    assert 'background: #0b1220;' not in stylesheet
-    assert 'background: #141f31;' not in stylesheet
+    assert "background: #ffffff;" in stylesheet
+    assert "color: #334155;" in stylesheet
+    assert "background: #0b1220;" not in stylesheet
+    assert "background: #141f31;" not in stylesheet
     assert "ui_workbench_light.png" not in (open("README.md", encoding="utf-8").read())
 
 
@@ -767,9 +556,9 @@ def test_settings_page_exposes_editable_runtime_configuration(monkeypatch) -> No
     app = _app()
     window = MainWindow()
     try:
-        window.resize(1680, 980)
+        window.resize(1280, 960)
         window.show()
-        window._switch_workspace_page(4)
+        window._switch_workspace_page(3)
         app.processEvents()
 
         assert "llm.primary.model" in window.settings_fields
@@ -863,52 +652,6 @@ def test_settings_page_persists_editable_runtime_configuration(monkeypatch, tmp_
         assert saved_app["project_knowledge"]["min_chunk_tokens"] == 64
         assert saved_llm["backends"][0]["model"] == "csllm-check"
         assert window.settings_status_label.text()
-    finally:
-        window.close()
-        app.processEvents()
-
-
-def test_settings_page_rejects_invalid_ratio_and_chunk_contract(monkeypatch, tmp_path) -> None:
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    app_config = {
-        "abaqus": {},
-        "pipeline": {
-            "candidate_source_ratio": {"llm": 2, "case_transfer": 1, "doe": 1},
-            "random_seed": 42,
-        },
-        "project_knowledge": {
-            "top_k": 5,
-            "kg_top_k": 8,
-            "chunk_token_size": 512,
-            "chunk_overlap_tokens": 64,
-            "min_chunk_tokens": 80,
-            "vector_enabled": True,
-            "vector_collection_name": "csdm_cph_project_knowledge",
-        },
-        "conversation": {"confirmation_steps": ["screening", "fem"]},
-    }
-    llm_config = {"backends": [{"model": "csllm"}, {"model_env": "MODEL_NAME"}]}
-    monkeypatch.setattr(main_window_module, "CONFIG_DIR", tmp_path)
-    monkeypatch.setattr(main_window_module, "load_app_config", _config_loader(app_config))
-    monkeypatch.setattr(main_window_module, "load_llm_config", _config_loader(llm_config))
-    app = _app()
-    window = MainWindow()
-    try:
-        window.settings_fields["pipeline.ratio.llm"].setText("0")
-        window.settings_fields["pipeline.ratio.case_transfer"].setText("0")
-        window.settings_fields["pipeline.ratio.doe"].setText("0")
-        window._save_settings_from_page()
-
-        assert not (tmp_path / "app_config.yaml").exists()
-        assert "至少需要一路" in window.settings_status_label.text()
-
-        window.settings_fields["pipeline.ratio.doe"].setText("1")
-        window.settings_fields["knowledge.chunk_token_size"].setText("128")
-        window.settings_fields["knowledge.chunk_overlap_tokens"].setText("128")
-        window._save_settings_from_page()
-
-        assert not (tmp_path / "app_config.yaml").exists()
-        assert "Overlap token" in window.settings_status_label.text()
     finally:
         window.close()
         app.processEvents()

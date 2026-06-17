@@ -45,6 +45,43 @@ def _text_props(language: str) -> dict:
     return {"fontproperties": font} if font is not None else {}
 
 
+def _center_rendered_png(png_bytes: bytes, background_hex: str) -> bytes:
+    """将离线三维预览的有效图形居中，避免 Matplotlib 3D 投影产生偏移留白。"""
+
+    try:
+        from PIL import Image, ImageChops
+    except Exception:
+        return png_bytes
+    try:
+        image = Image.open(io.BytesIO(png_bytes)).convert("RGBA")
+        background_rgb = tuple(int(background_hex.lstrip("#")[index : index + 2], 16) for index in (0, 2, 4))
+        background = Image.new("RGBA", image.size, (*background_rgb, 255))
+        diff = ImageChops.difference(image, background).convert("L")
+        bbox = diff.point(lambda value: 255 if value > 10 else 0).getbbox()
+        if bbox is None:
+            return png_bytes
+        canvas_width, canvas_height = image.size
+        pad_x = max(22, int(canvas_width * 0.16))
+        pad_y = max(22, int(canvas_height * 0.22))
+        cropped = image.crop(bbox)
+        target_width = max(1, canvas_width - pad_x * 2)
+        target_height = max(1, canvas_height - pad_y * 2)
+        scale = min(target_width / cropped.width, target_height / cropped.height)
+        if scale <= 0:
+            return png_bytes
+        resized = cropped.resize(
+            (max(1, int(cropped.width * scale)), max(1, int(cropped.height * scale))),
+            Image.Resampling.LANCZOS,
+        )
+        canvas = Image.new("RGBA", image.size, (*background_rgb, 255))
+        canvas.alpha_composite(resized, ((canvas_width - resized.width) // 2, (canvas_height - resized.height) // 2))
+        buffer = io.BytesIO()
+        canvas.save(buffer, format="PNG")
+        return buffer.getvalue()
+    except Exception:
+        return png_bytes
+
+
 def build_candidate_scene(candidate: Dict) -> Tuple[list[tuple[object, Dict]], str] | None:
     if pv is None:
         return None
@@ -198,11 +235,11 @@ def render_candidate_png_bytes(
             except Exception:
                 pass
             try:
-                axis.set_box_aspect((max(length, 1.0), max(radius * 2.0, 1.0), max(radius * 2.0, 1.0)), zoom=1.16)
+                axis.set_box_aspect((max(length, 1.0), max(radius * 2.0, 1.0), max(radius * 2.0, 1.0)), zoom=1.0)
             except TypeError:
                 axis.set_box_aspect((max(length, 1.0), max(radius * 2.0, 1.0), max(radius * 2.0, 1.0)))
-            radial_limit = radius * 1.12
-            axial_limit = length * 0.59
+            radial_limit = radius * 1.2
+            axial_limit = length * 0.68
             axis.set_xlim(-axial_limit, axial_limit)
             axis.set_ylim(-radial_limit, radial_limit)
             axis.set_zlim(-radial_limit, radial_limit)
@@ -235,7 +272,8 @@ def render_candidate_png_bytes(
                 figure.text(0.035, 0.885, subtitle, color=muted, fontsize=8, **text_props)
             buffer = io.BytesIO()
             canvas.print_png(buffer)
-            return buffer.getvalue()
+            rendered = buffer.getvalue()
+            return _center_rendered_png(rendered, bg) if not show_annotations else rendered
         except Exception:
             pass
 

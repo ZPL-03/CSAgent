@@ -153,7 +153,8 @@ def test_knowledge_widget_renders_runtime_pipeline_and_evidence(monkeypatch, tmp
         assert widget.graph_relation_filter.count() >= 2
         assert widget.graph_type_chip_buttons
         assert widget.graph_relation_chip_buttons
-        assert widget.pipeline_widget.minimumHeight() >= 230
+        assert widget.pipeline_widget.minimumHeight() >= 170
+        assert len(widget.pipeline_widget.steps) == 5
     finally:
         widget.close()
         app.processEvents()

@@ -6,6 +6,7 @@ from html import escape
 from typing import Iterable
 
 from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QGridLayout,
     QHeaderView,
@@ -78,8 +79,10 @@ class CandidateWidget(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        for column, width in enumerate([92, 104, 118, 100, 112, 118, 116, 98]):
+            self.table.setColumnWidth(column, width)
         self.table.itemSelectionChanged.connect(self._refresh_detail)
 
         self.empty_state = QFrame()
@@ -103,7 +106,7 @@ class CandidateWidget(QWidget):
         self.table_stack.addWidget(self.empty_state)
         self.table_stack.addWidget(self.table)
         self.table_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.table_stack.setMaximumHeight(160)
+        self.table_stack.setMaximumHeight(136)
 
         self.summary_label = QLabel(tr("candidate.empty", language=self.language))
         self.summary_label.setWordWrap(True)
@@ -130,7 +133,7 @@ class CandidateWidget(QWidget):
         self.detail_tabs.addTab(self.detail_browser, tr("candidate.tab.detail", language=self.language))
         self.detail_tabs.addTab(self.audit_browser, tr("candidate.tab.audit", language=self.language))
         self.detail_tabs.addTab(self.preview_widget, tr("candidate.tab.preview", language=self.language))
-        self.detail_tabs.setMaximumHeight(360)
+        self.detail_tabs.setMaximumHeight(300)
 
         left_layout = QVBoxLayout()
         left_layout.setContentsMargins(0, 0, 0, 0)
@@ -286,9 +289,9 @@ class CandidateWidget(QWidget):
             self.detail_tabs.setVisible(True)
             self.right_widget.setVisible(True)
         else:
-            self.table_stack.setMaximumHeight(148)
+            self.table_stack.setMaximumHeight(130)
             self.table_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            self.detail_tabs.setMaximumHeight(360)
+            self.detail_tabs.setMaximumHeight(300)
             self.summary_label.setVisible(False)
             self.detail_tabs.setVisible(False)
             self.right_widget.setVisible(False)
@@ -300,6 +303,10 @@ class CandidateWidget(QWidget):
             source_counter[generation_label] = source_counter.get(generation_label, 0) + 1
             result = self._result_for_candidate(candidate)
             archive_id = candidate.get("persistent_candidate_id") or (result or {}).get("candidate_id", "-")
+            screening_selected = candidate.get("screening_selected")
+            status_value = result.get("status", "未校核") if result else "未校核"
+            if screening_selected is False and not result:
+                status_value = "未入选Top-K"
             values = [
                 candidate.get("display_name", candidate.get("candidate_id", "")),
                 generation_label,
@@ -307,11 +314,14 @@ class CandidateWidget(QWidget):
                 _format_number(candidate.get("surrogate_weight")),
                 _format_number(candidate.get("rank_score"), 4),
                 _format_number(result.get("ultimate_pressure_MPa") if result else None),
-                result.get("status", "未校核") if result else "未校核",
+                status_value,
                 result.get("verdict", "-") if result else "-",
             ]
             for col, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
+                if screening_selected is False and not result:
+                    item.setForeground(QColor("#8796aa"))
+                    item.setToolTip("未进入默认 Top-K 校核队列；仍可人工选择进入 FEM 校核。")
                 if col == 0:
                     item.setToolTip(f"会话编号: {candidate.get('candidate_id')} | 正式编号: {archive_id}")
                 self.table.setItem(row, col, item)

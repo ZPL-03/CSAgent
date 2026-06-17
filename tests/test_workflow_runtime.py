@@ -10,6 +10,7 @@ class FakeOrchestrator:
     def __init__(self) -> None:
         self.progress_callback = None
         self.calls: list[str] = []
+        self.last_ranked_candidates: list[dict] = []
         self.screener = type("Screener", (), {"score_formula_text": "score = P_ult"})()
 
     def _emit(self, sender: str, message: str, event_type: str) -> None:
@@ -40,7 +41,11 @@ class FakeOrchestrator:
     def screen_candidates(self, task, candidates):
         self.calls.append("screen")
         self._emit("SCREENER", "初筛已完成", "screening_completed")
-        return [dict(candidates[0], rank_score=42.0)]
+        self.last_ranked_candidates = [
+            dict(candidates[0], rank_score=42.0, screening_rank=1, screening_selected=True),
+            dict(candidates[1], rank_score=21.0, screening_rank=2, screening_selected=False),
+        ]
+        return [self.last_ranked_candidates[0]]
 
     def evaluate_candidate(self, task, candidate):
         self.calls.append(f"evaluate:{candidate['candidate_id']}")
@@ -147,7 +152,9 @@ def test_workflow_runtime_persists_and_resumes_without_repeating_completed_nodes
 
     assert next_state["stage"] == "awaiting_fem_confirmation"
     assert next_state["pending_confirmation"] == "fem_evaluation"
+    assert [candidate["candidate_id"] for candidate in next_state["candidates"]] == ["TMP_1", "TMP_2"]
     assert [candidate["candidate_id"] for candidate in next_state["evaluated_candidates"]] == ["TMP_1"]
+    assert next_state["candidates"][1]["screening_selected"] is False
     assert orchestrator.calls == ["parse", "generate", "screen"]
 
     paused = runtime.continue_after_confirmation(next_state["run_id"], False)

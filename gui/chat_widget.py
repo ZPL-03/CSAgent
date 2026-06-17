@@ -27,8 +27,8 @@ class ChatWidget(QWidget):
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.content = QWidget()
         self.content_layout = QVBoxLayout(self.content)
-        self.content_layout.setContentsMargins(18, 8, 18, 8)
-        self.content_layout.setSpacing(6)
+        self.content_layout.setContentsMargins(18, 6, 18, 6)
+        self.content_layout.setSpacing(4)
         self.scroll_area.setWidget(self.content)
 
         root_layout = QVBoxLayout(self)
@@ -236,12 +236,12 @@ class ChatWidget(QWidget):
             f"QFrame#chatBubble {{ background:{bg}; border:1px solid {border}; border-radius:14px; }}"
         )
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(12, 6, 12, 6)
+        layout.setContentsMargins(12, 5, 12, 5)
         layout.setSpacing(2)
         text_label = self._label(text, fg, 13)
         text_label.setFixedWidth(max(120, bubble_width - 24))
         layout.addWidget(text_label)
-        frame.setFixedHeight(max(36, self._wrapped_text_height(text, bubble_width - 24) + 14))
+        frame.setFixedHeight(max(32, self._wrapped_text_height(text, bubble_width - 24) + 12))
         return frame
 
     def _avatar_label(self, text: str, bg: str, fg: str) -> QLabel:
@@ -281,7 +281,7 @@ class ChatWidget(QWidget):
         column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         column_layout = QVBoxLayout(column)
         column_layout.setContentsMargins(0, 0, 0, 0)
-        column_layout.setSpacing(5)
+        column_layout.setSpacing(3)
         column_layout.addWidget(self._label(sender, fg, 12, True))
         column_layout.addWidget(self._bubble(message, bg, border, fg, 980, 220, fit_content=True))
         row_layout.addWidget(column, 1)
@@ -293,17 +293,17 @@ class ChatWidget(QWidget):
         box.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layout = QVBoxLayout(box)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(6)
+        layout.setSpacing(5)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         layout.addWidget(self._single_line_label(self.empty_state.get("title", ""), palette["body"], 15, True))
-        layout.addWidget(self._single_line_label(self.empty_text, palette["muted"], 13))
+        layout.addWidget(self._label(self.empty_text, palette["muted"], 13))
 
         user_row = QWidget()
         user_row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         user_layout = QHBoxLayout(user_row)
         user_layout.setContentsMargins(0, 0, 0, 0)
-        user_layout.setSpacing(10)
+        user_layout.setSpacing(8)
         user_layout.addStretch(1)
         user_layout.addWidget(
             self._bubble(
@@ -323,13 +323,13 @@ class ChatWidget(QWidget):
         agent_group.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         agent_layout = QHBoxLayout(agent_group)
         agent_layout.setContentsMargins(0, 0, 0, 0)
-        agent_layout.setSpacing(10)
+        agent_layout.setSpacing(8)
         agent_layout.addWidget(self._avatar_label("O", palette["avatar_bg"], palette["avatar_text"]), 0, Qt.AlignmentFlag.AlignTop)
         agent_column = QWidget()
         agent_column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         agent_column_layout = QVBoxLayout(agent_column)
         agent_column_layout.setContentsMargins(0, 0, 0, 0)
-        agent_column_layout.setSpacing(6)
+        agent_column_layout.setSpacing(4)
         agent_column_layout.addWidget(self._label(self.empty_state.get("agent_title", "ORCHESTRATOR"), palette["user_bg"], 12, True))
         agent_column_layout.addWidget(
             self._bubble(

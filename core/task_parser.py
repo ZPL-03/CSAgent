@@ -85,7 +85,10 @@ class TaskParser:
         return normalize_boundary_conditions(text)
 
     def _geometry_patterns(self) -> Dict[str, list[str]]:
-        connector = r"(?:\s*(?:为|是|=|:|：|固定|保持|限定|锁定|指定|严格采用|必须|等于|不变))*"
+        connector = (
+            r"(?:\s*(?:为|是|=|:|：|固定|保持|限定|锁定|指定|严格采用|必须|等于|不变|"
+            r"参考|建议|中心|基准|附近|左右|约|大约|around|about|reference))*"
+        )
         return {
             "length_mm": [
                 rf"(?:长度|壳长|筒长|length|L){connector}\s*([0-9]+(?:\.[0-9]+)?)\s*mm",
@@ -134,8 +137,16 @@ class TaskParser:
         if not geometry_values:
             return {}
 
+        reference_terms = r"(?:参考|建议|中心|基准|附近|左右|约|大约|around|about|reference)"
         fixed_terms = r"(?:固定|保持|限定|锁定|指定|严格采用|必须|等于|不变)"
         gap = r"[^，。；,;\n]{0,24}"
+        whole_reference_patterns = [
+            rf"(?:几何|尺寸|结构尺寸){gap}{reference_terms}",
+            rf"{reference_terms}{gap}(?:几何|尺寸|结构尺寸)",
+        ]
+        if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in whole_reference_patterns):
+            return {}
+
         whole_geometry_patterns = [
             rf"(?:几何|尺寸|结构尺寸){gap}{fixed_terms}",
             rf"{fixed_terms}{gap}(?:几何|尺寸|结构尺寸)",
@@ -154,12 +165,13 @@ class TaskParser:
         fixed: Dict[str, float] = {}
         for key, value in geometry_values.items():
             label = labels[key]
-            patterns = [
-                rf"{fixed_terms}{gap}{label}",
-                rf"{label}{gap}{fixed_terms}",
+            reference_patterns = [
+                rf"{reference_terms}{gap}{label}",
+                rf"{label}{gap}{reference_terms}",
             ]
-            if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in patterns):
-                fixed[key] = value
+            if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in reference_patterns):
+                continue
+            fixed[key] = value
         return fixed
 
     def _extract_geometry_envelope(self, text: str) -> Dict[str, Any]:

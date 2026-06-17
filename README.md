@@ -23,24 +23,17 @@ CSAgent 多智能体智能设计平台面向复合材料外压圆柱耐压壳智
 - 流程参数：候选池总数和初筛保留数由自然语言明确指定
 - 候选来源初始比例：`LLM:案例迁移:DOE = 2:1:1`，实际来源统计以有效候选为准
 
-普通长度、半径、厚度、铺层角或缺陷比写入 `geometry_reference`，用于设计中心和几何包络；明确固定的几何条件写入 `fixed_geometry`。普通几何参考值不会强制所有候选等于该数值。
+自然语言中明确给出的长度、半径、厚度、铺层角或缺陷比默认写入 `fixed_geometry`，作为候选生成和有限元输入必须满足的几何条件；只有字段附近出现“约、参考、附近、设计中心、左右”等参考语义时，对应字段才写入 `geometry_reference`，用于设计中心和几何包络。
 
 ## GUI 工作台
 
 PyQt6 桌面端默认为简体中文界面，“设置”页支持切换为 English，并支持跟随系统、深色工程和亮色工程主题。界面语言和主题写入 `data/runtime/ui_settings.json`，属于本地运行偏好，不进入 Git。桌面端启动时优先加载 `HarmonyOS Sans SC`、`Noto Sans SC` 和 Windows 中文字体，避免中文标签、状态栏和可视化图注显示为方块。
 
-主界面采用 `QMainWindow + QSplitter + QStackedWidget` 工程工作台布局。顶部为系统身份栏、工作台/项目/知识库/监控/设置导航和当前模型标识；语言和主题配置位于“设置”页。当前模型标识读取 `llm_call_trace` 事件，显示本次调用实际使用的领域主模型、回退模型或失败状态，并同步写入运行日志。工作台左栏展示 `ORCHESTRATOR`、`CANDIDATE_GEN`、`SCREENER`、`FEM_AGENT`、`KNOWLEDGE_AGENT`、`REPORT_GEN` 的状态点、实时状态和任务队列；中部上方为自绘 LangGraph DAG，下方为对话优先的多智能体协作区；右栏展示实时三维视口、会话指标、运行日志、阶段报告、会话数据导出和报告打开入口。实时三维视口在本机 OpenGL 可用时使用 PyVista 交互视图，支持旋转、缩放、平移、双击重置、按钮重置视角和适配窗口。项目页承载任务契约、候选、FEM、追踪和报告详情；知识库页承载资料入库、RAG/KG 检索、文档表、五阶段入库流水线、可搜索/拖动/缩放/复位的核心知识图谱、节点选中审计和证据预览；监控页读取正式案例 FEM 指标绘制 Pareto 前沿、收敛历史、最佳案例指标，并保留工作流审计、运行日志和状态恢复入口；设置页提供主/回退 LLM、Abaqus、候选来源比例、人工确认节点、RAG/KG 分块和向量索引等本地 YAML 配置表单，并在右栏显示主模型、回退模型、Abaqus、RAG/KG、候选来源比例和人工确认节点的配置健康状态；该状态只显示环境变量是否提供，不显示密钥正文。界面层只显示和触发流程，不改变任务解析、候选生成、代理初筛、有限元校核、知识回流和报告生成的业务契约。会话数据导出写入 `data/results/session_export_<RUN_ID>.json` 和 `data/results/session_trace_<RUN_ID>.csv`，分别保存当前任务快照与 TMP-C-CASE 追踪表。
+主界面采用 `QMainWindow + QSplitter + QStackedWidget` 工程工作台布局。顶部为系统身份栏、工作台/知识库/监控/设置导航和当前模型标识；语言和主题配置位于“设置”页。当前模型标识读取 `llm_call_trace` 事件，显示本次调用实际使用的领域主模型、回退模型或失败状态，并同步写入运行日志。工作台左栏展示 `ORCHESTRATOR`、`CANDIDATE_GEN`、`SCREENER`、`FEM_AGENT`、`KNOWLEDGE_AGENT`、`REPORT_GEN` 的状态点、实时状态和任务队列；中部上方为自绘 LangGraph DAG，下方为对话优先的多智能体协作区和候选池；右栏展示实时三维视口、会话指标、运行日志、阶段报告、会话数据导出和报告打开入口。实时三维视口在本机 OpenGL 可用时使用 PyVista 交互视图，支持旋转、缩放、平移、双击重置、按钮重置视角和适配窗口。知识库页承载资料入库、RAG/KG 检索、文档表、五阶段入库流水线、可搜索/拖动/缩放/复位的核心知识图谱、节点选中审计、证据预览和案例记忆；监控页读取正式案例 FEM 指标绘制 Pareto 前沿、收敛历史、最佳案例指标，并保留工作流审计、运行日志和状态恢复入口；设置页提供主/回退 LLM、Abaqus、候选来源比例、人工确认节点、RAG/KG 分块和向量索引等本地 YAML 配置表单，并在右栏显示主模型、回退模型、Abaqus、RAG/KG、候选来源比例和人工确认节点的配置健康状态；该状态只显示环境变量是否提供，不显示密钥正文。界面层只显示和触发流程，不改变任务解析、候选生成、代理初筛、有限元校核、知识回流和报告生成的业务契约。会话数据导出写入 `data/results/session_export_<RUN_ID>.json` 和 `data/results/session_trace_<RUN_ID>.csv`，分别保存当前任务快照与 TMP-C-CASE 追踪表。
 
 ![CSAgent 深色工程工作台](assets/screenshots/dark_workbench.png)
 
-| 页面 | 深色工程 | 亮色工程 |
-| --- | --- | --- |
-| 工作台 | [dark_workbench.png](assets/screenshots/dark_workbench.png) | [light_workbench.png](assets/screenshots/light_workbench.png) |
-| 运行态工作台 | [dark_workbench_runtime.png](assets/screenshots/dark_workbench_runtime.png) | [light_workbench_runtime.png](assets/screenshots/light_workbench_runtime.png) |
-| 项目 | [dark_project.png](assets/screenshots/dark_project.png) | [light_project.png](assets/screenshots/light_project.png) |
-| 知识库 | [dark_knowledge.png](assets/screenshots/dark_knowledge.png) | [light_knowledge.png](assets/screenshots/light_knowledge.png) |
-| 监控 | [dark_monitor.png](assets/screenshots/dark_monitor.png) | [light_monitor.png](assets/screenshots/light_monitor.png) |
-| 设置 | [dark_settings.png](assets/screenshots/dark_settings.png) | [light_settings.png](assets/screenshots/light_settings.png) |
+展示图位于 `assets/screenshots/`，覆盖工作台、知识库、监控和设置页面。README 只展示默认深色工程主题，亮色工程主题作为 GUI 内可选外观保留。
 
 ## PBIPF 公式
 
@@ -77,7 +70,7 @@ P_PBIPF = d1 * lg(Q) * t / R
 | `workflow/simulation_queue.py` | 有限元作业队列，记录候选入队、运行、成功、失败和结果摘要 |
 | `workflow/state.py` | 工作流状态契约，保存任务、候选、初筛、正式有限元输入、有限元结果、知识回流结果、报告和人工确认状态 |
 
-运行时数据写入 `data/runtime/`，该目录属于本地运行产物，不进入 Git。中央“项目”页展示结构化任务契约、用户已给事实、普通几何参考、固定几何约束、候选生成控制参数、初筛控制参数和事实边界；该页只读取当前会话任务，不修改候选或流程状态。核心工作台中的“智能体流程”面板读取运行时事件库、状态快照和有限元作业队列，展示运行摘要、LangGraph DAG、状态图、智能体职责契约、诊断信息、LLM 后端配置状态、LLM 调用轨迹、有限元作业队列和工具调用记录；DAG 和智能体卡片使用完成、运行中、失败、等待四类状态灯。工具调用记录包含工具名、运行智能体、状态、耗时、输入摘要、输出摘要和失败原因。该面板提供“检测 LLM 后端”和“导出运行记录”按钮，运行记录报告落盘到 `data/results/run_audit_<RUN_ID>.md`，内容包含运行摘要、智能体职责、候选-结果-案例追踪、有限元队列、LLM 调用轨迹、诊断和事件记录。LLM 后端检测结果只显示后端名称、模型、状态、耗时和脱敏错误摘要，不显示 URL、密钥或提示词正文。右侧“候选”页展示候选来源构成、三路初始配额、规则过滤、结构去重和 DOE 补足记录；“追踪”页展示 TMP 会话候选、正式 C 编号、代理预测、FEM 结果、代理误差、CASE 回流状态和报告纳入状态之间的对应关系；“报告”页读取当前会话报告或 `data/results/latest_report.md`，展示 Markdown/PDF 路径、LLM 工程解释使用状态和 Markdown 正文预览。LLM 调用轨迹只记录后端名称、模型名称、调用状态、耗时和错误摘要，不记录 URL、密钥、系统提示词或用户提示词。
+运行时数据写入 `data/runtime/`，该目录属于本地运行产物，不进入 Git。中央“项目”页展示结构化任务契约、用户已给事实、几何参考、固定几何约束、候选生成控制参数、初筛控制参数和事实边界；该页只读取当前会话任务，不修改候选或流程状态。核心工作台中的“智能体流程”面板读取运行时事件库、状态快照和有限元作业队列，展示运行摘要、LangGraph DAG、状态图、智能体职责契约、诊断信息、LLM 后端配置状态、LLM 调用轨迹、有限元作业队列和工具调用记录；DAG 和智能体卡片使用完成、运行中、失败、等待四类状态灯。工具调用记录包含工具名、运行智能体、状态、耗时、输入摘要、输出摘要和失败原因。该面板提供“检测 LLM 后端”和“导出运行记录”按钮，运行记录报告落盘到 `data/results/run_audit_<RUN_ID>.md`，内容包含运行摘要、智能体职责、候选-结果-案例追踪、有限元队列、LLM 调用轨迹、诊断和事件记录。LLM 后端检测结果只显示后端名称、模型、状态、耗时和脱敏错误摘要，不显示 URL、密钥或提示词正文。工作台候选池和右侧“候选”页展示全部会话候选、来源构成、三路初始配额、规则过滤、结构去重和 DOE 补足记录；代理初筛后全量候选按评分排序，Top-K 标记为默认送检集合，未入选候选置灰但仍可人工送入有限元校核。“追踪”页展示 TMP 会话候选、正式 C 编号、代理预测、FEM 结果、代理误差、CASE 回流状态和报告纳入状态之间的对应关系；“报告”页读取当前会话报告或 `data/results/latest_report.md`，展示 Markdown/PDF 路径、LLM 工程解释使用状态和 Markdown 正文预览。LLM 调用轨迹只记录后端名称、模型名称、调用状态、耗时和错误摘要，不记录 URL、密钥、系统提示词或用户提示词。
 
 工作流运行状态由最新快照推导并写入 `workflow_runs.status`：等待人工确认为 `waiting`，用户暂停为 `paused`，节点异常为 `failed`，流程完成为 `completed`，其余执行中阶段为 `running`。GUI、运行审计和恢复入口读取同一状态字段，不把暂停或失败误显示为运行中。
 

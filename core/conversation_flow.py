@@ -80,13 +80,27 @@ class ConversationFlowController:
                 f"和 {describe_boundary_conditions(task_payload.get('boundary_conditions', {}))} 来生成方案，候选池先按 {target_total} 个目标展开，后续初筛会保留 Top-{top_k}。"
             )
         if stage == "candidate_summary":
-            return "我先按默认来源比例铺开初始方案池，再用代理模型做一轮便宜但有解释性的预筛选；来源拆分以有效候选统计为准。"
+            source_counter = payload.get("source_counter") if isinstance(payload.get("source_counter"), dict) else {}
+            source_text = " / ".join(f"{key}={value}" for key, value in sorted(source_counter.items())) or "-"
+            return (
+                f"候选池已生成 {payload.get('candidate_count', '-')} 个有效方案，来源拆分为 {source_text}。"
+                "下一步将对完整候选池计算 ASME RD-1172、PBIPF 公式、面密度和综合得分，初筛结果只决定默认 FEM 队列，不删除其他方案。"
+            )
         if stage == "screening_summary":
-            return "代理模型初筛已经把候选范围收紧了，接下来更值得把有限元预算用在当前排序靠前、解释更充分的耐压壳样本上。"
+            return (
+                f"代理模型初筛已完成：输入 {payload.get('input_count', '-')} 个候选，"
+                f"默认 FEM 队列 {payload.get('output_count', '-')} 个。"
+                "未入选样本仍保留在候选池中，可人工选择进入有限元校核。"
+            )
         if stage == "fem_summary":
-            return "有限元结果已经回来，现在可以根据极限压力、失效模式和面密度表现来决定是否直接导出报告，或者继续迭代约束。"
+            return (
+                f"有限元校核返回 {payload.get('result_count', '-')} 个结果，"
+                f"通过 {payload.get('passed_count', '-')} 个。报告阶段会读取 FEM 结果、候选追踪和知识证据生成交付文档。"
+            )
         if stage == "report_summary":
-            return "报告部分已经收尾完成，你现在可以直接查看最新导出的 Markdown 或 PDF。"
+            report = payload.get("report") if isinstance(payload.get("report"), dict) else {}
+            outputs = report.get("report_outputs") if isinstance(report.get("report_outputs"), dict) else {}
+            return f"报告已生成，当前输出目录包含 {len(outputs) or 1} 类报告产物，可在报告页预览或打开 PDF。"
         if stage == "conversation_paused":
             return "我先把当前状态停在这里，后面的候选和结果都还保留着，你随时可以继续往下推。"
         return ""
@@ -231,6 +245,7 @@ class ConversationFlowController:
                 ),
                 {
                     "screened_candidates": state.evaluated_candidates,
+                    "ranked_candidates": state.candidates,
                     **target_counts,
                 },
             )
@@ -323,6 +338,9 @@ class ConversationFlowController:
 
         if approved:
             screened_candidates = self.orchestrator.screen_candidates(state.task, state.candidates)
+            ranked_candidates = getattr(self.orchestrator, "last_ranked_candidates", None)
+            if isinstance(ranked_candidates, list) and ranked_candidates:
+                state.candidates = ranked_candidates
             state.screened_candidates = screened_candidates
             state.evaluated_candidates = screened_candidates
             self._emit(
@@ -333,6 +351,7 @@ class ConversationFlowController:
                 ),
                 {
                     "screened_candidates": screened_candidates,
+                    "ranked_candidates": state.candidates,
                     **target_counts,
                 },
             )

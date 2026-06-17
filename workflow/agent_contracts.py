@@ -90,7 +90,7 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
         tool_name="generate_report",
         responsibility="基于结构化任务、候选和有限元结果生成 Markdown/PDF 报告。",
         input_contract="task 字典、results 列表、candidates 列表。",
-        output_contract="report 字典；包含 Markdown/PDF 路径、正文和 LLM 工程解释使用状态。",
+        output_contract="report 字典；包含当前报告 Markdown/PDF 路径、正文、LLM 工程解释状态，以及 overall/fem/design_solution 三类 report_outputs。",
         llm_policy="只在工程解释和制造建议中受控调用 LLM；数值、排序和结论由结构化数据确定。",
         failure_policy="LLM 解释失败时退回确定性解释；报告文件生成失败时写入节点失败事件。",
     ),

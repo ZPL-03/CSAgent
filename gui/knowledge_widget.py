@@ -503,7 +503,7 @@ class KnowledgeGraphView(QWidget):
         has_side_components = len(components) > 1 and graph_rect.width() >= 520
         main_center = QPointF(graph_center.x() - (graph_rect.width() * 0.08 if has_side_components else 0), graph_center.y())
         main_rx = max(96.0, graph_rect.width() * (0.30 if has_side_components else 0.40)) * self._scale
-        main_ry = max(66.0, graph_rect.height() * 0.36) * self._scale
+        main_ry = max(58.0, graph_rect.height() * 0.28) * self._scale
         place_component(main_component, main_center, main_rx, main_ry)
 
         small_components = components[1:]
@@ -521,7 +521,7 @@ class KnowledgeGraphView(QWidget):
                     place_component(component, center, cell_width * 0.36 * self._scale, cell_height * 0.34 * self._scale, phase=0.28)
             else:
                 outer_rx = max(78.0, graph_rect.width() * 0.36) * self._scale
-                outer_ry = max(52.0, graph_rect.height() * 0.32) * self._scale
+                outer_ry = max(48.0, graph_rect.height() * 0.26) * self._scale
                 for index, component in enumerate(small_components):
                     angle = -math.pi / 2.0 + 2.0 * math.pi * index / max(1, len(small_components))
                     center = QPointF(graph_center.x() + outer_rx * math.cos(angle), graph_center.y() + outer_ry * math.sin(angle))
@@ -533,7 +533,7 @@ class KnowledgeGraphView(QWidget):
     def _fit_positions_to_rect(self, positions: dict[str, QPointF], graph_rect: QRectF) -> dict[str, QPointF]:
         if len(positions) < 2:
             return positions
-        padding = 38.0
+        padding = 54.0
         min_x = min(point.x() for point in positions.values())
         max_x = max(point.x() for point in positions.values())
         min_y = min(point.y() for point in positions.values())
@@ -542,7 +542,7 @@ class KnowledgeGraphView(QWidget):
         height = max(1.0, max_y - min_y)
         available_width = max(1.0, graph_rect.width() - padding * 2.0)
         available_height = max(1.0, graph_rect.height() - padding * 2.0)
-        factor = min(2.15, available_width / width, available_height / height)
+        factor = min(1.0, available_width / width, available_height / height)
         current_center = QPointF((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
         target_center = graph_rect.center()
         fitted: dict[str, QPointF] = {}
@@ -803,6 +803,7 @@ class KnowledgeGraphView(QWidget):
         if y + height > graph_rect.bottom():
             y = point.y() - radius - height - 5.0
         x = min(max(x, graph_rect.left() + 2.0), graph_rect.right() - width - 2.0)
+        y = min(max(y, graph_rect.top() + 2.0), graph_rect.bottom() - height - 2.0)
         label_rect = QRectF(x, y, width, height)
         if occupied is not None and not force:
             padded_rect = label_rect.adjusted(-5, -4, 5, 4)
@@ -852,7 +853,7 @@ class KnowledgeGraphView(QWidget):
         painter.fillRect(self.rect(), colors["bg"])
 
         panel = QRectF(1, 1, self.width() - 2, self.height() - 2)
-        graph_rect = panel.adjusted(18, 34, -18, -18)
+        graph_rect = panel.adjusted(18, 34, -18, -38)
         self._draw_background(painter, panel, graph_rect, colors)
         self._draw_grid(painter, graph_rect, colors["grid"])
 
@@ -918,7 +919,7 @@ class KnowledgeGraphView(QWidget):
         label_font.setPointSize(8)
         label_font.setBold(True)
         label_metrics = QFontMetrics(label_font)
-        label_budget = 4 if len(visible_nodes) > 24 else 6
+        label_budget = 3 if len(visible_nodes) > 24 else 5
         ranked_label_names = {
             name
             for name, _entity_type in sorted(
@@ -1167,11 +1168,11 @@ class KnowledgeWidget(QWidget):
         self.source_overview_label = self._make_panel_label()
         self.source_overview_scroll = self._scrollable_panel(self.source_overview_label)
 
-        self.pipeline_widget = PipelineStatusWidget()
-        self.pipeline_widget.setMinimumHeight(238)
-        self.pipeline_widget.setMaximumHeight(276)
+        self.pipeline_widget = PipelineStatusWidget("入库流水线 · PIPELINE")
+        self.pipeline_widget.setMinimumHeight(172)
+        self.pipeline_widget.setMaximumHeight(204)
         self.graph_view = KnowledgeGraphView()
-        self.graph_view.setMinimumHeight(360)
+        self.graph_view.setMinimumHeight(340)
         self.graph_summary_label = QLabel("核心图谱等待知识库数据")
         self.graph_summary_label.setObjectName("graphSummaryLabel")
         self.graph_summary_label.setWordWrap(True)
@@ -1183,8 +1184,8 @@ class KnowledgeWidget(QWidget):
         self.graph_relation_filter = QComboBox()
         self.graph_relation_filter.setObjectName("graphFilterCombo")
         for combo in [self.graph_type_filter, self.graph_relation_filter]:
-            combo.setMinimumWidth(136)
-            combo.setMaximumWidth(190)
+            combo.setMinimumWidth(108)
+            combo.setMaximumWidth(150)
         self.graph_reset_button = QPushButton("F")
         self.graph_reset_button.setToolTip("适配图谱")
         self.graph_zoom_in_button = QPushButton("+")
@@ -1206,8 +1207,8 @@ class KnowledgeWidget(QWidget):
         self.graph_detail_browser = QTextBrowser()
         self.graph_detail_browser.setOpenExternalLinks(False)
         self._configure_panel_browser(self.graph_detail_browser)
-        self.graph_detail_browser.setMinimumWidth(260)
-        self.graph_detail_browser.setMinimumHeight(150)
+        self.graph_detail_browser.setMinimumWidth(220)
+        self.graph_detail_browser.setMinimumHeight(96)
         self.graph_type_chip_layout: QGridLayout | None = None
         self.graph_relation_chip_layout: QGridLayout | None = None
         self.graph_type_chip_buttons: list[QPushButton] = []
@@ -1215,13 +1216,13 @@ class KnowledgeWidget(QWidget):
         self.evidence_browser = QTextBrowser()
         self.evidence_browser.setOpenExternalLinks(True)
         self._configure_panel_browser(self.evidence_browser)
-        self.evidence_browser.setMinimumHeight(150)
+        self.evidence_browser.setMinimumHeight(96)
         self.summary_label = self._make_panel_label()
         self.summary_scroll = self._scrollable_panel(self.summary_label)
         self._summary_html_cache = ""
         for overview_scroll in [self.summary_scroll, self.source_overview_scroll, self.document_overview_scroll]:
-            overview_scroll.setMinimumHeight(134)
-            overview_scroll.setMaximumHeight(148)
+            overview_scroll.setMinimumHeight(76)
+            overview_scroll.setMaximumHeight(92)
             overview_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self._build_layout()
@@ -1330,30 +1331,33 @@ class KnowledgeWidget(QWidget):
         top_layout.addWidget(self.search_input, 1)
         top_layout.addWidget(self.search_button)
 
-        action_layout = QHBoxLayout()
-        action_layout.setSpacing(8)
-        action_layout.addWidget(self.upload_button)
-        action_layout.addWidget(self.batch_button)
-        action_layout.addWidget(self.rebuild_button)
-        action_layout.addWidget(self.export_snapshot_button)
-        action_layout.addWidget(self.refresh_button)
-        action_layout.addStretch(1)
+        action_layout = QGridLayout()
+        action_layout.setContentsMargins(0, 0, 0, 0)
+        action_layout.setHorizontalSpacing(8)
+        action_layout.setVerticalSpacing(8)
+        for index, button in enumerate(
+            [self.upload_button, self.batch_button, self.rebuild_button, self.export_snapshot_button, self.refresh_button]
+        ):
+            action_layout.addWidget(button, 0, index)
+            action_layout.setColumnStretch(index, 1)
 
-        pill_layout = QHBoxLayout()
-        pill_layout.setSpacing(8)
-        for pill in [self.store_pill, self.rag_pill, self.vector_pill, self.kg_pill, self.parser_pill]:
-            pill_layout.addWidget(pill)
-        pill_layout.addStretch(1)
+        pill_layout = QGridLayout()
+        pill_layout.setContentsMargins(0, 0, 0, 0)
+        pill_layout.setHorizontalSpacing(8)
+        pill_layout.setVerticalSpacing(8)
+        for index, pill in enumerate([self.store_pill, self.rag_pill, self.vector_pill, self.kg_pill, self.parser_pill]):
+            pill_layout.addWidget(pill, 0, index)
+            pill_layout.setColumnStretch(index, 1)
 
         def titled_panel(title: str, widget: QWidget, object_name: str = "knowledgeMiniPanel") -> QFrame:
             card = QFrame()
             card.setObjectName(object_name)
             card_layout = QVBoxLayout(card)
-            card_layout.setContentsMargins(12, 11, 12, 12)
-            card_layout.setSpacing(8)
+            card_layout.setContentsMargins(12, 10, 12, 10)
+            card_layout.setSpacing(6)
             label = QLabel(title)
             label.setObjectName("knowledgePanelTitle")
-            label.setFixedHeight(24)
+            label.setFixedHeight(22)
             label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             card_layout.addWidget(label)
             card_layout.addWidget(widget, 1)
@@ -1361,12 +1365,15 @@ class KnowledgeWidget(QWidget):
 
         overview_panel = QFrame()
         overview_panel.setObjectName("knowledgeOverviewPanel")
+        overview_panel.setMinimumHeight(132)
+        overview_panel.setMaximumHeight(148)
         overview_layout = QHBoxLayout(overview_panel)
-        overview_layout.setContentsMargins(0, 0, 0, 0)
+        overview_layout.setContentsMargins(10, 10, 10, 10)
         overview_layout.setSpacing(10)
         overview_layout.addWidget(titled_panel("资料状态 · STATUS", self.summary_scroll), 1)
         overview_layout.addWidget(titled_panel("知识来源 · SOURCES", self.source_overview_scroll), 1)
         overview_layout.addWidget(titled_panel("资料库 · DOCUMENTS", self.document_overview_scroll), 1)
+        self.overview_panel = overview_panel
 
         graph_panel = QFrame()
         graph_panel.setObjectName("knowledgeGraphPanel")
@@ -1389,40 +1396,41 @@ class KnowledgeWidget(QWidget):
 
         graph_filter_panel = QFrame()
         graph_filter_panel.setObjectName("graphFilterPanel")
-        graph_filter_layout = QVBoxLayout(graph_filter_panel)
-        graph_filter_layout.setContentsMargins(10, 10, 10, 10)
+        graph_filter_panel.setMaximumHeight(58)
+        graph_filter_layout = QHBoxLayout(graph_filter_panel)
+        graph_filter_layout.setContentsMargins(10, 9, 10, 9)
         graph_filter_layout.setSpacing(8)
-        graph_filter_layout.addWidget(self.graph_search_input)
-        self.graph_type_filter.setVisible(False)
-        self.graph_relation_filter.setVisible(False)
-        type_label = QLabel("节点类型")
-        type_label.setObjectName("graphSubTitle")
-        graph_filter_layout.addWidget(type_label)
-        type_chip_widget = QWidget()
-        self.graph_type_chip_layout = QGridLayout(type_chip_widget)
+        graph_filter_layout.addWidget(self.graph_search_input, 1)
+        self.graph_type_filter.setVisible(True)
+        self.graph_relation_filter.setVisible(True)
+        graph_filter_layout.addWidget(self.graph_type_filter)
+        graph_filter_layout.addWidget(self.graph_relation_filter)
+        hidden_type_chip_widget = QWidget(graph_filter_panel)
+        hidden_relation_chip_widget = QWidget(graph_filter_panel)
+        hidden_type_chip_widget.hide()
+        hidden_relation_chip_widget.hide()
+        self.graph_type_chip_layout = QGridLayout(hidden_type_chip_widget)
         self.graph_type_chip_layout.setContentsMargins(0, 0, 0, 0)
         self.graph_type_chip_layout.setHorizontalSpacing(6)
         self.graph_type_chip_layout.setVerticalSpacing(6)
-        graph_filter_layout.addWidget(type_chip_widget)
-        relation_label = QLabel("关系类型")
-        relation_label.setObjectName("graphSubTitle")
-        graph_filter_layout.addWidget(relation_label)
-        relation_chip_widget = QWidget()
-        self.graph_relation_chip_layout = QGridLayout(relation_chip_widget)
+        self.graph_relation_chip_layout = QGridLayout(hidden_relation_chip_widget)
         self.graph_relation_chip_layout.setContentsMargins(0, 0, 0, 0)
         self.graph_relation_chip_layout.setHorizontalSpacing(6)
         self.graph_relation_chip_layout.setVerticalSpacing(6)
-        graph_filter_layout.addWidget(relation_chip_widget)
         graph_layout.addWidget(graph_filter_panel, 0)
         graph_layout.addWidget(self.graph_view, 1)
 
         evidence_panel = QFrame()
         evidence_panel.setObjectName("knowledgeEvidencePanel")
+        evidence_panel.setMinimumHeight(174)
+        evidence_panel.setMaximumHeight(190)
         evidence_layout = QVBoxLayout(evidence_panel)
-        evidence_layout.setContentsMargins(12, 12, 12, 12)
-        evidence_layout.setSpacing(8)
+        evidence_layout.setContentsMargins(12, 10, 12, 10)
+        evidence_layout.setSpacing(6)
         evidence_label = QLabel("图谱审计与检索证据 · EVIDENCE")
         evidence_label.setObjectName("sectionTitle")
+        evidence_label.setFixedHeight(22)
+        evidence_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         evidence_layout.addWidget(evidence_label)
         evidence_splitter = QSplitter(Qt.Orientation.Horizontal)
         evidence_splitter.addWidget(titled_panel("图谱审计", self.graph_detail_browser))
@@ -1434,7 +1442,7 @@ class KnowledgeWidget(QWidget):
         evidence_layout.addWidget(evidence_splitter, 1)
 
         main = QWidget()
-        main.setMinimumWidth(740)
+        main.setMinimumWidth(0)
         main_layout = QVBoxLayout(main)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(10)

@@ -89,7 +89,7 @@ def _assert_unique_candidates(candidates: list[dict[str, Any]]) -> None:
 
 
 def _attach_deterministic_downstream(orchestrator: OrchestratorAgent, output_dir: Path) -> None:
-    """把 FEM、知识回流和报告替换为可审计的快速验收适配器。"""
+    """把 FEM 和知识回流替换为可审计的快速验收适配器，报告阶段仍使用正式报告智能体。"""
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -143,36 +143,9 @@ def _attach_deterministic_downstream(orchestrator: OrchestratorAgent, output_dir
             )
         return updates
 
-    def generate_report(
-        task: dict[str, Any],
-        results: list[dict[str, Any]],
-        candidates: list[dict[str, Any]] | None = None,
-    ) -> dict[str, Any]:
-        run_id = str(task.get("task_id") or "TASK_ACCEPT")
-        markdown_path = output_dir / f"{run_id}_acceptance_report.md"
-        pdf_path = output_dir / f"{run_id}_acceptance_report.pdf"
-        task_payload = task_payload_from_request(task)
-        lines = [
-            "# CSAgent 耐压壳设计报告",
-            "",
-            f"- 外压：{task_payload['load_conditions'].get('external_pressure_MPa')} MPa",
-            f"- 目标极限压力：{task_payload['design_targets'].get('ultimate_pressure_min_MPa')} MPa",
-            f"- 候选数量：{len(candidates or [])}",
-            f"- FEM 验收结果：{len(results)} 个",
-        ]
-        markdown_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
-        pdf_path.write_bytes(b"%PDF-1.4\n% CSAgent acceptance fixture\n")
-        return {
-            "markdown_path": str(markdown_path),
-            "pdf_path": str(pdf_path),
-            "content": markdown_path.read_text(encoding="utf-8"),
-            "llm_explanation_used": False,
-        }
-
     orchestrator.prepare_candidate_for_fem = prepare_candidate_for_fem  # type: ignore[method-assign]
     orchestrator.evaluate_prepared_candidate = evaluate_prepared_candidate  # type: ignore[method-assign]
     orchestrator.persist_knowledge_records = persist_knowledge_records  # type: ignore[method-assign]
-    orchestrator.generate_report = generate_report  # type: ignore[method-assign]
 
 
 def _expected_float(expected: dict[str, Any], *keys: str) -> float | None:
@@ -238,6 +211,8 @@ def _validate_completed_state(
         raise AssertionError("工作流未完成知识回流")
     if not state.report:
         raise AssertionError("工作流未生成报告")
+    if not state.report.get("report_outputs"):
+        raise AssertionError("工作流未生成 FEM/总体/推荐方案报告交付件")
 
     _assert_unique_candidates(state.candidates)
     _assert_unique_candidates(state.evaluated_candidates)
@@ -259,6 +234,8 @@ def _validate_completed_state(
         "result_count": len(state.results),
         "knowledge_update_count": len(state.knowledge_updates),
         "report_markdown": state.report.get("markdown_path"),
+        "report_pdf": state.report.get("pdf_path"),
+        "report_outputs": state.report.get("report_outputs"),
         "external_pressure_MPa": task_payload["load_conditions"].get("external_pressure_MPa"),
         "ultimate_pressure_min_MPa": task_payload["design_targets"].get("ultimate_pressure_min_MPa"),
         "source_counter": {

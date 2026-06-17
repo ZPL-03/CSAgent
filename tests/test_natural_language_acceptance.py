@@ -99,6 +99,7 @@ def _patch_deterministic_downstream(monkeypatch, orchestrator: OrchestratorAgent
                 "top_k": 5,
                 "boundary_type": "END_CLAMPED",
                 "has_geometry_reference": False,
+                "has_fixed_geometry": False,
             },
         ),
         (
@@ -110,6 +111,7 @@ def _patch_deterministic_downstream(monkeypatch, orchestrator: OrchestratorAgent
                 "top_k": 3,
                 "boundary_type": "END_SIMPLY_SUPPORTED",
                 "has_geometry_reference": False,
+                "has_fixed_geometry": False,
             },
         ),
         (
@@ -121,6 +123,7 @@ def _patch_deterministic_downstream(monkeypatch, orchestrator: OrchestratorAgent
                 "top_k": 3,
                 "boundary_type": "END_CLAMPED",
                 "has_geometry_reference": False,
+                "has_fixed_geometry": False,
             },
         ),
         (
@@ -132,6 +135,7 @@ def _patch_deterministic_downstream(monkeypatch, orchestrator: OrchestratorAgent
                 "top_k": 3,
                 "boundary_type": "END_SIMPLY_SUPPORTED",
                 "has_geometry_reference": False,
+                "has_fixed_geometry": False,
             },
         ),
         (
@@ -143,6 +147,7 @@ def _patch_deterministic_downstream(monkeypatch, orchestrator: OrchestratorAgent
                 "top_k": 3,
                 "boundary_type": "END_SIMPLY_SUPPORTED",
                 "has_geometry_reference": False,
+                "has_fixed_geometry": False,
             },
         ),
         (
@@ -154,6 +159,7 @@ def _patch_deterministic_downstream(monkeypatch, orchestrator: OrchestratorAgent
                 "top_k": 3,
                 "boundary_type": "END_CLAMPED",
                 "has_geometry_reference": False,
+                "has_fixed_geometry": False,
             },
         ),
         (
@@ -164,7 +170,8 @@ def _patch_deterministic_downstream(monkeypatch, orchestrator: OrchestratorAgent
                 "total": 8,
                 "top_k": 3,
                 "boundary_type": "END_CLAMPED",
-                "has_geometry_reference": True,
+                "has_geometry_reference": False,
+                "has_fixed_geometry": True,
             },
         ),
     ],
@@ -184,7 +191,7 @@ def test_multi_natural_language_inputs_run_candidate_and_screening_pipeline(monk
 
     facts = payload["user_input_facts"]
     assert ("geometry_reference" in facts) is expected["has_geometry_reference"]
-    assert "fixed_geometry" not in facts
+    assert ("fixed_geometry" in facts) is expected["has_fixed_geometry"]
 
     candidates = orchestrator.generate_candidates(task)
     assert len(candidates) == expected["total"]

@@ -37,9 +37,7 @@ class ScreenerAgent(BaseAgent):
             candidate.get("material_system", {}),
         )
 
-    def run(self, input_data: Dict) -> List[Dict]:
-        task = input_data["task"]
-        candidates = input_data["candidates"]
+    def rank_candidates(self, task: Dict, candidates: List[Dict]) -> List[Dict]:
         requested_top_k = effective_screen_top_k(task, len(candidates))
         if requested_top_k <= 0:
             raise ValueError("代理模型初筛缺少有效 Top-K 数量或候选池为空。")
@@ -85,12 +83,28 @@ class ScreenerAgent(BaseAgent):
             enriched.append(updated)
 
         enriched.sort(key=lambda item: item["rank_score"], reverse=True)
-        selected = enriched[:requested_top_k]
-        for index, candidate in enumerate(selected, start=1):
-            candidate["selection_reason"] = (
-                f"Top-{index} 入选：{candidate['screening_summary']} "
-                "当前排序靠前，适合优先进入真实有限元校核。"
-            )
+        selected_ids = {str(candidate.get("candidate_id")) for candidate in enriched[:requested_top_k]}
+        for index, candidate in enumerate(enriched, start=1):
+            candidate["screening_rank"] = index
+            candidate["screening_selected"] = str(candidate.get("candidate_id")) in selected_ids
+            if candidate["screening_selected"]:
+                candidate["selection_reason"] = (
+                    f"Top-{index} 入选：{candidate['screening_summary']} "
+                    "当前排序靠前，适合优先进入真实有限元校核。"
+                )
+            else:
+                candidate["selection_reason"] = (
+                    f"排序第 {index}：{candidate['screening_summary']} "
+                    "未进入默认 Top-K 校核队列，但仍可由人工选择进入有限元校核。"
+                )
+        return enriched
+
+    def run(self, input_data: Dict) -> List[Dict]:
+        task = input_data["task"]
+        candidates = input_data["candidates"]
+        requested_top_k = effective_screen_top_k(task, len(candidates))
+        ranked = self.rank_candidates(task, candidates)
+        selected = [candidate for candidate in ranked if candidate.get("screening_selected")]
         self.emit(
             f"已完成 {len(candidates)} 个候选的批量评分，请求保留 Top-{requested_top_k}，实际返回 {len(selected)} 个。"
         )

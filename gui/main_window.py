@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-UI_LAYOUT_VERSION = 4
+UI_LAYOUT_VERSION = 5
 
 from PyQt6 import sip
 from PyQt6.QtCore import QObject, QRectF, QSettings, QSize, Qt, QThread, QUrl, pyqtSignal
@@ -38,7 +38,6 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QStackedWidget,
-    QTabWidget,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
@@ -56,7 +55,6 @@ from core.task_contract import (
     requested_screen_top_k,
     task_payload_from_request,
 )
-from gui.abaqus_widget import AbaqusWidget
 from gui.candidate_widget import CandidateWidget
 from gui.chat_widget import ChatWidget
 from gui.i18n import LANGUAGE_OPTIONS, THEME_OPTIONS, LocaleManager
@@ -64,9 +62,7 @@ from gui.interactive_view import InteractivePlotWidget
 from gui.knowledge_widget import KnowledgeWidget
 from gui.log_widget import LogWidget
 from gui.monitor_widget import MonitorDashboardWidget
-from gui.report_widget import ReportWidget
 from gui.result_trace_widget import ResultTraceWidget
-from gui.task_config_widget import TaskConfigWidget
 from gui.theme import application_stylesheet, install_application_font, resolve_theme
 from gui.workbench_widgets import AgentStatusCard, FlowDagWidget, PipelineStatusWidget, StatusPill
 from gui.workflow_widget import WorkflowWidget
@@ -95,6 +91,10 @@ class PipelineSession:
         if self.screened_candidates:
             return self.screened_candidates
         return self.candidates
+
+    @property
+    def display_candidates(self) -> list[dict]:
+        return self.candidates or self.current_candidates
 
     def to_flow_state(self) -> ConversationState:
         return ConversationState(
@@ -178,7 +178,13 @@ class PipelineWorker(QObject):
                 task = self.payload["task"]
                 candidates = self.payload["candidates"]
                 screened = orchestrator.screen_candidates(task, candidates)
-                self.finished.emit(self.action, {"screened_candidates": screened})
+                self.finished.emit(
+                    self.action,
+                    {
+                        "screened_candidates": screened,
+                        "ranked_candidates": getattr(orchestrator, "last_ranked_candidates", []),
+                    },
+                )
                 return
 
             if self.action == "evaluate":
@@ -206,7 +212,13 @@ class PipelineWorker(QObject):
                 task = self.payload["task"]
                 results = self.payload["results"]
                 candidates = self.payload.get("candidates", [])
-                report = orchestrator.generate_report(task, results, candidates)
+                report = orchestrator.generate_report(
+                    task,
+                    results,
+                    candidates,
+                    report_kind=str(self.payload.get("report_kind") or "all"),
+                    output_dir=self.payload.get("output_dir"),
+                )
                 self.finished.emit(self.action, {"report": report})
                 return
 
@@ -261,6 +273,7 @@ class MainWindow(QMainWindow):
         self.last_llm_trace_payload: dict | None = None
         self.runtime_agent_states: dict[str, str] = {}
         self.runtime_stage_text = ""
+        self.report_output_dir: Path | None = None
 
         self.app_title_label = QLabel(self.locale.text("app.title"))
         self.app_title_label.setObjectName("appTitle")
@@ -279,7 +292,6 @@ class MainWindow(QMainWindow):
         self.theme_label.setObjectName("appSubtitle")
         self.nav_buttons = [
             QPushButton(self.locale.text("nav.workbench")),
-            QPushButton(self.locale.text("nav.project")),
             QPushButton(self.locale.text("nav.knowledge")),
             QPushButton(self.locale.text("nav.monitor")),
             QPushButton(self.locale.text("nav.settings")),
@@ -305,13 +317,9 @@ class MainWindow(QMainWindow):
             self.theme_selector.setCurrentIndex(current_theme_index)
 
         self.chat_widget = ChatWidget()
-        self.chat_widget.setMinimumHeight(220)
+        self.chat_widget.setMinimumHeight(150)
         self.chat_widget.set_empty_text(self.locale.text("chat.empty"))
         self._apply_chat_empty_state()
-        self.task_browser = QTextBrowser()
-        self.task_browser.setHtml(self._initial_task_html())
-        self.task_browser.setMinimumHeight(96)
-        self.task_browser.setMaximumHeight(126)
         self.status_label = QLabel(self.locale.text("status.waiting"))
         self.status_label.setWordWrap(True)
         self.status_label.setObjectName("chatStatus")
@@ -331,6 +339,11 @@ class MainWindow(QMainWindow):
         self.refresh_button = QPushButton(self.locale.text("button.refresh_knowledge"))
         self.open_report_button = QPushButton(self.locale.text("button.open_report"))
         self.export_data_button = QPushButton(self.locale.text("button.export_data"))
+        self.report_type_selector = QComboBox()
+        self._populate_report_type_selector()
+        self.report_type_selector.setMinimumHeight(42)
+        self.report_dir_button = QPushButton(self.locale.text("button.report_dir"))
+        self.report_dir_button.setToolTip(self.locale.text("tooltip.report_dir"))
         self.reset_view_button = QPushButton()
         self.reset_view_button.setToolTip(self.locale.text("button.reset_view"))
         self.fit_view_button = QPushButton()
@@ -351,10 +364,9 @@ class MainWindow(QMainWindow):
         self.candidate_card = QLabel(self.locale.text("metric.candidate_zero"))
         self.pending_card = QLabel(self.locale.text("metric.pending_zero"))
         self.pass_card = QLabel(self.locale.text("metric.pass", count=0))
-        self.primary_header = QLabel(self.locale.text("section.primary"))
-        self.primary_header.setObjectName("sectionTitle")
-        self.utility_header = QLabel(self.locale.text("section.utility"))
-        self.utility_header.setObjectName("sectionTitle")
+        for metric_card in [self.stage_card, self.candidate_card, self.pending_card, self.pass_card]:
+            metric_card.setMinimumHeight(66)
+            metric_card.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.stats_header = QLabel(self.locale.text("section.session"))
         self.stats_header.setObjectName("sectionTitle")
         self.log_header = QLabel(self.locale.text("section.runtime_log"))
@@ -374,8 +386,6 @@ class MainWindow(QMainWindow):
         self.details_header = QLabel(self.locale.text("section.details"))
         self.details_header.setObjectName("sectionTitle")
         for header_label in [
-            self.primary_header,
-            self.utility_header,
             self.stats_header,
             self.log_header,
             self.agent_header,
@@ -402,15 +412,13 @@ class MainWindow(QMainWindow):
         self.run_audit_label.setObjectName("statusLabel")
         self.run_audit_label.setWordWrap(True)
 
-        self.candidate_widget = CandidateWidget(language=self.locale.language)
-        self.abaqus_widget = AbaqusWidget(language=self.locale.language)
+        self.workbench_candidate_widget = CandidateWidget(language=self.locale.language)
+        self.workbench_candidate_widget.setMinimumHeight(180)
         self.knowledge_widget = KnowledgeWidget()
-        self.report_widget = ReportWidget()
         self.result_trace_widget = ResultTraceWidget()
         self.log_widget = LogWidget()
         self.monitor_log_widget = LogWidget()
         self.monitor_dashboard_widget = MonitorDashboardWidget()
-        self.task_config_widget = TaskConfigWidget(language=self.locale.language)
         self.workflow_widget = WorkflowWidget(event_store=self.workflow_event_store)
         self.workflow_widget.setMinimumHeight(300)
         self.flow_dag_widget = FlowDagWidget()
@@ -418,13 +426,9 @@ class MainWindow(QMainWindow):
             self.locale.text("live_view.empty"),
             language=self.locale.language,
         )
-        self.live_result_view.setMinimumHeight(260)
-
-        self.tabs = QTabWidget()
-        self.tabs.addTab(self.candidate_widget, self.locale.text("tab.candidates"))
-        self.tabs.addTab(self.abaqus_widget, self.locale.text("tab.abaqus"))
-        self.tabs.addTab(self.result_trace_widget, self.locale.text("tab.trace"))
-        self.tabs.addTab(self.report_widget, self.locale.text("tab.report"))
+        self.live_result_view.setMinimumHeight(210)
+        self.live_result_view.setMaximumHeight(260)
+        self.log_widget.setMinimumHeight(128)
 
         self._build_layout()
         self._apply_styles()
@@ -457,6 +461,26 @@ class MainWindow(QMainWindow):
                 Qt.TransformationMode.SmoothTransformation,
             )
         )
+
+    def _populate_report_type_selector(self) -> None:
+        current_kind = None
+        if hasattr(self, "report_type_selector"):
+            current_kind = self.report_type_selector.currentData()
+            self.report_type_selector.blockSignals(True)
+            self.report_type_selector.clear()
+        report_options = [
+            ("report.kind.all", "all"),
+            ("report.kind.overall", "overall"),
+            ("report.kind.fem", "fem"),
+            ("report.kind.design_solution", "design_solution"),
+        ]
+        for text_key, kind in report_options:
+            self.report_type_selector.addItem(self.locale.text(text_key), kind)
+        if current_kind:
+            index = self.report_type_selector.findData(current_kind)
+            if index >= 0:
+                self.report_type_selector.setCurrentIndex(index)
+        self.report_type_selector.blockSignals(False)
 
     def _build_layout(self) -> None:
         input_action_layout = QHBoxLayout()
@@ -535,8 +559,9 @@ class MainWindow(QMainWindow):
 
         workbench_splitter = QSplitter(Qt.Orientation.Vertical)
         workbench_splitter.addWidget(workflow_panel)
+        workbench_splitter.addWidget(self.workbench_candidate_widget)
         workbench_splitter.addWidget(chat_panel)
-        workbench_splitter.setSizes([210, 806])
+        workbench_splitter.setSizes([170, 180, 500])
         self.workbench_splitter = workbench_splitter
 
         workbench_page = QWidget()
@@ -555,11 +580,21 @@ class MainWindow(QMainWindow):
         live_header_layout.addWidget(self.reset_view_button)
         live_header_layout.addWidget(self.fit_view_button)
         right_layout.addLayout(live_header_layout)
-        right_layout.addWidget(self.live_result_view, 2)
+        right_layout.addWidget(self.live_result_view, 1)
         right_layout.addWidget(self.stats_header)
         right_layout.addLayout(stats_layout)
+        action_grid = QGridLayout()
+        action_grid.setHorizontalSpacing(8)
+        action_grid.setVerticalSpacing(8)
+        action_grid.addWidget(self.screen_button, 0, 0)
+        action_grid.addWidget(self.evaluate_selected_button, 0, 1)
+        action_grid.addWidget(self.evaluate_all_button, 1, 0)
+        action_grid.addWidget(self.reset_button, 1, 1)
+        right_layout.addLayout(action_grid)
         right_layout.addWidget(self.log_header)
-        right_layout.addWidget(self.log_widget, 2)
+        right_layout.addWidget(self.log_widget, 1)
+        right_layout.addWidget(self.report_type_selector)
+        right_layout.addWidget(self.report_dir_button)
         right_layout.addWidget(self.report_button)
         right_layout.addWidget(self.export_data_button)
         right_layout.addWidget(self.open_report_button)
@@ -597,26 +632,32 @@ class MainWindow(QMainWindow):
         workbench_left.setMinimumWidth(248)
         workbench_left.setMaximumWidth(286)
 
-        project_left = self._build_project_left_page()
         knowledge_left = self._build_knowledge_left_page()
         monitor_left = self._build_monitor_left_page()
         settings_left = self._build_settings_left_page()
 
+        workbench_right_content = QWidget()
+        workbench_right_content.setObjectName("resultRailContent")
+        workbench_right_content.setLayout(right_layout)
+        workbench_right_scroll = QScrollArea()
+        workbench_right_scroll.setObjectName("resultRail")
+        workbench_right_scroll.setWidgetResizable(True)
+        workbench_right_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        workbench_right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        workbench_right_scroll.setWidget(workbench_right_content)
+
         workbench_right = QWidget()
-        workbench_right.setObjectName("resultRail")
-        workbench_right.setLayout(right_layout)
+        workbench_right.setObjectName("resultRailShell")
+        workbench_right_layout = QVBoxLayout(workbench_right)
+        workbench_right_layout.setContentsMargins(0, 0, 0, 0)
+        workbench_right_layout.setSpacing(0)
+        workbench_right_layout.addWidget(workbench_right_scroll)
         workbench_right.setMinimumWidth(330)
         workbench_right.setMaximumWidth(430)
 
         self.stack = QStackedWidget()
+        self.stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.stack.addWidget(workbench_page)
-        project_page = QSplitter(Qt.Orientation.Vertical)
-        project_page.setObjectName("centerWorkbench")
-        project_page.addWidget(self.task_config_widget)
-        project_page.addWidget(self.tabs)
-        project_page.setChildrenCollapsible(False)
-        project_page.setSizes([330, 570])
-        self.stack.addWidget(project_page)
         self.stack.addWidget(self.knowledge_widget)
         self.monitor_page = self._build_monitor_page()
         self.stack.addWidget(self.monitor_page)
@@ -624,8 +665,8 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.settings_page)
 
         self.left_stack = QStackedWidget()
+        self.left_stack.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Ignored)
         self.left_stack.addWidget(workbench_left)
-        self.left_stack.addWidget(project_left)
         self.left_stack.addWidget(knowledge_left)
         self.left_stack.addWidget(monitor_left)
         self.left_stack.addWidget(settings_left)
@@ -633,8 +674,8 @@ class MainWindow(QMainWindow):
         self.left_stack.setMaximumWidth(286)
 
         self.right_stack = QStackedWidget()
+        self.right_stack.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Ignored)
         self.right_stack.addWidget(workbench_right)
-        self.right_stack.addWidget(self._build_project_right_page())
         self.right_stack.addWidget(self._build_knowledge_right_page())
         self.right_stack.addWidget(self._build_monitor_right_page())
         self.right_stack.addWidget(self._build_settings_right_page())
@@ -696,18 +737,6 @@ class MainWindow(QMainWindow):
         else:
             layout.addStretch(1)
         return page
-
-    def _build_project_left_page(self) -> QWidget:
-        return self._sidebar_page(
-            "项目 · DESIGN",
-            [
-                ("任务契约", "自然语言事实 / 几何参考 / 固定约束"),
-                ("候选方案", "LLM / 案例迁移 / DOE 来源审计"),
-                ("有限元结果", "线性屈曲 / Riks 后屈曲 / 云图"),
-                ("报告输出", "Markdown / PDF / 工程解释"),
-            ],
-            "正式案例库：按 CASE_<n> 顺序编号\n候选会话编号：TMP_<n>",
-        )
 
     def _build_knowledge_left_page(self) -> QWidget:
         page = QWidget()
@@ -851,7 +880,6 @@ class MainWindow(QMainWindow):
                         {"name": "检索验证 / 证据引用", "status": "pending", "message": "等待可引用证据"},
                     ]
                 )
-
     def _build_monitor_left_page(self) -> QWidget:
         return self._sidebar_page(
             "监控 · RUNS",
@@ -928,17 +956,6 @@ class MainWindow(QMainWindow):
             if label is not None:
                 label.setText(f"<b>{title}</b><br>{body}")
 
-    def _build_project_right_page(self) -> QWidget:
-        return self._right_page(
-            "项目结果 · TRACE",
-            [
-                ("当前任务", "项目页展示结构化任务、候选、FEM、追踪和报告。"),
-                ("编号契约", "候选 TMP_<n>；正式 FEM 输入 C<n>；案例 CASE_<n>。"),
-                ("数据回流", "通过 FEM 的样本进入正式案例库，不依赖 task_id 检索。"),
-            ],
-            [self.screen_button, self.evaluate_selected_button, self.evaluate_all_button, self.reset_button],
-        )
-
     def _build_knowledge_right_page(self) -> QWidget:
         page = QWidget()
         page.setObjectName("resultRail")
@@ -964,8 +981,8 @@ class MainWindow(QMainWindow):
             self.knowledge_right_labels[key] = card
 
         self.knowledge_right_pipeline = PipelineStatusWidget("入库流水线 · PIPELINE")
-        self.knowledge_right_pipeline.setMinimumHeight(260)
-        self.knowledge_right_pipeline.setMaximumHeight(310)
+        self.knowledge_right_pipeline.setMinimumHeight(250)
+        self.knowledge_right_pipeline.setMaximumHeight(292)
         layout.addWidget(self.knowledge_right_pipeline)
 
         self.knowledge_right_rebuild_button = QPushButton("重建全部索引")
@@ -1087,12 +1104,12 @@ class MainWindow(QMainWindow):
         self.stack.setCurrentIndex(index)
         self.left_stack.setCurrentIndex(index)
         self.right_stack.setCurrentIndex(index)
-        if index == 2:
+        if index == 1:
             self.knowledge_widget.refresh(load_evidence=False)
             self._refresh_knowledge_sidebar()
-        if index == 3:
+        if index == 2:
             self.monitor_dashboard_widget.refresh()
-        if index == 4:
+        if index == 3:
             self._refresh_settings_sidebar()
             self._refresh_settings_health_panel()
 
@@ -1235,21 +1252,22 @@ class MainWindow(QMainWindow):
                 ],
             ),
         ]
-        for row_start in range(0, len(cards), 2):
-            row_cards = cards[row_start : row_start + 2]
-            row_height = max(card.minimumHeight() for card in row_cards)
-            for card in row_cards:
-                card.setMinimumHeight(row_height)
-                card.setMaximumHeight(row_height)
-        forms_grid = QGridLayout()
-        forms_grid.setContentsMargins(0, 0, 0, 0)
-        forms_grid.setHorizontalSpacing(12)
-        forms_grid.setVerticalSpacing(12)
-        for index, card in enumerate(cards):
-            forms_grid.addWidget(card, index // 2, index % 2)
-        forms_grid.setColumnStretch(0, 1)
-        forms_grid.setColumnStretch(1, 1)
-        content_layout.addLayout(forms_grid)
+        forms_columns = QHBoxLayout()
+        forms_columns.setContentsMargins(0, 0, 0, 0)
+        forms_columns.setSpacing(12)
+        left_column = QVBoxLayout()
+        right_column = QVBoxLayout()
+        for column in [left_column, right_column]:
+            column.setContentsMargins(0, 0, 0, 0)
+            column.setSpacing(12)
+            column.setAlignment(Qt.AlignmentFlag.AlignTop)
+        for card in [cards[0], cards[2]]:
+            left_column.addWidget(card)
+        for card in [cards[1], cards[3]]:
+            right_column.addWidget(card)
+        forms_columns.addLayout(left_column, 1)
+        forms_columns.addLayout(right_column, 1)
+        content_layout.addLayout(forms_columns)
         content_layout.addWidget(self._settings_runtime_card())
         content_layout.addWidget(self._settings_validation_card())
 
@@ -1406,6 +1424,7 @@ class MainWindow(QMainWindow):
     def _settings_line(self, key: str, value: object) -> QLineEdit:
         field = QLineEdit(str(value if value is not None else ""))
         field.setObjectName("settingsInput")
+        field.setCursorPosition(0)
         self.settings_fields[key] = field
         return field
 
@@ -1434,6 +1453,7 @@ class MainWindow(QMainWindow):
             path, _ = QFileDialog.getOpenFileName(self, "选择文件", start_dir, "All Files (*)")
         if path:
             field.setText(path)
+            field.setCursorPosition(0)
 
     def _settings_combo(self, key: str, value: object, options: list[tuple[str, str]]) -> QComboBox:
         combo = QComboBox()
@@ -1507,6 +1527,7 @@ class MainWindow(QMainWindow):
             return
         if isinstance(widget, QLineEdit):
             widget.setText(str(value if value is not None else ""))
+            widget.setCursorPosition(0)
 
     def _settings_int(self, key: str, default: int) -> int:
         try:
@@ -1696,13 +1717,26 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(12, 12, 12, 12)
         layout.setSpacing(10)
-        splitter = QSplitter(Qt.Orientation.Vertical)
-        splitter.addWidget(self.monitor_dashboard_widget)
-        splitter.addWidget(self.workflow_widget)
-        splitter.addWidget(self.monitor_log_widget)
-        splitter.setChildrenCollapsible(False)
-        splitter.setSizes([560, 250, 160])
-        layout.addWidget(splitter, 1)
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setFrameShape(QFrame.Shape.NoFrame)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(10)
+        content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+        self.monitor_dashboard_widget.setMinimumHeight(610)
+        self.monitor_dashboard_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.workflow_widget.setMinimumHeight(220)
+        self.workflow_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.monitor_log_widget.setMinimumHeight(150)
+        self.monitor_log_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        content_layout.addWidget(self.monitor_dashboard_widget)
+        content_layout.addWidget(self.workflow_widget)
+        content_layout.addWidget(self.monitor_log_widget)
+        scroll_area.setWidget(content)
+        layout.addWidget(scroll_area, 1)
         return page
 
     def _set_button_variant(self, button: QPushButton, variant: str = "default") -> None:
@@ -1784,10 +1818,19 @@ class MainWindow(QMainWindow):
     def _target_window_size(self) -> QSize:
         screen = QApplication.primaryScreen()
         if screen is None:
-            return QSize(1440, 900)
+            return QSize(1280, 960)
         available = screen.availableGeometry()
-        width = min(available.width(), min(1600, max(1024, available.width() - 80)))
-        height = min(available.height(), min(900, max(680, available.height() - 96)))
+        max_width = max(320, available.width() - 32)
+        max_height = max(320, available.height() - 40)
+        if max_width >= 1360 and max_height >= 1020:
+            return QSize(1360, 1020)
+        if max_width >= 1280 and max_height >= 960:
+            return QSize(1280, 960)
+        height = min(max_height, max(560, int(max_width * 3 / 4)))
+        width = min(max_width, int(height * 4 / 3))
+        if width < 960 and max_width >= 960:
+            width = 960
+            height = min(max_height, int(width * 3 / 4))
         return QSize(width, height)
 
     def _resize_to_available_work_area(self) -> None:
@@ -1837,15 +1880,17 @@ class MainWindow(QMainWindow):
         self.confirm_yes_button.clicked.connect(lambda: self._respond_confirmation(True))
         self.confirm_no_button.clicked.connect(lambda: self._respond_confirmation(False))
         self.example_button.clicked.connect(self._load_example_prompt)
-        self.trace_button.clicked.connect(lambda: self._switch_workspace_page(3))
+        self.trace_button.clicked.connect(lambda: self._switch_workspace_page(2))
         self.refresh_button.clicked.connect(self._refresh_knowledge_view)
-        self.knowledge_widget.pipelineChanged.connect(self._sync_knowledge_pipeline_steps)
         if hasattr(self, "knowledge_right_rebuild_button"):
             self.knowledge_right_rebuild_button.clicked.connect(lambda: self.knowledge_widget._run_maintenance("rebuild"))
         if hasattr(self, "knowledge_right_snapshot_button"):
             self.knowledge_right_snapshot_button.clicked.connect(lambda: self.knowledge_widget._run_maintenance("export"))
+        self.knowledge_widget.pipelineChanged.connect(self._sync_knowledge_pipeline_steps)
         self.open_report_button.clicked.connect(self._open_latest_report)
         self.export_data_button.clicked.connect(self._export_session_data)
+        self.report_dir_button.clicked.connect(self._choose_report_output_dir)
+        self.report_type_selector.currentIndexChanged.connect(lambda: self._update_button_states())
         self.reset_view_button.clicked.connect(self.live_result_view.reset_view)
         self.fit_view_button.clicked.connect(self.live_result_view.fit_view)
         self.refresh_runs_button.clicked.connect(self._refresh_run_selector)
@@ -1894,7 +1939,7 @@ class MainWindow(QMainWindow):
         if theme_index >= 0:
             self.theme_selector.setCurrentIndex(theme_index)
         self.theme_selector.blockSignals(False)
-        nav_keys = ["nav.workbench", "nav.project", "nav.knowledge", "nav.monitor", "nav.settings"]
+        nav_keys = ["nav.workbench", "nav.knowledge", "nav.monitor", "nav.settings"]
         for button, key in zip(self.nav_buttons, nav_keys):
             button.setText(self.locale.text(key))
         self.input_line.setPlaceholderText(self.locale.text("input.placeholder"))
@@ -1910,6 +1955,9 @@ class MainWindow(QMainWindow):
         self.refresh_button.setText(self.locale.text("button.refresh_knowledge"))
         self.open_report_button.setText(self.locale.text("button.open_report"))
         self.export_data_button.setText(self.locale.text("button.export_data"))
+        self._populate_report_type_selector()
+        self.report_dir_button.setText(self.locale.text("button.report_dir"))
+        self.report_dir_button.setToolTip(self.locale.text("tooltip.report_dir"))
         self.reset_view_button.setText("")
         self.reset_view_button.setToolTip(self.locale.text("button.reset_view"))
         self.fit_view_button.setText("")
@@ -1924,8 +1972,6 @@ class MainWindow(QMainWindow):
         self.evaluate_all_button.setText(self.locale.text("button.evaluate_all"))
         self.report_button.setText(self.locale.text("button.report"))
         self.reset_button.setText(self.locale.text("button.reset"))
-        self.primary_header.setText(self.locale.text("section.primary"))
-        self.utility_header.setText(self.locale.text("section.utility"))
         self.stats_header.setText(self.locale.text("section.session"))
         self.log_header.setText(self.locale.text("section.runtime_log"))
         self.agent_header.setText(self.locale.text("section.agents"))
@@ -1935,20 +1981,9 @@ class MainWindow(QMainWindow):
         self.workbench_header.setText(self.locale.text("section.workbench"))
         self.dialog_header.setText(self.locale.text("section.dialog"))
         self.details_header.setText(self.locale.text("section.details"))
-        tab_texts = [
-            self.locale.text("tab.candidates"),
-            self.locale.text("tab.abaqus"),
-            self.locale.text("tab.trace"),
-            self.locale.text("tab.report"),
-        ]
-        for index, label in enumerate(tab_texts):
-            self.tabs.setTabText(index, label)
-        self.candidate_widget.set_language(self.locale.language)
-        self.abaqus_widget.set_language(self.locale.language)
+        self.workbench_candidate_widget.set_language(self.locale.language)
         self.live_result_view.set_language(self.locale.language, self.locale.text("live_view.empty"))
-        self.task_config_widget.set_language(self.locale.language)
         if not self.session.task:
-            self.task_browser.setHtml(self._initial_task_html())
             self.status_label.setText(self.locale.text("status.waiting"))
         self._update_overview_cards()
         self._refresh_run_selector()
@@ -1978,6 +2013,8 @@ class MainWindow(QMainWindow):
             self.refresh_button,
             self.open_report_button,
             self.export_data_button,
+            self.report_type_selector,
+            self.report_dir_button,
             self.reset_view_button,
             self.fit_view_button,
             self.refresh_runs_button,
@@ -1996,17 +2033,29 @@ class MainWindow(QMainWindow):
         has_candidates = bool(self.session.candidates)
         has_results = bool(self.session.results_by_session_id)
         has_pending_current = bool(self._pending_candidates(self.session.current_candidates)) if has_candidates else False
+        has_pending_display = bool(self._pending_candidates(self.session.display_candidates)) if has_candidates else False
+        report_kind = str(self.report_type_selector.currentData() or "all")
+        if report_kind == "design_solution":
+            report_ready = bool(self.session.task and (self.session.candidates or self.session.screened_candidates))
+        else:
+            report_ready = bool(self.session.task and has_results)
 
         self.confirm_yes_button.setEnabled(self.session.pending_confirmation is not None)
         self.confirm_no_button.setEnabled(self.session.pending_confirmation is not None)
         self.screen_button.setEnabled(has_candidates and self.session.pending_confirmation is None)
-        self.evaluate_selected_button.setEnabled(has_pending_current and self.session.pending_confirmation is None)
+        self.evaluate_selected_button.setEnabled(has_pending_display and self.session.pending_confirmation is None)
         self.evaluate_all_button.setEnabled(has_pending_current and self.session.pending_confirmation is None)
-        self.report_button.setEnabled(has_results and self.session.pending_confirmation is None)
+        self.report_button.setEnabled(report_ready and self.session.pending_confirmation is None)
         self.reset_button.setEnabled(True)
         self.example_button.setEnabled(self.session.pending_confirmation is None)
         self.refresh_button.setEnabled(True)
-        self.open_report_button.setEnabled((RESULTS_DIR / "latest_report.md").exists() or (RESULTS_DIR / "latest_report.pdf").exists())
+        session_report = self.session.report or {}
+        session_report_raw_path = str(session_report.get("pdf_path") or session_report.get("markdown_path") or "").strip()
+        self.open_report_button.setEnabled(
+            (bool(session_report_raw_path) and Path(session_report_raw_path).exists())
+            or (RESULTS_DIR / "latest_report.md").exists()
+            or (RESULTS_DIR / "latest_report.pdf").exists()
+        )
         self.export_data_button.setEnabled(
             bool(self.session.task or self.session.candidates or self.session.results_by_session_id or self.session.report)
         )
@@ -2030,7 +2079,7 @@ class MainWindow(QMainWindow):
             return (
                 f"<span style='color:{label_color};font-size:12px;'>"
                 f"{label}</span><br>"
-                f"<span style='color:{value_color};font-size:22px;font-weight:800;'>"
+                f"<span style='color:{value_color};font-size:18px;font-weight:800;'>"
                 f"{value}</span>"
             )
 
@@ -2410,7 +2459,6 @@ class MainWindow(QMainWindow):
         self.session = self._session_from_workflow_state(snapshot)
         self.input_line.setText(self.session.instruction)
         self._apply_session(self.session)
-        self.tabs.setCurrentWidget(self.result_trace_widget)
         self.chat_widget.add_message(
             "SYSTEM",
             f"已恢复运行状态：{run_id}，当前阶段：{self.session.stage}",
@@ -2422,17 +2470,13 @@ class MainWindow(QMainWindow):
 
     def _apply_session(self, session: PipelineSession) -> None:
         self.session = session
-        self.task_browser.setHtml(self._task_summary_html())
-        self.task_config_widget.update_task(self.session.task)
-        self.candidate_widget.update_candidates(self.session.current_candidates, self.session.results_by_session_id)
-        self.abaqus_widget.update_results(list(self.session.results_by_session_id.values()))
+        self.workbench_candidate_widget.update_candidates(self.session.display_candidates, self.session.results_by_session_id)
         self.result_trace_widget.update_trace(
-            self.session.current_candidates,
+            self.session.display_candidates,
             self.session.results_by_session_id,
             self.session.knowledge_updates,
             self.session.report,
         )
-        self.report_widget.update_report(self.session.report)
         self.workflow_widget.refresh(
             self.session.workflow_run_id,
             self.session.stage,
@@ -2445,17 +2489,13 @@ class MainWindow(QMainWindow):
         self._sync_status_label_with_session()
 
     def _refresh_design_views(self) -> None:
-        self.task_browser.setHtml(self._task_summary_html())
-        self.task_config_widget.update_task(self.session.task)
-        self.candidate_widget.update_candidates(self.session.current_candidates, self.session.results_by_session_id)
-        self.abaqus_widget.update_results(list(self.session.results_by_session_id.values()))
+        self.workbench_candidate_widget.update_candidates(self.session.display_candidates, self.session.results_by_session_id)
         self.result_trace_widget.update_trace(
-            self.session.current_candidates,
+            self.session.display_candidates,
             self.session.results_by_session_id,
             self.session.knowledge_updates,
             self.session.report,
         )
-        self.report_widget.update_report(self.session.report)
         self.workflow_widget.refresh(
             self.session.workflow_run_id,
             self.session.stage,
@@ -2478,8 +2518,8 @@ class MainWindow(QMainWindow):
         if results:
             self.live_result_view.show_mode_shape(results[0])
             return
-        if self.session.current_candidates:
-            self.live_result_view.show_candidate(self.session.current_candidates[0])
+        if self.session.display_candidates:
+            self.live_result_view.show_candidate(self.session.display_candidates[0])
             return
         self.live_result_view.show_reference_hull()
 
@@ -2489,7 +2529,6 @@ class MainWindow(QMainWindow):
             return
         self.session = PipelineSession(instruction=instruction)
         self.chat_widget.add_message("USER", instruction)
-        self.tabs.setCurrentWidget(self.candidate_widget)
         self._run_action(
             "conversation_start",
             {"instruction": instruction},
@@ -2512,9 +2551,22 @@ class MainWindow(QMainWindow):
         if right_pipeline is not None:
             right_pipeline.set_steps(steps)
 
+    def _choose_report_output_dir(self) -> None:
+        initial_dir = str(self.report_output_dir or RESULTS_DIR)
+        selected_dir = QFileDialog.getExistingDirectory(self, self.locale.text("dialog.report_dir"), initial_dir)
+        if not selected_dir:
+            return
+        self.report_output_dir = Path(selected_dir)
+        self.status_label.setText(self.locale.text("status.report_dir", path=self.report_output_dir))
+
     def _open_latest_report(self) -> None:
-        self.report_widget.refresh_latest()
-        for path in [RESULTS_DIR / "latest_report.pdf", RESULTS_DIR / "latest_report.md"]:
+        session_paths = [
+            self.session.report.get("pdf_path") if self.session.report else None,
+            self.session.report.get("markdown_path") if self.session.report else None,
+        ]
+        paths = [Path(str(path)) for path in session_paths if str(path or "").strip()]
+        paths.extend([RESULTS_DIR / "latest_report.pdf", RESULTS_DIR / "latest_report.md"])
+        for path in paths:
             if path.exists():
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
                 self.chat_widget.add_message("SYSTEM", self.locale.text("message.open_report", path=path))
@@ -2640,18 +2692,21 @@ class MainWindow(QMainWindow):
         evaluated = set(self.session.results_by_session_id.keys())
         return [candidate for candidate in candidates if candidate.get("candidate_id") not in evaluated]
 
+    def _selected_candidates_for_evaluation(self) -> list[dict]:
+        return self.workbench_candidate_widget.selected_candidates()
+
     def _report_candidate_set(self) -> list[dict]:
         evaluated = set(self.session.results_by_session_id.keys())
         return [
             candidate
-            for candidate in self.session.current_candidates
+            for candidate in self.session.display_candidates
             if str(candidate.get("candidate_id")) in evaluated
         ]
 
     def _ordered_report_results(self) -> list[dict]:
         ordered_results: list[dict] = []
         used_keys: set[str] = set()
-        for candidate in self.session.current_candidates:
+        for candidate in self.session.display_candidates:
             candidate_id = str(candidate.get("candidate_id") or "")
             if candidate_id in self.session.results_by_session_id:
                 ordered_results.append(self.session.results_by_session_id[candidate_id])
@@ -2664,7 +2719,6 @@ class MainWindow(QMainWindow):
     def _start_screen(self) -> None:
         if not self.session.task or not self.session.candidates:
             return
-        self.tabs.setCurrentWidget(self.candidate_widget)
         self._run_action(
             "screen",
             {"task": self.session.task, "candidates": self.session.candidates},
@@ -2672,13 +2726,12 @@ class MainWindow(QMainWindow):
         )
 
     def _start_evaluate_selected(self) -> None:
-        if not self.session.task or not self.session.current_candidates:
+        if not self.session.task or not self.session.display_candidates:
             return
-        selected = self._pending_candidates(self.candidate_widget.selected_candidates())
+        selected = self._pending_candidates(self._selected_candidates_for_evaluation())
         if not selected:
             self.chat_widget.add_message("SYSTEM", self.locale.text("message.selected_done"))
             return
-        self.tabs.setCurrentWidget(self.abaqus_widget)
         self._run_action(
             "evaluate",
             {"task": self.session.task, "candidates": selected},
@@ -2692,7 +2745,6 @@ class MainWindow(QMainWindow):
         if not pending:
             self.chat_widget.add_message("SYSTEM", self.locale.text("message.all_done"))
             return
-        self.tabs.setCurrentWidget(self.abaqus_widget)
         self._run_action(
             "evaluate",
             {"task": self.session.task, "candidates": pending},
@@ -2700,19 +2752,25 @@ class MainWindow(QMainWindow):
         )
 
     def _start_report(self) -> None:
-        if not self.session.task or not self.session.results_by_session_id:
+        if not self.session.task:
             return
+        report_kind = str(self.report_type_selector.currentData() or "all")
         report_candidates = self._report_candidate_set()
         ordered_results = self._ordered_report_results()
-        if not ordered_results:
+        if report_kind == "design_solution":
+            if not report_candidates:
+                return
+        elif not ordered_results:
             return
-        self.tabs.setCurrentWidget(self.report_widget)
+        output_dir = str(self.report_output_dir) if self.report_output_dir else None
         self._run_action(
             "report",
             {
                 "task": self.session.task,
                 "results": ordered_results,
                 "candidates": report_candidates,
+                "report_kind": report_kind,
+                "output_dir": output_dir,
             },
             "正在生成报告",
         )
@@ -2724,17 +2782,12 @@ class MainWindow(QMainWindow):
         self.runtime_stage_text = ""
         self.chat_widget.clear()
         self.log_widget.clear()
-        self.task_browser.setHtml(self._initial_task_html())
-        self.candidate_widget.update_candidates([])
-        self.abaqus_widget.update_results([])
+        self.workbench_candidate_widget.update_candidates([])
         self.result_trace_widget.update_trace([])
-        self.candidate_widget.reset_view()
-        self.abaqus_widget.reset_view()
+        self.workbench_candidate_widget.reset_view()
         self.live_result_view.reset_plotter(self.locale.text("live_view.empty"))
         self.live_result_view.show_reference_hull()
         self.result_trace_widget.reset_view()
-        self.report_widget.reset_view()
-        self.task_config_widget.reset_view()
         self.workflow_widget.reset_view()
         self.model_status_label.set_state(self.locale.text("model.current"), "success")
         self.flow_dag_widget.update_state(self._agent_state_map(), self.locale.text("queue.idle"))
@@ -2815,7 +2868,13 @@ class MainWindow(QMainWindow):
                 self.workflow_widget.refresh(run_id, runtime_stage, self.session.pending_confirmation)
             return
 
-        self.chat_widget.add_message(sender_label, message)
+        display_message = message
+        if event_type == "llm_candidate_answer":
+            excerpt = str(payload.get("answer_excerpt") or "").strip()
+            if excerpt:
+                display_message = f"{message}\n\n{excerpt}"
+
+        self.chat_widget.add_message(sender_label, display_message)
         self.log_widget.append_log(sender_label, f"[{event_type}] {message}")
         self.monitor_log_widget.append_log(sender_label, f"[{event_type}] {message}")
 
@@ -2841,9 +2900,11 @@ class MainWindow(QMainWindow):
                 self.session.stage = "awaiting_screen_confirmation"
                 self.session.pending_confirmation = "screen_candidates"
                 self._refresh_design_views()
-            self.tabs.setCurrentWidget(self.candidate_widget)
 
         elif sender == "FLOW" and event_type == "screening_summary":
+            ranked_candidates = payload.get("ranked_candidates")
+            if isinstance(ranked_candidates, list) and ranked_candidates:
+                self.session.candidates = ranked_candidates
             screened_candidates = payload.get("screened_candidates")
             if isinstance(screened_candidates, list):
                 self.session.screened_candidates = screened_candidates
@@ -2851,7 +2912,6 @@ class MainWindow(QMainWindow):
                 self.session.stage = "awaiting_fem_confirmation"
                 self.session.pending_confirmation = "fem_evaluation"
                 self._refresh_design_views()
-            self.tabs.setCurrentWidget(self.candidate_widget)
 
         elif sender == "FLOW" and event_type == "fem_summary":
             results = payload.get("results")
@@ -2868,7 +2928,6 @@ class MainWindow(QMainWindow):
                 self.session.stage = "awaiting_report_confirmation"
                 self.session.pending_confirmation = "export_report"
                 self._refresh_design_views()
-            self.tabs.setCurrentWidget(self.abaqus_widget)
 
         elif sender == "FLOW" and event_type == "report_summary":
             report = payload.get("report")
@@ -2877,7 +2936,6 @@ class MainWindow(QMainWindow):
             self.session.stage = "completed"
             self.session.pending_confirmation = None
             self._refresh_design_views()
-            self.tabs.setCurrentWidget(self.report_widget)
 
     def _handle_finished(self, action: str, payload: dict) -> None:
         if action in {"conversation_start", "conversation_continue"}:
@@ -2901,6 +2959,9 @@ class MainWindow(QMainWindow):
             )
 
         elif action == "screen":
+            ranked_candidates = payload.get("ranked_candidates")
+            if isinstance(ranked_candidates, list) and ranked_candidates:
+                self.session.candidates = ranked_candidates
             self.session.screened_candidates = payload["screened_candidates"]
             self.session.evaluated_candidates = payload["screened_candidates"]
             self._apply_session(self.session)
@@ -2914,7 +2975,6 @@ class MainWindow(QMainWindow):
             for result in payload["results"]:
                 session_candidate_id = result.get("session_candidate_id", result["candidate_id"])
                 self.session.results_by_session_id[session_candidate_id] = result
-                self.abaqus_widget.append_or_update_result(result)
             self.session.knowledge_updates = list(payload.get("knowledge_updates") or self.session.knowledge_updates)
             self._apply_session(self.session)
             passed_count = sum(1 for item in payload["results"] if item.get("verdict") == "通过")
@@ -2926,7 +2986,6 @@ class MainWindow(QMainWindow):
         elif action == "report":
             self.session.report = payload["report"]
             self._apply_session(self.session)
-            self.tabs.setCurrentWidget(self.report_widget)
             self.chat_widget.add_message(
                 "SYSTEM",
                 f"手动入口：报告已生成：{payload['report'].get('markdown_path')} / {payload['report'].get('pdf_path')}",
@@ -2977,8 +3036,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent) -> None:
         try:
             self._save_window_layout()
-            self.candidate_widget.reset_view()
-            self.abaqus_widget.reset_view()
+            self.workbench_candidate_widget.reset_view()
             self.live_result_view.reset_plotter()
         finally:
             thread = self.worker_thread

@@ -387,7 +387,7 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         border: 1px solid {color["border_soft"]};
         border-left: 0;
         border-radius: 8px;
-        padding: 13px 14px;
+        padding: 8px 12px;
         font-weight: 600;
         color: {color["text"]};
     }}

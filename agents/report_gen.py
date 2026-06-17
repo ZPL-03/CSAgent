@@ -19,6 +19,11 @@ from core.task_contract import describe_boundary_conditions, describe_load_condi
 
 class ReportGenAgent(BaseAgent):
     agent_name = "REPORT_GEN"
+    REPORT_ARTIFACTS = {
+        "overall": ("overall_design_report", "CSAgent 总体设计报告"),
+        "fem": ("fem_verification_report", "CSAgent FEM 校核报告"),
+        "design_solution": ("recommended_design_solution", "CSAgent 推荐设计方案"),
+    }
 
     def __init__(self, progress_callback=None) -> None:
         super().__init__(progress_callback=progress_callback)
@@ -56,6 +61,39 @@ class ReportGenAgent(BaseAgent):
             "rank_score": candidate.get("rank_score"),
             "weight_kg_per_m2": candidate.get("surrogate_weight") or candidate.get("weight_kg_per_m2"),
         }
+
+    def _candidate_context_maps(self, candidates: List[Dict]) -> tuple[Dict[str, Dict], Dict[str, Dict]]:
+        by_candidate_id = {
+            str(candidate.get("candidate_id")): candidate
+            for candidate in candidates
+            if str(candidate.get("candidate_id") or "").strip()
+        }
+        by_display_name = {
+            str(candidate.get("display_name")): candidate
+            for candidate in candidates
+            if str(candidate.get("display_name") or "").strip()
+        }
+        return by_candidate_id, by_display_name
+
+    def _enrich_results_with_candidate_context(self, results: List[Dict], candidates: List[Dict]) -> List[Dict]:
+        by_candidate_id, by_display_name = self._candidate_context_maps(candidates)
+        enriched_results: List[Dict] = []
+        for result in results:
+            enriched = dict(result)
+            candidate = (
+                by_candidate_id.get(str(result.get("session_candidate_id") or ""))
+                or by_candidate_id.get(str(result.get("candidate_id") or ""))
+                or by_display_name.get(str(result.get("display_name") or ""))
+                or {}
+            )
+            if enriched.get("weight_kg_per_m2") is None:
+                enriched["weight_kg_per_m2"] = candidate.get("surrogate_weight") or candidate.get("weight_kg_per_m2")
+            if enriched.get("diagnosis_summary") is None and candidate.get("selection_reason"):
+                enriched["diagnosis_summary"] = candidate.get("selection_reason")
+            if enriched.get("display_name") is None:
+                enriched["display_name"] = result.get("candidate_id")
+            enriched_results.append(enriched)
+        return enriched_results
 
     def _build_structured_summary(self, task: Dict, results: List[Dict], candidates: List[Dict]) -> Dict:
         task_payload = task_payload_from_request(task)
@@ -123,6 +161,22 @@ class ReportGenAgent(BaseAgent):
         )
         return "\n\n".join([overall, compare, suggestion])
 
+    def _field_text(self, value: Any, default: str = "-") -> str:
+        if value is None:
+            return default
+        text = str(value).strip()
+        if not text or text.lower() == "none":
+            return default
+        return text
+
+    def _failure_mode_text(self, value: Any) -> str:
+        text = self._field_text(value)
+        mapping = {
+            "acceptance_adapter": "快速验收校核",
+            "deterministic_acceptance_adapter": "快速验收校核",
+        }
+        return mapping.get(text, text)
+
     def _render_deterministic_engineering_explanation(self, summary: Dict[str, Any]) -> str:
         candidates = summary.get("screened_candidates") or []
         results = summary.get("results") or []
@@ -178,7 +232,7 @@ class ReportGenAgent(BaseAgent):
         text = re.sub(r"\b(?:CASE|TMP|CAND|C)\s*[_-]?\d+\b", "候选", text, flags=re.IGNORECASE)
         text = re.sub(
             r"[-+]?[0-9]+(?:\.[0-9]+)?\s*(?:MPa|mm|kg\s*/\s*m\^?2|kg/m²|kg/m2|%|‰|deg|°|LPF|GPa)",
-            "对应工程量",
+            "已记录指标",
             text,
             flags=re.IGNORECASE,
         )
@@ -290,6 +344,10 @@ class ReportGenAgent(BaseAgent):
         return self._material_codes(text).issubset(known_codes)
 
     def _validate_llm_engineering_text(self, text: str, payload: Dict[str, Any]) -> None:
+        if "<think" in text.lower() or "</think>" in text.lower():
+            raise ValueError("LLM 报告解释包含推理标签")
+        if any(term in text for term in ["结构化结果", "对应工程量", "__MAT_CODE"]):
+            raise ValueError("LLM 报告解释包含占位式表达")
         if not self._llm_text_uses_only_known_numbers(text, payload):
             raise ValueError("LLM 报告解释包含结构化数据之外的数值")
         if not self._llm_text_uses_only_known_material_codes(text, payload):
@@ -317,7 +375,7 @@ class ReportGenAgent(BaseAgent):
             if not line_codes.issubset(known_codes):
                 continue
             line = re.sub(r"^\s*[0-9]+[.、]\s*", "", line)
-            line = re.sub(measurement_pattern, "结构化结果中的对应工程量", line, flags=re.IGNORECASE)
+            line = re.sub(measurement_pattern, "已记录指标", line, flags=re.IGNORECASE)
             cleaned_lines.append(line)
         cleaned = "\n".join(cleaned_lines).strip()
         return cleaned
@@ -391,22 +449,27 @@ class ReportGenAgent(BaseAgent):
 
     def _postprocess_engineering_explanation(self, text: str) -> str:
         """清理报告解释段的标题层级和数值占位语，避免与模板标题重复。"""
+        text = re.sub(r"(?is)<think>.*?</think>", "", str(text or ""))
         cleaned_lines: List[str] = []
-        for raw_line in str(text or "").splitlines():
+        for raw_line in text.splitlines():
             line = unicodedata.normalize("NFKC", raw_line.rstrip())
             stripped = line.strip()
             if not stripped:
                 cleaned_lines.append("")
+                continue
+            if stripped.lower().startswith("<think") or stripped.lower().endswith("</think>"):
                 continue
             if re.fullmatch(r"#{1,6}\s*工程解释与制造建议", stripped) or stripped == "工程解释与制造建议":
                 continue
             if stripped.startswith("# ") or stripped.startswith("## "):
                 stripped = re.sub(r"^#+\s*", "", stripped)
                 line = f"### {stripped}"
+            elif re.match(r"^\s*\d+[.、]\s+", stripped):
+                line = "- " + re.sub(r"^\s*\d+[.、]\s+", "", stripped)
             line = re.sub(r"[Vv]erd[Dd]?ict", "结论", line)
-            line = line.replace("为对应工程量", "由结构化有限元结果给出")
-            line = line.replace("为结构化结果中的对应工程量", "由结构化有限元结果给出")
-            line = line.replace("对应工程量", "结构化结果")
+            line = line.replace("为对应工程量", "由已记录指标给出")
+            line = line.replace("为结构化结果中的对应工程量", "由已记录指标给出")
+            line = line.replace("对应工程量", "已记录指标")
             cleaned_lines.append(line)
         cleaned = "\n".join(cleaned_lines).strip()
         while "\n\n\n" in cleaned:
@@ -425,6 +488,77 @@ class ReportGenAgent(BaseAgent):
                 self.emit_llm_trace(self.llm_backend, {"purpose": "report_engineering_explanation", "failed": True})
                 self.emit(f"报告 LLM 工程解释生成失败，已使用确定性解释：{exc}")
         return self._render_deterministic_engineering_explanation(summary)
+
+    def _deterministic_artifact_explanation(self, report_kind: str, summary: Dict[str, Any]) -> str:
+        if report_kind == "fem":
+            return "\n".join(
+                [
+                    "- FEM 校核报告以 FEM_AGENT 返回的结果记录为准，报告生成智能体只解释校核链路、失效模式和复核建议。",
+                    "- 线性屈曲、非线性后屈曲、缺陷幅值和云图路径都来自有限元结果字段，不由 LLM 改写。",
+                    "- 后续复核应保持正式 C 编号、会话 TMP 编号和案例回流编号一致，便于追踪每个校核样本。",
+                ]
+            )
+        if report_kind == "design_solution":
+            return "\n".join(
+                [
+                    "- 推荐设计方案报告汇总候选生成、代理初筛和正式 FEM 编号之间的追踪关系。",
+                    "- 候选来源包含 LLM 提案、案例迁移和 DOE 采样；去重和规则检查由确定性工程逻辑完成。",
+                    "- 方案是否进入工程冻结，应结合 FEM 校核结果、制造工艺评审和后续试验验证共同确认。",
+                ]
+            )
+        return "\n".join(
+            [
+                "- 总体设计报告综合任务、候选、代理初筛、FEM 校核、知识证据和报告建议。",
+                "- 数值、编号、排序和结论来自结构化流程数据；LLM 只补充定性工程解释。",
+            ]
+        )
+
+    def _render_report_artifact_explanation(self, report_kind: str, summary: Dict[str, Any]) -> str:
+        fallback = self._deterministic_artifact_explanation(report_kind, summary)
+        if self.llm_backend is None:
+            return fallback
+        payload = self._build_llm_explanation_payload(summary)
+        purpose_map = {
+            "overall": "总体设计报告",
+            "fem": "FEM 校核报告",
+            "design_solution": "推荐设计方案",
+        }
+        purpose = purpose_map.get(report_kind, "设计报告")
+        system_prompt = (
+            "你是复合材料外压圆柱耐压壳设计报告解释助手。"
+            "只基于结构化 JSON 事实，为指定报告类型写一段中文工程说明。"
+            "禁止新增候选编号、数值、单位、材料牌号、工况、设备参数或结构型式。"
+            "数值事实由模板输出，解释段只做定性归纳。"
+            "输出 Markdown 短横线条目，不输出表格、JSON 或代码块。"
+        )
+        user_prompt = (
+            f"报告类型：{purpose}\n"
+            "说明内容需要覆盖该报告类型对应的用途、可追溯性和后续复核建议。"
+            "如果结构化数据缺少某项事实，只能说明当前结构化数据未提供。\n\n"
+            f"结构化定性数据 JSON：\n{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}"
+        )
+        try:
+            answer = self.llm_backend.chat(
+                system_prompt,
+                user_prompt,
+                max_tokens_override=min(max(int(self.llm_backend.max_tokens), 900), 1600),
+                json_mode=False,
+            ).strip()
+            self.emit_llm_trace(self.llm_backend, {"purpose": f"report_{report_kind}_explanation"})
+            if not answer:
+                return fallback
+            try:
+                self._validate_llm_engineering_text(answer, payload)
+            except ValueError:
+                answer = self._sanitize_llm_engineering_text(answer, payload)
+                self._validate_llm_engineering_text(answer, payload)
+            self._last_llm_explanation_used = True
+            return self._postprocess_engineering_explanation(answer)
+        except Exception as exc:
+            if self.llm_backend is not None:
+                self.emit_llm_trace(self.llm_backend, {"purpose": f"report_{report_kind}_explanation", "failed": True})
+            self.emit(f"{purpose} LLM 解释生成失败，已使用确定性解释：{exc}")
+            return fallback
 
     def _render_markdown(self, task: Dict, results: List[Dict], candidates: List[Dict]) -> str:
         task_payload = task_payload_from_request(task)
@@ -490,15 +624,15 @@ class ReportGenAgent(BaseAgent):
                     "",
                     f"### {result.get('display_name', result['candidate_id'])} / {result['candidate_id']}",
                     f"- 状态：{result['status']}",
-                    f"- 极限压力：{result.get('ultimate_pressure_MPa')} MPa",
-                    f"- 线性屈曲压力：{result.get('linear_buckling_pressure_MPa')} MPa",
+                    f"- 极限压力：{self._field_text(result.get('ultimate_pressure_MPa'))} MPa",
+                    f"- 线性屈曲压力：{self._field_text(result.get('linear_buckling_pressure_MPa'))} MPa",
                     f"- 极限压力依据：{result.get('ultimate_pressure_basis') or '-'}",
-                    f"- Riks 最大 LPF：{result.get('riks_lpf_max')}",
-                    f"- 缺陷幅值：{result.get('imperfection_amplitude_mm')} mm",
-                    f"- 面密度：{result.get('weight_kg_per_m2')}",
-                    f"- 失效模式：{result.get('failure_mode')}",
+                    f"- Riks 最大 LPF：{self._field_text(result.get('riks_lpf_max'))}",
+                    f"- 缺陷幅值：{self._field_text(result.get('imperfection_amplitude_mm'))} mm",
+                    f"- 面密度：{self._field_text(result.get('weight_kg_per_m2'))}",
+                    f"- 失效模式：{self._failure_mode_text(result.get('failure_mode'))}",
                     f"- 结论：{result.get('verdict')}",
-                    f"- 工程说明：{result.get('diagnosis_summary')}",
+                    f"- 工程说明：{self._field_text(result.get('diagnosis_summary'))}",
                     f"- 模态云图数据：{result.get('visualization_json') or '-'}",
                 ]
             )
@@ -511,6 +645,144 @@ class ReportGenAgent(BaseAgent):
             ]
         )
         return "\n".join(lines)
+
+    def _candidate_result_maps(self, results: List[Dict]) -> tuple[Dict[str, Dict], Dict[str, Dict]]:
+        by_session_id = {
+            str(result.get("session_candidate_id")): result
+            for result in results
+            if str(result.get("session_candidate_id") or "").strip()
+        }
+        by_candidate_id = {
+            str(result.get("candidate_id")): result
+            for result in results
+            if str(result.get("candidate_id") or "").strip()
+        }
+        return by_session_id, by_candidate_id
+
+    def _render_fem_report_markdown(self, task: Dict, results: List[Dict], candidates: List[Dict] | None = None) -> str:
+        task_payload = task_payload_from_request(task)
+        candidates = candidates or []
+        summary = self._build_structured_summary(task, results, candidates)
+        explanation = self._render_report_artifact_explanation("fem", summary)
+        lines = [
+            "# CSAgent FEM 校核报告",
+            "",
+            f"- 会话任务编号：`{task.get('task_id') or '-'}`",
+            f"- 工况：{describe_load_conditions(task_payload['load_conditions'])}",
+            f"- 边界条件：{describe_boundary_conditions(task_payload['boundary_conditions'])}",
+            f"- 极限压力目标：不低于 {task_payload['design_targets']['ultimate_pressure_min_MPa']} MPa",
+            f"- 校核样本数量：{len(results)}",
+            "",
+            "## 校核结论摘要",
+        ]
+        passed = [result for result in results if result.get("verdict") == "通过"]
+        lines.extend(
+            [
+                "",
+                f"- 通过样本：{len(passed)} / {len(results)}",
+                "- 有限元结果由 FEM_AGENT 写入结果记录，报告生成智能体只读取并归纳，不改写压力、编号和结论。",
+            ]
+        )
+        for result in results:
+            lines.extend(
+                [
+                    "",
+                    f"## {result.get('display_name', result.get('candidate_id'))} / {result.get('candidate_id')}",
+                    f"- 会话候选编号：{result.get('session_candidate_id') or '-'}",
+                    f"- 作业状态：{result.get('status') or '-'}",
+                    f"- 线性屈曲压力：{result.get('linear_buckling_pressure_MPa') or '-'} MPa",
+                    f"- 极限压力：{result.get('ultimate_pressure_MPa') or '-'} MPa",
+                    f"- 极限压力依据：{result.get('ultimate_pressure_basis') or '-'}",
+                    f"- Riks 最大 LPF：{result.get('riks_lpf_max') or '-'}",
+                    f"- 缺陷幅值：{result.get('imperfection_amplitude_mm') or '-'} mm",
+                    f"- 面密度：{result.get('weight_kg_per_m2') or '-'}",
+                    f"- 失效模式：{self._failure_mode_text(result.get('failure_mode'))}",
+                    f"- 校核结论：{result.get('verdict') or '-'}",
+                    f"- 诊断摘要：{result.get('diagnosis_summary') or '-'}",
+                    f"- 云图或模态数据：{result.get('visualization_json') or '-'}",
+                ]
+            )
+        if not results:
+            lines.extend(["", "- 当前没有可写入 FEM 校核报告的有限元结果。"])
+        lines.extend(["", "## FEM 校核解释与复核建议", "", explanation])
+        return "\n".join(lines)
+
+    def _render_design_solution_markdown(self, task: Dict, candidates: List[Dict], results: List[Dict]) -> str:
+        task_payload = task_payload_from_request(task)
+        summary = self._build_structured_summary(task, results, candidates)
+        explanation = self._render_report_artifact_explanation("design_solution", summary)
+        by_session_id, by_candidate_id = self._candidate_result_maps(results)
+        lines = [
+            "# CSAgent 推荐设计方案",
+            "",
+            f"- 会话任务编号：`{task.get('task_id') or '-'}`",
+            f"- 工况：{describe_load_conditions(task_payload['load_conditions'])}",
+            f"- 极限压力目标：不低于 {task_payload['design_targets']['ultimate_pressure_min_MPa']} MPa",
+            f"- 候选来源比例：LLM / 案例迁移 / DOE 由任务配置和有效候选去重结果共同确定。",
+            "",
+            "## 入选候选与正式编号",
+        ]
+        if candidates:
+            for candidate in candidates:
+                result = (
+                    by_session_id.get(str(candidate.get("candidate_id") or ""))
+                    or by_candidate_id.get(str(candidate.get("candidate_id") or ""))
+                    or {}
+                )
+                geometry = candidate.get("geometry") or {}
+                material = candidate.get("material_system") or {}
+                layup = candidate.get("layup") or {}
+                lines.extend(
+                    [
+                        "",
+                        f"### {candidate.get('display_name', candidate.get('candidate_id'))}",
+                        f"- 会话候选编号：{candidate.get('candidate_id') or '-'}",
+                        f"- 正式校核编号：{result.get('candidate_id') or '-'}",
+                        f"- 来源：{candidate.get('source') or '-'}",
+                        f"- 材料体系：{material.get('name') or material.get('display_name') or material.get('material_key') or '-'}",
+                        (
+                            f"- 几何参数：L={geometry.get('length_mm') or '-'} mm，"
+                            f"R={geometry.get('radius_mm') or '-'} mm，"
+                            f"t={geometry.get('thickness_mm') or '-'} mm"
+                        ),
+                        (
+                            f"- 铺层角与缺陷：alpha={geometry.get('alpha_deg') or '-'} deg，"
+                            f"beta={geometry.get('beta_deg') or '-'} deg，"
+                            f"imperfection={geometry.get('imperfection_ratio') or '-'}"
+                        ),
+                        f"- 铺层形式：{layup.get('layup') or '-'}",
+                        f"- 代理预测极限压力：{candidate.get('surrogate_ultimate_pressure_MPa') or '-'} MPa",
+                        f"- ASME RD-1172 线性屈曲压力：{candidate.get('asme_linear_buckling_pressure_MPa') or '-'} MPa",
+                        f"- 面密度：{candidate.get('surrogate_weight') or candidate.get('weight_kg_per_m2') or '-'}",
+                        f"- 入选理由：{candidate.get('selection_reason') or candidate.get('screening_summary') or '-'}",
+                        f"- FEM 校核结论：{result.get('verdict') or '尚未校核'}",
+                    ]
+                )
+        else:
+            lines.extend(["", "- 当前没有可写入推荐方案报告的候选记录。"])
+        lines.extend(
+            [
+                "",
+                "## 交付说明",
+                "",
+                "- 推荐方案报告只汇总候选生成、代理初筛和正式 FEM 编号之间的追踪关系。",
+                "- 最终是否进入工程冻结状态，应结合 FEM 校核报告、制造工艺评审和试验验证计划共同确认。",
+                "",
+                "## 方案解释与后续设计建议",
+                "",
+                explanation,
+            ]
+        )
+        return "\n".join(lines)
+
+    def _write_markdown_pdf_pair(self, markdown_text: str, markdown_path: Path, pdf_path: Path) -> bool:
+        write_text(markdown_path, markdown_text)
+        try:
+            self._write_pdf(markdown_text, pdf_path)
+            return True
+        except ModuleNotFoundError as exc:
+            self.emit(f"PDF 依赖缺失，已跳过 PDF 导出：{exc}")
+            return False
 
     def _reportlab(self):
         from reportlab.lib.enums import TA_LEFT
@@ -667,25 +939,107 @@ class ReportGenAgent(BaseAgent):
         )
         document.build(self._build_pdf_story(markdown_text, font_name))
 
+    def _normalize_report_kind(self, value: Any) -> str:
+        report_kind = str(value or "all").strip().lower()
+        aliases = {
+            "latest": "all",
+            "all_reports": "all",
+            "overall_design": "overall",
+            "design": "design_solution",
+            "solution": "design_solution",
+            "recommended": "design_solution",
+            "fem_verification": "fem",
+        }
+        report_kind = aliases.get(report_kind, report_kind)
+        if report_kind not in {"all", "overall", "fem", "design_solution"}:
+            raise ValueError(f"未知报告类型：{value}")
+        return report_kind
+
+    def _output_dir(self, value: Any) -> Path:
+        if value:
+            output_dir = Path(str(value)).expanduser()
+        else:
+            output_dir = RESULTS_DIR
+        output_dir.mkdir(parents=True, exist_ok=True)
+        return output_dir
+
+    def _artifact_paths(self, output_dir: Path, report_kind: str) -> tuple[Path, Path, str]:
+        stem, title = self.REPORT_ARTIFACTS[report_kind]
+        return output_dir / f"{stem}.md", output_dir / f"{stem}.pdf", title
+
     def run(self, input_data: Dict) -> Dict:
-        markdown_text = self._render_markdown(
-            input_data["task"],
-            input_data["results"],
-            input_data.get("candidates", []),
-        )
-        markdown_path = RESULTS_DIR / "latest_report.md"
-        pdf_path = RESULTS_DIR / "latest_report.pdf"
-        write_text(markdown_path, markdown_text)
+        task = input_data["task"]
+        raw_results = input_data.get("results", [])
+        candidates = input_data.get("candidates", [])
+        results = self._enrich_results_with_candidate_context(raw_results, candidates)
+        report_kind = self._normalize_report_kind(input_data.get("report_kind"))
+        output_dir = self._output_dir(input_data.get("output_dir"))
+        self._last_llm_explanation_used = False
+        selected_keys = list(self.REPORT_ARTIFACTS) if report_kind == "all" else [report_kind]
+
+        selected_texts: Dict[str, str] = {}
+        base_markdown_text: str | None = None
+        if "overall" in selected_keys:
+            base_markdown_text = self._render_markdown(task, results, candidates)
+            selected_texts["overall"] = base_markdown_text.replace(
+                "# CSAgent 耐压壳设计报告",
+                "# CSAgent 总体设计报告",
+                1,
+            )
+        if "fem" in selected_keys:
+            selected_texts["fem"] = self._render_fem_report_markdown(task, results, candidates)
+        if "design_solution" in selected_keys:
+            selected_texts["design_solution"] = self._render_design_solution_markdown(task, candidates, results)
+
+        markdown_text = selected_texts.get("overall") or next(iter(selected_texts.values()), "")
+        markdown_path = output_dir / "latest_report.md"
+        pdf_path = output_dir / "latest_report.pdf"
         pdf_generated = False
-        try:
-            self._write_pdf(markdown_text, pdf_path)
-            pdf_generated = True
-        except ModuleNotFoundError as exc:
-            self.emit(f"PDF 依赖缺失，已跳过 PDF 导出：{exc}")
+        if report_kind == "all":
+            latest_text = base_markdown_text or self._render_markdown(task, results, candidates)
+            markdown_text = latest_text
+            pdf_generated = self._write_markdown_pdf_pair(latest_text, markdown_path, pdf_path)
+
+        report_outputs = {}
+        generated_output_keys: List[str] = []
+        for key in selected_keys:
+            artifact_markdown_path, artifact_pdf_path, title = self._artifact_paths(output_dir, key)
+            payload = {
+                "markdown_path": str(artifact_markdown_path),
+                "pdf_path": str(artifact_pdf_path),
+                "title": title,
+                "report_kind": key,
+            }
+            text = selected_texts[key]
+            generated = self._write_markdown_pdf_pair(
+                text,
+                artifact_markdown_path,
+                artifact_pdf_path,
+            )
+            payload["pdf_generated"] = generated
+            payload["markdown_generated"] = True
+            if generated:
+                generated_output_keys.append(key)
+            else:
+                payload["pdf_path"] = None
+            report_outputs[key] = payload
+
+        if report_kind != "all":
+            selected_payload = report_outputs[report_kind]
+            markdown_path = Path(selected_payload["markdown_path"])
+            pdf_path_value = selected_payload.get("pdf_path")
+            pdf_path = Path(pdf_path_value) if pdf_path_value else pdf_path
+            pdf_generated = bool(selected_payload.get("pdf_generated"))
+            markdown_text = selected_texts[report_kind]
+
         self.emit("Markdown/PDF 报告已生成" if pdf_generated else "Markdown 报告已生成")
         return {
             "markdown_path": str(markdown_path),
             "pdf_path": str(pdf_path) if pdf_generated else None,
             "content": markdown_text,
             "llm_explanation_used": self._last_llm_explanation_used,
+            "report_kind": report_kind,
+            "output_dir": str(output_dir),
+            "report_outputs": report_outputs,
+            "generated_output_keys": generated_output_keys,
         }
