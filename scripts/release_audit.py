@@ -581,6 +581,68 @@ class ReleaseAudit:
             if gap < 8 or gap > 40:
                 errors.append(f"{theme}/{page_name} 左栏智能体与任务队列间距异常：{gap}px")
 
+        def signal_receiver_count(button: QPushButton) -> int:
+            count = 0
+            for signal_name in ("clicked", "toggled"):
+                signal = getattr(button, signal_name, None)
+                if signal is None:
+                    continue
+                try:
+                    count += button.receivers(signal)
+                except TypeError:
+                    continue
+            return count
+
+        def check_button_bindings() -> None:
+            critical_specs: list[tuple[str, object, str]] = [
+                ("工作台-发送", window, "generate_button"),
+                ("工作台-确认继续", window, "confirm_yes_button"),
+                ("工作台-跳过暂停", window, "confirm_no_button"),
+                ("工作台-示例", window, "example_button"),
+                ("工作台-执行轨迹", window, "trace_button"),
+                ("工作台-刷新知识库", window, "refresh_button"),
+                ("工作台-报告目录", window, "report_dir_button"),
+                ("工作台-打开报告", window, "open_report_button"),
+                ("工作台-导出数据", window, "export_data_button"),
+                ("实时视口-重置", window, "reset_view_button"),
+                ("实时视口-适配", window, "fit_view_button"),
+                ("监控-刷新运行", window, "refresh_runs_button"),
+                ("监控-恢复运行", window, "restore_run_button"),
+                ("候选池-代理初筛", window, "screen_button"),
+                ("候选池-校核所选", window, "evaluate_selected_button"),
+                ("候选池-校核全部", window, "evaluate_all_button"),
+                ("候选池-生成报告", window, "report_button"),
+                ("候选池-重置会话", window, "reset_button"),
+                ("知识库右栏-重建索引", window, "knowledge_right_rebuild_button"),
+                ("知识库右栏-导出快照", window, "knowledge_right_snapshot_button"),
+                ("设置-保存", window, "settings_save_button"),
+                ("设置-重新载入", window, "settings_reload_button"),
+                ("知识库-检索", window.knowledge_widget, "search_button"),
+                ("知识库-上传", window.knowledge_widget, "upload_button"),
+                ("知识库-批量解析", window.knowledge_widget, "batch_button"),
+                ("知识库-重建索引", window.knowledge_widget, "rebuild_button"),
+                ("知识库-导出快照", window.knowledge_widget, "export_snapshot_button"),
+                ("知识库-刷新", window.knowledge_widget, "refresh_button"),
+                ("知识图谱-重置", window.knowledge_widget, "graph_reset_button"),
+                ("知识图谱-放大", window.knowledge_widget, "graph_zoom_in_button"),
+                ("知识图谱-缩小", window.knowledge_widget, "graph_zoom_out_button"),
+                ("知识图谱-标签", window.knowledge_widget, "graph_label_button"),
+            ]
+            for label, owner, attr in critical_specs:
+                button = getattr(owner, attr, None)
+                if not isinstance(button, QPushButton):
+                    errors.append(f"{label} 按钮缺失")
+                    if len(errors) >= 12:
+                        return
+                    continue
+                label_text = plain_text(button.text()) or plain_text(button.toolTip())
+                if not label_text:
+                    errors.append(f"{label} 缺少可见文本或提示")
+                if signal_receiver_count(button) <= 0:
+                    errors.append(f"{label} 未绑定动作")
+                if len(errors) >= 12:
+                    return
+
         def build_runtime_session() -> PipelineSession:
             instruction = "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
             task = TaskParser().parse_instruction(instruction)
@@ -653,6 +715,7 @@ class ReleaseAudit:
             window.resize(1280, 960)
             window.show()
             app.processEvents()
+            check_button_bindings()
             screenshots = 0
             for theme in ["dark", "light"]:
                 set_runtime_theme(theme)
@@ -712,7 +775,7 @@ class ReleaseAudit:
                 os.environ["CSDM_cph_DISABLE_LLM_AUTO"] = previous_llm_auto
 
         detail = (
-            f"深浅主题四页渲染通过，截图 {screenshots} 张"
+            f"深浅主题四页渲染通过，截图 {screenshots} 张，关键按钮绑定完整"
             + (f"，保留目录 {screenshot_root.relative_to(ROOT).as_posix()}" if self.keep_gui_screenshots and screenshot_root else "")
             if not errors
             else "; ".join(errors[:12])
