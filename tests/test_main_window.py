@@ -451,6 +451,31 @@ def test_visible_workbench_buttons_keep_text_inside_layout(monkeypatch) -> None:
         app.processEvents()
 
 
+def test_workbench_input_actions_share_one_compact_row(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window.resize(1280, 960)
+        window.show()
+        app.processEvents()
+
+        widgets = [
+            window.input_line,
+            window.generate_button,
+            window.confirm_yes_button,
+            window.confirm_no_button,
+        ]
+        centers = [widget.mapTo(window, widget.rect().center()).y() for widget in widgets]
+        assert max(centers) - min(centers) <= 2
+        assert window.input_line.width() > window.generate_button.width() * 4
+        assert abs(window.confirm_yes_button.y() - window.generate_button.y()) <= 2
+        assert abs(window.confirm_no_button.y() - window.generate_button.y()) <= 2
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_shell_pages_keep_major_regions_inside_window_across_themes(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()

@@ -326,6 +326,8 @@ class MainWindow(QMainWindow):
 
         self.input_line = QLineEdit()
         self.input_line.setPlaceholderText(self.locale.text("input.placeholder"))
+        self.input_line.setMinimumHeight(40)
+        self.input_line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         self.generate_button = QPushButton(self.locale.text("button.start"))
         self.confirm_yes_button = QPushButton(self.locale.text("button.confirm"))
@@ -484,9 +486,10 @@ class MainWindow(QMainWindow):
 
     def _build_layout(self) -> None:
         input_action_layout = QHBoxLayout()
-        input_action_layout.setSpacing(10)
+        input_action_layout.setContentsMargins(0, 0, 0, 0)
+        input_action_layout.setSpacing(8)
         self.example_button.setText("+")
-        self.example_button.setFixedWidth(46)
+        self.example_button.setFixedSize(42, 40)
         input_action_layout.addWidget(self.example_button)
         input_action_layout.addWidget(self.input_line, 1)
         input_action_layout.addWidget(self.generate_button)
@@ -1742,7 +1745,10 @@ class MainWindow(QMainWindow):
         if variant == "icon":
             button.setFixedSize(30, 28)
         else:
-            button.setMinimumHeight(38)
+            button.setMinimumHeight(40)
+            button.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            if variant in {"primary", "success", "warning", "danger"}:
+                button.setMinimumWidth(84)
         button.setProperty("variant", variant)
 
     def _apply_styles(self) -> None:
