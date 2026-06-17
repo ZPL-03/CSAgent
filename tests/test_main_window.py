@@ -161,6 +161,60 @@ def test_session_data_export_writes_json_and_trace_csv(monkeypatch, tmp_path) ->
         app.processEvents()
 
 
+def test_workbench_non_destructive_buttons_execute_connected_actions(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    monkeypatch.setattr("gui.main_window.RESULTS_DIR", tmp_path)
+    app = _app()
+    window = MainWindow()
+    try:
+        window.example_button.click()
+        assert "外压 30 MPa" in window.input_line.text()
+        assert "生成 12 个候选" in window.input_line.text()
+
+        approvals: list[bool] = []
+        window._respond_confirmation = lambda approved: approvals.append(approved)
+        window.confirm_yes_button.setEnabled(True)
+        window.confirm_no_button.setEnabled(True)
+        window.confirm_yes_button.click()
+        window.confirm_no_button.click()
+        assert approvals == [True, False]
+
+        window.reset_view_button.click()
+        window.fit_view_button.click()
+
+        window.trace_button.click()
+        app.processEvents()
+        assert window.stack.currentWidget() is window.monitor_page
+
+        window.session.workflow_run_id = "RUN_CLICK"
+        window.session.instruction = "按钮点击导出测试"
+        window.session.task = TaskParser().parse_instruction("外压 30 MPa，生成 2 个候选，初筛保留 1 个候选")
+        candidate = _candidate("TMP_1")
+        window.session.candidates = [candidate]
+        window.session.results_by_session_id = {
+            "TMP_1": {
+                "candidate_id": "C1",
+                "session_candidate_id": "TMP_1",
+                "ultimate_pressure_MPa": 42.0,
+                "linear_buckling_pressure_MPa": 31.5,
+                "status": "success",
+                "verdict": "通过",
+            }
+        }
+        window._update_button_states()
+        assert window.export_data_button.isEnabled() is True
+
+        window.export_data_button.click()
+        app.processEvents()
+
+        assert (tmp_path / "session_export_RUN_CLICK.json").exists()
+        assert (tmp_path / "session_trace_RUN_CLICK.csv").exists()
+        assert "数据导出完成" in window.log_widget.toPlainText()
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_loaded_example_keeps_geometry_as_candidate_variables(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
