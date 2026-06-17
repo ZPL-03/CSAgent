@@ -26,6 +26,17 @@ from core.task_contract import (
     task_payload_from_request,
 )
 
+
+def _sanitize_llm_output_excerpt(text: Any) -> str:
+    """清理候选记录中的 LLM 内部标记，保留可审计的自然语言方案内容。"""
+    cleaned = str(text or "")
+    cleaned = re.sub(r"(?is)<think\b[^>]*>.*?</think>", "", cleaned)
+    cleaned = re.sub(r"(?i)</?think\b[^>]*>", "", cleaned)
+    while "\n\n\n" in cleaned:
+        cleaned = cleaned.replace("\n\n\n", "\n\n")
+    return cleaned.strip()
+
+
 class CandidateGenAgent(BaseAgent):
     """候选生成编排器，统一调度 LLM、案例迁移与 DOE 三条路径。"""
 
@@ -569,7 +580,7 @@ class CandidateGenAgent(BaseAgent):
             "rank_score": None,
             "rationale": str(raw.get("rationale", f"{source} 生成候选")),
             "origin_summary": str(raw.get("origin_summary") or raw.get("source_text") or ""),
-            "llm_output_excerpt": raw.get("llm_output_excerpt"),
+            "llm_output_excerpt": _sanitize_llm_output_excerpt(raw.get("llm_output_excerpt")),
             "material_system": material_system,
             "load_conditions": task_payload["load_conditions"],
             "boundary_conditions": task_payload["boundary_conditions"],
@@ -611,7 +622,8 @@ class CandidateGenAgent(BaseAgent):
                         self.llm_backend,
                         {"purpose": "candidate_generation", "desired_count": desired_count},
                     )
-                    excerpt = str(answer).strip()
+                    cleaned_answer = _sanitize_llm_output_excerpt(answer)
+                    excerpt = cleaned_answer.strip()
                     if excerpt:
                         self.emit_event(
                             "llm_candidate_answer",
@@ -633,7 +645,7 @@ class CandidateGenAgent(BaseAgent):
                     usable_items = []
                     for raw in items:
                         if isinstance(raw, dict):
-                            raw["llm_output_excerpt"] = answer
+                            raw["llm_output_excerpt"] = cleaned_answer
                         merged_raw = self._merge_user_facts_into_raw_candidate(task, raw)
                         if self._llm_raw_candidate_is_usable(merged_raw):
                             usable_items.append(merged_raw)

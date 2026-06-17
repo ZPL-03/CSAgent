@@ -433,6 +433,7 @@ def test_llm_candidates_are_extracted_from_engineering_natural_answer(monkeypatc
             assert "需要生成的 LLM 来源候选数量：2" in user_prompt
             assert "pressure hull buckling guidance" in user_prompt
             return (
+                "<think>内部推理不应进入候选审计字段。</think>\n"
                 "## 候选方案\n"
                 "| 编号 | 材料 | 长度(mm) | 半径(mm) | 厚度(mm) | alpha(deg) | beta(deg) | 缺陷比 | 铺层形式 | 推荐理由 |\n"
                 "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
@@ -457,6 +458,8 @@ def test_llm_candidates_are_extracted_from_engineering_natural_answer(monkeypatc
     assert "S01" in candidates[0]["origin_summary"]
     assert "候选方案" in candidates[0]["llm_output_excerpt"]
     assert "END_MARKER" in candidates[0]["llm_output_excerpt"]
+    assert "<think" not in candidates[0]["llm_output_excerpt"].lower()
+    assert "</think>" not in candidates[0]["llm_output_excerpt"].lower()
     assert len(candidates[0]["llm_output_excerpt"]) > 2000
 
 
