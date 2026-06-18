@@ -225,7 +225,7 @@ class ParetoPlotWidget(QWidget):
                 painter.setPen(QPen(colors["best"], 2.2))
                 painter.setBrush(colors["panel"])
                 painter.drawEllipse(best_pt, 7.2, 7.2)
-                self._draw_annotation(painter, colors, best_pt, self.best)
+                self._draw_annotation(painter, colors, plot, best_pt, self.best)
 
             self._draw_axis_labels(painter, colors, plot, "结构面密度 kg/m²", "极限压力 MPa")
             return
@@ -273,17 +273,37 @@ class ParetoPlotWidget(QWidget):
         painter.drawText(QRectF(-plot.height() / 2.0, -9, plot.height(), 18), Qt.AlignmentFlag.AlignCenter, y_label)
         painter.restore()
 
-    def _draw_annotation(self, painter: QPainter, colors: dict[str, QColor], point: QPointF, best: MonitorCasePoint) -> None:
-        text = f"{best.case_id} · {best.ultimate_pressure_MPa:.2f} MPa · {best.weight_kg_per_m2:.2f} kg/m²"
-        metrics = QFontMetrics(self.font())
-        width = min(max(metrics.horizontalAdvance(text) + 24, 180), 330)
-        rect = QRectF(min(point.x() + 16, self.width() - width - 18), max(44, point.y() - 52), width, 42)
+    def _draw_annotation(
+        self,
+        painter: QPainter,
+        colors: dict[str, QColor],
+        plot: QRectF,
+        point: QPointF,
+        best: MonitorCasePoint,
+    ) -> None:
+        text = f"{best.case_id} | {best.ultimate_pressure_MPa:.2f} MPa | {best.weight_kg_per_m2:.2f} kg/m^2"
+        annotation_font = QFont(self.font())
+        annotation_font.setPointSize(9)
+        annotation_font.setBold(True)
+        metrics = QFontMetrics(annotation_font)
+        width = min(max(metrics.horizontalAdvance(text) + 34, 220), min(430, int(plot.width() - 28)))
+        height = 42
+        margin = 14
+        if point.x() < plot.center().x():
+            x = min(plot.right() - width - margin, point.x() + 18)
+        else:
+            x = max(plot.left() + margin, point.x() - width - 18)
+        if point.y() < plot.center().y():
+            y = min(plot.bottom() - height - margin, point.y() + 24)
+        else:
+            y = max(plot.top() + margin, point.y() - height - 24)
+        rect = QRectF(x, y, width, height)
         painter.setBrush(colors["panel"])
         painter.setPen(QPen(colors["best"], 1.6))
         painter.drawRoundedRect(rect, 8, 8)
+        painter.setFont(annotation_font)
         painter.setPen(colors["text"])
         painter.drawText(rect.adjusted(12, 6, -12, -6), Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, text)
-
 
 class MonitorDashboardWidget(QWidget):
     """面向真实案例库的监控页中心看板。"""

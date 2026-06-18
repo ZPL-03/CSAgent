@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-UI_LAYOUT_VERSION = 5
+UI_LAYOUT_VERSION = 7
 
 from PyQt6 import sip
 from PyQt6.QtCore import QObject, QRectF, QSettings, QSize, Qt, QThread, QUrl, pyqtSignal
@@ -64,7 +64,7 @@ from gui.log_widget import LogWidget
 from gui.monitor_widget import MonitorDashboardWidget
 from gui.result_trace_widget import ResultTraceWidget
 from gui.theme import application_stylesheet, install_application_font, resolve_theme
-from gui.workbench_widgets import AgentStatusCard, FlowDagWidget, PipelineStatusWidget, StatusPill
+from gui.workbench_widgets import AgentStatusCard, FlowDagWidget, StatusPill
 from gui.workflow_widget import WorkflowWidget
 from workflow.event_store import WorkflowEventStore
 
@@ -317,7 +317,7 @@ class MainWindow(QMainWindow):
             self.theme_selector.setCurrentIndex(current_theme_index)
 
         self.chat_widget = ChatWidget()
-        self.chat_widget.setMinimumHeight(130)
+        self.chat_widget.setMinimumHeight(220)
         self.chat_widget.set_empty_text(self.locale.text("chat.empty"))
         self._apply_chat_empty_state()
         self.status_label = QLabel(self.locale.text("status.waiting"))
@@ -326,7 +326,7 @@ class MainWindow(QMainWindow):
 
         self.input_line = QLineEdit()
         self.input_line.setPlaceholderText(self.locale.text("input.placeholder"))
-        self.input_line.setMinimumHeight(40)
+        self.input_line.setFixedHeight(44)
         self.input_line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         self.generate_button = QPushButton(self.locale.text("button.start"))
@@ -370,8 +370,15 @@ class MainWindow(QMainWindow):
         self.pending_card = QLabel(self.locale.text("metric.pending_zero"))
         self.pass_card = QLabel(self.locale.text("metric.pass", count=0))
         for metric_card in [self.stage_card, self.candidate_card, self.pending_card, self.pass_card]:
-            metric_card.setMinimumHeight(66)
+            metric_card.setFixedHeight(76)
+            metric_card.setWordWrap(True)
+            metric_card.setTextFormat(Qt.TextFormat.RichText)
+            metric_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             metric_card.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        for metric_card in [self.stage_card, self.pending_card]:
+            metric_card.setMinimumWidth(184)
+        for metric_card in [self.candidate_card, self.pass_card]:
+            metric_card.setMinimumWidth(112)
         self.stats_header = QLabel(self.locale.text("section.session"))
         self.stats_header.setObjectName("sectionTitle")
         self.log_header = QLabel(self.locale.text("section.runtime_log"))
@@ -418,7 +425,7 @@ class MainWindow(QMainWindow):
         self.run_audit_label.setWordWrap(True)
 
         self.workbench_candidate_widget = CandidateWidget(language=self.locale.language)
-        self.workbench_candidate_widget.setMinimumHeight(300)
+        self.workbench_candidate_widget.setMinimumHeight(270)
         self.knowledge_widget = KnowledgeWidget()
         self.result_trace_widget = ResultTraceWidget()
         self.log_widget = LogWidget()
@@ -491,13 +498,14 @@ class MainWindow(QMainWindow):
         input_action_layout = QHBoxLayout()
         input_action_layout.setContentsMargins(0, 0, 0, 0)
         input_action_layout.setSpacing(8)
+        input_action_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         self.example_button.setText("+")
-        self.example_button.setFixedSize(42, 40)
-        input_action_layout.addWidget(self.example_button)
-        input_action_layout.addWidget(self.input_line, 1)
-        input_action_layout.addWidget(self.generate_button)
-        input_action_layout.addWidget(self.confirm_yes_button)
-        input_action_layout.addWidget(self.confirm_no_button)
+        self.example_button.setFixedSize(44, 44)
+        input_action_layout.addWidget(self.example_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        input_action_layout.addWidget(self.input_line, 1, Qt.AlignmentFlag.AlignVCenter)
+        input_action_layout.addWidget(self.generate_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        input_action_layout.addWidget(self.confirm_yes_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        input_action_layout.addWidget(self.confirm_no_button, 0, Qt.AlignmentFlag.AlignVCenter)
         self.input_action_layout = input_action_layout
 
         stats_layout = QGridLayout()
@@ -507,10 +515,18 @@ class MainWindow(QMainWindow):
         stats_layout.addWidget(self.candidate_card, 0, 1)
         stats_layout.addWidget(self.pending_card, 1, 0)
         stats_layout.addWidget(self.pass_card, 1, 1)
+        stats_layout.setColumnMinimumWidth(0, 184)
+        stats_layout.setColumnMinimumWidth(1, 108)
+        stats_layout.setColumnStretch(0, 4)
+        stats_layout.setColumnStretch(1, 2)
+        stats_layout.setRowMinimumHeight(0, 76)
+        stats_layout.setRowMinimumHeight(1, 76)
+        stats_layout.setRowStretch(0, 0)
+        stats_layout.setRowStretch(1, 0)
 
         agent_layout = QVBoxLayout()
-        agent_layout.setContentsMargins(14, 14, 14, 8)
-        agent_layout.setSpacing(10)
+        agent_layout.setContentsMargins(14, 14, 14, 10)
+        agent_layout.setSpacing(11)
         agent_layout.addWidget(self.agent_header)
         for agent_name, description_key in self.AGENT_DESCRIPTIONS:
             card = AgentStatusCard()
@@ -535,15 +551,6 @@ class MainWindow(QMainWindow):
         queue_layout.addWidget(self.run_audit_header)
         queue_layout.addWidget(self.run_audit_label)
 
-        workflow_panel = QWidget()
-        workflow_panel.setObjectName("centerWorkbench")
-        workflow_panel.setMinimumHeight(190)
-        workflow_panel.setMaximumHeight(218)
-        workflow_layout = QVBoxLayout(workflow_panel)
-        workflow_layout.setContentsMargins(0, 0, 0, 0)
-        workflow_layout.setSpacing(0)
-        workflow_layout.addWidget(self.flow_dag_widget, 1)
-
         chat_panel = QWidget()
         chat_panel.setObjectName("conversationPanel")
         chat_layout = QVBoxLayout(chat_panel)
@@ -560,10 +567,9 @@ class MainWindow(QMainWindow):
         chat_layout.addLayout(input_action_layout)
 
         workbench_splitter = QSplitter(Qt.Orientation.Vertical)
-        workbench_splitter.addWidget(workflow_panel)
         workbench_splitter.addWidget(self.workbench_candidate_widget)
         workbench_splitter.addWidget(chat_panel)
-        workbench_splitter.setSizes([150, 360, 350])
+        workbench_splitter.setSizes([430, 455])
         self.workbench_splitter = workbench_splitter
 
         workbench_page = QWidget()
@@ -592,6 +598,8 @@ class MainWindow(QMainWindow):
         action_grid.addWidget(self.evaluate_selected_button, 0, 1)
         action_grid.addWidget(self.evaluate_all_button, 1, 0)
         action_grid.addWidget(self.reset_button, 1, 1)
+        action_grid.setColumnStretch(0, 1)
+        action_grid.setColumnStretch(1, 1)
         right_layout.addLayout(action_grid)
         right_layout.addWidget(self.log_header)
         right_layout.addWidget(self.log_widget, 1)
@@ -619,18 +627,31 @@ class MainWindow(QMainWindow):
 
         workbench_left = QWidget()
         workbench_left.setObjectName("agentRail")
-        left_layout = QVBoxLayout(workbench_left)
+        workbench_left_layout = QVBoxLayout(workbench_left)
+        workbench_left_layout.setContentsMargins(0, 0, 0, 0)
+        workbench_left_layout.setSpacing(0)
+        workbench_left_content = QWidget()
+        left_layout = QVBoxLayout(workbench_left_content)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(0)
+        left_layout.setSpacing(16)
+        left_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         agent_widget = QWidget()
         agent_widget.setLayout(agent_layout)
+        agent_widget.setMinimumHeight(480)
         agent_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         queue_widget = QWidget()
         queue_widget.setLayout(queue_layout)
         queue_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         left_layout.addWidget(agent_widget)
         left_layout.addWidget(queue_widget)
-        left_layout.addStretch(1)
+        workbench_left_scroll = QScrollArea()
+        workbench_left_scroll.setObjectName("railScroll")
+        workbench_left_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        workbench_left_scroll.setWidgetResizable(True)
+        workbench_left_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        workbench_left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        workbench_left_scroll.setWidget(workbench_left_content)
+        workbench_left_layout.addWidget(workbench_left_scroll)
         workbench_left.setMinimumWidth(248)
         workbench_left.setMaximumWidth(286)
 
@@ -700,21 +721,38 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(9)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         header = QLabel(title)
         header.setObjectName("sectionTitle")
         layout.addWidget(header)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(9)
+        content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         for primary, secondary in cards:
             card = QLabel(f"<b>{primary}</b><br>{secondary}")
             card.setObjectName("agentCard")
             card.setWordWrap(True)
             card.setProperty("state", "waiting")
-            layout.addWidget(card)
+            card.setMinimumHeight(56)
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+            content_layout.addWidget(card)
         if footer:
             footer_label = QLabel(footer)
             footer_label.setObjectName("statusLabel")
             footer_label.setWordWrap(True)
-            layout.addWidget(footer_label)
-        layout.addStretch(1)
+            footer_label.setMinimumHeight(58)
+            footer_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+            content_layout.addWidget(footer_label)
+        scroll = QScrollArea()
+        scroll.setObjectName("railScroll")
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
         return page
 
     def _right_page(self, title: str, cards: list[tuple[str, str]], footer_buttons: list[QPushButton] | None = None) -> QWidget:
@@ -745,11 +783,17 @@ class MainWindow(QMainWindow):
         page.setObjectName("agentRail")
         layout = QVBoxLayout(page)
         layout.setContentsMargins(14, 14, 14, 14)
-        layout.setSpacing(9)
+        layout.setSpacing(8)
 
         header = QLabel("知识库 · CORPUS")
         header.setObjectName("sectionTitle")
         layout.addWidget(header)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(8)
+        content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.knowledge_sidebar_labels: dict[str, QLabel] = {}
         for key, title, body in [
@@ -764,13 +808,14 @@ class MainWindow(QMainWindow):
             card.setObjectName("agentCard")
             card.setWordWrap(True)
             card.setProperty("state", "waiting")
-            card.setMinimumHeight(66)
-            layout.addWidget(card)
+            card.setMinimumHeight(72)
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+            content_layout.addWidget(card)
             self.knowledge_sidebar_labels[key] = card
 
         category_header = QLabel("资料分层 · SOURCES")
         category_header.setObjectName("sectionTitle")
-        layout.addWidget(category_header)
+        content_layout.addWidget(category_header)
         for primary, secondary in [
             ("规范与手册", "设计准则 / 工艺约束"),
             ("论文与模型", "屈曲 / 后屈曲 / 代理模型"),
@@ -780,12 +825,13 @@ class MainWindow(QMainWindow):
             card = QLabel(f"<b>{primary}</b><br>{secondary}")
             card.setObjectName("statusLabel")
             card.setWordWrap(True)
-            card.setMinimumHeight(48)
-            layout.addWidget(card)
+            card.setMinimumHeight(50)
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+            content_layout.addWidget(card)
 
         service_header = QLabel("索引服务 · INDEX")
         service_header.setObjectName("sectionTitle")
-        layout.addWidget(service_header)
+        content_layout.addWidget(service_header)
         self.knowledge_index_labels: dict[str, QLabel] = {}
         for key, title, body in [
             ("vector", "向量索引", "等待刷新"),
@@ -795,14 +841,24 @@ class MainWindow(QMainWindow):
             card.setObjectName("statusLabel")
             card.setWordWrap(True)
             card.setMinimumHeight(52)
-            layout.addWidget(card)
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+            content_layout.addWidget(card)
             self.knowledge_index_labels[key] = card
 
         footer = QLabel("最终检索入口读取合并后的 RAG/KG；数值计算、排序和 FEM 结果不由知识库改写。")
         footer.setObjectName("statusLabel")
         footer.setWordWrap(True)
-        layout.addWidget(footer)
-        layout.addStretch(1)
+        footer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        content_layout.addWidget(footer)
+
+        scroll = QScrollArea()
+        scroll.setObjectName("railScroll")
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
         return page
 
     def _refresh_knowledge_sidebar(self) -> None:
@@ -827,23 +883,18 @@ class MainWindow(QMainWindow):
         total_entities = int(merged_status.get("kg_entity_count", 0) or 0)
         total_relations = int(merged_status.get("kg_relation_count", 0) or 0)
         vector_status = str(merged_status.get("vector_status") or "pending")
-        last = merged_status.get("last_ingestion") if isinstance(merged_status.get("last_ingestion"), dict) else {}
-        parser = str(last.get("parser_backend") or "等待上传资料")
-        pipeline = merged_status.get("pipeline") if isinstance(merged_status.get("pipeline"), list) else []
-        active = next((step for step in pipeline if isinstance(step, dict) and step.get("status") == "running"), None)
-        pipeline_text = str(active.get("name")) if isinstance(active, dict) else ("等待用户资料" if runtime_docs == 0 else "索引已生成")
         chunk_size = merged_status.get("chunk_token_size", "-")
         overlap = merged_status.get("chunk_overlap_tokens", "-")
         top_k = merged_status.get("top_k", "-")
         kg_top_k = merged_status.get("kg_top_k", "-")
 
         payload = {
-            "merged": ("合并知识库", f"RAG {total_chunks} 块 · KG {total_entities}/{total_relations}"),
-            "builtin": ("系统资料", f"{builtin_chunks} 块 · {builtin_entities} 实体 · {builtin_relations} 关系"),
+            "merged": ("合并知识库", f"RAG {total_chunks} · KG {total_entities}/{total_relations}"),
+            "builtin": ("系统资料", f"RAG {builtin_chunks} · KG {builtin_entities}/{builtin_relations}"),
             "runtime": ("用户资料", f"{runtime_docs} 文档 · {runtime_chunks} 块 · {runtime_relations} 关系"),
             "cases": ("案例记忆", f"会话 {archive_cases} · 正式 {formal_cases}"),
-            "retrieval": ("检索验证", f"Vector {vector_status} · 文本与图谱联合检索"),
-            "config": ("分块参数", f"chunk {chunk_size} / overlap {overlap} · top_k {top_k}/{kg_top_k}"),
+            "retrieval": ("检索验证", f"Vector {vector_status} · 联合检索"),
+            "config": ("分块参数", f"{chunk_size} / {overlap} · top_k {top_k}/{kg_top_k}"),
         }
         for key, (title, body) in payload.items():
             label = labels.get(key)
@@ -867,25 +918,12 @@ class MainWindow(QMainWindow):
                 "retrieval": ("检索验证", str(verification.get("message") or "等待检索命中")),
                 "vector": ("向量索引", f"{vector_status} · {vector_count} 向量块"),
                 "graph": ("知识图谱", f"{total_entities} 实体 · {total_relations} 关系"),
+                "cases": ("案例记忆", f"会话 {archive_cases} · 正式 {formal_cases}"),
             }
             for key, (title, body) in right_payload.items():
                 label = right_labels.get(key)
                 if label is not None:
                     label.setText(f"<b>{title}</b><br>{body}")
-        right_pipeline = getattr(self, "knowledge_right_pipeline", None)
-        if right_pipeline is not None:
-            if pipeline:
-                right_pipeline.set_steps(pipeline)
-            else:
-                right_pipeline.set_steps(
-                    [
-                        {"name": "MinerU / Docling 文档解析", "status": "pending", "message": "等待用户上传资料"},
-                        {"name": "语义分块", "status": "pending", "message": f"chunk {chunk_size} / overlap {overlap}"},
-                        {"name": "向量化索引", "status": "pending", "message": "等待文本块写入索引"},
-                        {"name": "KG 实体/关系抽取", "status": "pending", "message": "等待实体关系抽取"},
-                        {"name": "检索验证 / 证据引用", "status": "pending", "message": "等待可引用证据"},
-                    ]
-                )
     def _build_monitor_left_page(self) -> QWidget:
         return self._sidebar_page(
             "监控 · RUNS",
@@ -904,10 +942,17 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(14, 14, 14, 14)
         layout.setSpacing(9)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         header = QLabel("设置 · SETTINGS")
         header.setObjectName("sectionTitle")
         layout.addWidget(header)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setSpacing(9)
+        content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
         self.settings_sidebar_labels: dict[str, QLabel] = {}
         for key, title, body in [
@@ -922,15 +967,25 @@ class MainWindow(QMainWindow):
             card.setObjectName("agentCard")
             card.setWordWrap(True)
             card.setProperty("state", "waiting")
-            card.setMinimumHeight(66)
-            layout.addWidget(card)
+            card.setMinimumHeight(68)
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+            content_layout.addWidget(card)
             self.settings_sidebar_labels[key] = card
 
         footer = QLabel("运行事实源为本项目 YAML 配置、.env 环境变量和本地运行数据；GUI 不显示密钥正文。")
         footer.setObjectName("statusLabel")
         footer.setWordWrap(True)
-        layout.addWidget(footer)
-        layout.addStretch(1)
+        footer.setMinimumHeight(62)
+        footer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
+        content_layout.addWidget(footer)
+        scroll = QScrollArea()
+        scroll.setObjectName("railScroll")
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        scroll.setWidget(content)
+        layout.addWidget(scroll, 1)
         return page
 
     def _refresh_settings_sidebar(self) -> None:
@@ -957,6 +1012,7 @@ class MainWindow(QMainWindow):
             "ui": ("界面偏好", f"{self.locale.language} · {self.locale.theme}"),
             "files": ("配置文件", "config/app_config.yaml · config/llm_config.yaml · .env"),
         }
+        values["files"] = (values["files"][0], "YAML 配置 · .env 隔离")
         for key, (title, body) in values.items():
             label = labels.get(key)
             if label is not None:
@@ -978,27 +1034,25 @@ class MainWindow(QMainWindow):
             ("retrieval", "检索验证", "RAG 文本块 + 知识图谱路径命中"),
             ("vector", "向量索引", "等待向量索引状态"),
             ("graph", "知识图谱", "等待实体关系统计"),
+            ("cases", "案例记忆", "等待案例库统计"),
         ]:
             card = QLabel(f"<b>{title}</b><br>{body}")
             card.setObjectName("statusLabel")
             card.setWordWrap(True)
             card.setMinimumHeight(62)
+            card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             layout.addWidget(card)
             self.knowledge_right_labels[key] = card
-
-        self.knowledge_right_pipeline = PipelineStatusWidget("入库流水线 · PIPELINE")
-        self.knowledge_right_pipeline.setMinimumHeight(250)
-        self.knowledge_right_pipeline.setMaximumHeight(292)
-        layout.addWidget(self.knowledge_right_pipeline)
 
         self.knowledge_right_rebuild_button = QPushButton("重建全部索引")
         self.knowledge_right_snapshot_button = QPushButton("导出图谱快照")
         self._set_button_variant(self.refresh_button, "secondary")
         self._set_button_variant(self.knowledge_right_rebuild_button, "primary")
         self._set_button_variant(self.knowledge_right_snapshot_button, "secondary")
-        layout.addWidget(self.refresh_button)
-        layout.addWidget(self.knowledge_right_rebuild_button)
-        layout.addWidget(self.knowledge_right_snapshot_button)
+        for button in [self.refresh_button, self.knowledge_right_rebuild_button, self.knowledge_right_snapshot_button]:
+            button.setMinimumHeight(44)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            layout.addWidget(button)
         layout.addStretch(1)
         return page
 
@@ -1258,19 +1312,14 @@ class MainWindow(QMainWindow):
                 ],
             ),
         ]
-        for row_cards in [(cards[0], cards[1]), (cards[2], cards[3])]:
-            row_height = max(card.minimumHeight() for card in row_cards)
-            for card in row_cards:
-                card.setMinimumHeight(row_height)
-                card.setMaximumHeight(row_height)
         forms_grid = QGridLayout()
         forms_grid.setContentsMargins(0, 0, 0, 0)
         forms_grid.setHorizontalSpacing(12)
         forms_grid.setVerticalSpacing(12)
-        forms_grid.addWidget(cards[0], 0, 0)
-        forms_grid.addWidget(cards[1], 0, 1)
-        forms_grid.addWidget(cards[2], 1, 0)
-        forms_grid.addWidget(cards[3], 1, 1)
+        forms_grid.addWidget(cards[0], 0, 0, Qt.AlignmentFlag.AlignTop)
+        forms_grid.addWidget(cards[1], 0, 1, Qt.AlignmentFlag.AlignTop)
+        forms_grid.addWidget(cards[2], 1, 0, Qt.AlignmentFlag.AlignTop)
+        forms_grid.addWidget(cards[3], 1, 1, Qt.AlignmentFlag.AlignTop)
         forms_grid.setColumnStretch(0, 1)
         forms_grid.setColumnStretch(1, 1)
         content_layout.addLayout(forms_grid)
@@ -1310,9 +1359,9 @@ class MainWindow(QMainWindow):
             key_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             key_label.setFixedHeight(38)
             key_label.setMinimumWidth(92)
-            widget.setMinimumHeight(max(widget.minimumHeight(), 38))
-            layout.addWidget(key_label, 1, column * 2)
-            layout.addWidget(widget, 1, column * 2 + 1)
+            widget.setFixedHeight(38)
+            layout.addWidget(key_label, 1, column * 2, Qt.AlignmentFlag.AlignVCenter)
+            layout.addWidget(widget, 1, column * 2 + 1, Qt.AlignmentFlag.AlignVCenter)
             layout.setColumnStretch(column * 2 + 1, 1)
         layout.setColumnStretch(0, 0)
         layout.setColumnStretch(2, 0)
@@ -1430,6 +1479,7 @@ class MainWindow(QMainWindow):
     def _settings_line(self, key: str, value: object) -> QLineEdit:
         field = QLineEdit(str(value if value is not None else ""))
         field.setObjectName("settingsInput")
+        field.setFixedHeight(38)
         field.setCursorPosition(0)
         self.settings_fields[key] = field
         return field
@@ -1464,6 +1514,7 @@ class MainWindow(QMainWindow):
     def _settings_combo(self, key: str, value: object, options: list[tuple[str, str]]) -> QComboBox:
         combo = QComboBox()
         combo.setObjectName("settingsInput")
+        combo.setFixedHeight(38)
         for label, data in options:
             combo.addItem(label, data)
         target = str(value).lower()
@@ -1502,18 +1553,17 @@ class MainWindow(QMainWindow):
             key_label.setWordWrap(True)
             key_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
             key_label.setMinimumWidth(132)
-            key_label.setMinimumHeight(38)
-            key_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
-            widget.setMinimumHeight(max(widget.minimumHeight(), 38))
+            key_label.setFixedHeight(38)
+            key_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+            widget.setFixedHeight(38)
             form.addWidget(key_label, row_index, 0, Qt.AlignmentFlag.AlignVCenter)
-            form.addWidget(widget, row_index, 1)
+            form.addWidget(widget, row_index, 1, Qt.AlignmentFlag.AlignVCenter)
         form.setColumnStretch(0, 0)
         form.setColumnStretch(1, 1)
         form_widget = QWidget()
         form_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         form_widget.setLayout(form)
         layout.addWidget(form_widget)
-        layout.addStretch(1)
         return card
 
     def _settings_value(self, key: str) -> str:
@@ -1784,6 +1834,19 @@ class MainWindow(QMainWindow):
         self._set_button_variant(self.evaluate_all_button)
         self._set_button_variant(self.report_button, "primary")
         self._set_button_variant(self.reset_button, "danger")
+        for button in [self.screen_button, self.evaluate_selected_button, self.evaluate_all_button, self.reset_button]:
+            button.setMinimumHeight(44)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        for button in [self.report_dir_button, self.report_button, self.export_data_button, self.open_report_button]:
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        for button in [
+            self.refresh_button,
+            getattr(self, "knowledge_right_rebuild_button", None),
+            getattr(self, "knowledge_right_snapshot_button", None),
+        ]:
+            if button is not None:
+                button.setMinimumHeight(44)
+                button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._fit_input_action_buttons()
         self.workflow_widget.set_theme(self.locale.theme)
         self.flow_dag_widget.set_theme(self.locale.theme)
@@ -1793,8 +1856,6 @@ class MainWindow(QMainWindow):
             card.set_theme(self.locale.theme)
         self.live_result_view.set_theme(self.locale.theme)
         self.knowledge_widget.set_theme(self.locale.theme)
-        if hasattr(self, "knowledge_right_pipeline"):
-            self.knowledge_right_pipeline.set_theme(self.locale.theme)
         self.monitor_dashboard_widget.set_theme(self.locale.theme)
         self.chat_widget.set_theme(self.locale.theme)
         self.setStyleSheet(application_stylesheet(self.font_family, self.locale.theme))
@@ -1905,7 +1966,6 @@ class MainWindow(QMainWindow):
             self.knowledge_right_rebuild_button.clicked.connect(lambda: self.knowledge_widget._run_maintenance("rebuild"))
         if hasattr(self, "knowledge_right_snapshot_button"):
             self.knowledge_right_snapshot_button.clicked.connect(lambda: self.knowledge_widget._run_maintenance("export"))
-        self.knowledge_widget.pipelineChanged.connect(self._sync_knowledge_pipeline_steps)
         self.open_report_button.clicked.connect(self._open_latest_report)
         self.export_data_button.clicked.connect(self._export_session_data)
         self.report_dir_button.clicked.connect(self._choose_report_output_dir)
@@ -2014,10 +2074,6 @@ class MainWindow(QMainWindow):
             user_prompt=self.locale.text("chat.empty.user_prompt"),
             agent_title=self.locale.text("chat.empty.agent_title"),
             agent_body=self.locale.text("chat.empty.agent_body"),
-            tool_title=self.locale.text("chat.empty.tool_title"),
-            tool_body=self.locale.text("chat.empty.tool_body"),
-            evidence_a=self.locale.text("chat.empty.evidence_a"),
-            evidence_b=self.locale.text("chat.empty.evidence_b"),
         )
 
     def _set_busy(self, busy: bool, status_text: str) -> None:
@@ -2099,7 +2155,7 @@ class MainWindow(QMainWindow):
             return (
                 f"<span style='color:{label_color};font-size:12px;'>"
                 f"{label}</span><br>"
-                f"<span style='color:{value_color};font-size:18px;font-weight:800;'>"
+                f"<span style='color:{value_color};font-size:17px;font-weight:800;'>"
                 f"{value}</span>"
             )
 
@@ -2565,11 +2621,6 @@ class MainWindow(QMainWindow):
         self.knowledge_widget.refresh(self.session.task)
         self._refresh_knowledge_sidebar()
         self.status_label.setText(self.locale.text("status.knowledge_refreshed"))
-
-    def _sync_knowledge_pipeline_steps(self, steps: list) -> None:
-        right_pipeline = getattr(self, "knowledge_right_pipeline", None)
-        if right_pipeline is not None:
-            right_pipeline.set_steps(steps)
 
     def _choose_report_output_dir(self) -> None:
         initial_dir = str(self.report_output_dir or RESULTS_DIR)

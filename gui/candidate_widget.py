@@ -10,11 +10,9 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QGridLayout,
     QHeaderView,
-    QFrame,
     QLabel,
     QSizePolicy,
     QSplitter,
-    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -78,30 +76,16 @@ class CandidateWidget(QWidget):
         self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
         self.table.setSelectionMode(QTableWidget.SelectionMode.ExtendedSelection)
         self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        self.table.verticalHeader().setVisible(False)
+        self.table.setCornerButtonEnabled(False)
         self.table.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         for column, width in enumerate([92, 104, 118, 100, 112, 118, 116, 98]):
             self.table.setColumnWidth(column, width)
         self.table.itemSelectionChanged.connect(self._refresh_detail)
-
-        self.empty_state = QFrame()
-        self.empty_state.setObjectName("configCard")
-        empty_layout = QVBoxLayout(self.empty_state)
-        empty_layout.setContentsMargins(16, 14, 16, 14)
-        empty_layout.setSpacing(8)
-        self.empty_title = QLabel(tr("candidate.empty", language=self.language))
-        self.empty_title.setObjectName("configCardTitle")
-        self.empty_body = QLabel(tr("candidate.empty_body", language=self.language))
-        self.empty_body.setObjectName("configSubtitle")
-        self.empty_body.setWordWrap(True)
-        empty_layout.addWidget(self.empty_title)
-        empty_layout.addWidget(self.empty_body)
-
-        self.table_stack = QStackedWidget()
-        self.table_stack.addWidget(self.empty_state)
-        self.table_stack.addWidget(self.table)
-        self.table_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        self.table_stack.setMaximumHeight(136)
+        self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self.summary_label = QLabel(tr("candidate.empty", language=self.language))
         self.summary_label.setWordWrap(True)
@@ -127,16 +111,20 @@ class CandidateWidget(QWidget):
         self.detail_browser = QTextBrowser()
         self.audit_browser = QTextBrowser()
         self.detail_tabs = QTabWidget()
+        self.detail_tabs.setObjectName("candidateDetailTabs")
+        self.detail_tabs.setDocumentMode(True)
         self.detail_tabs.addTab(self.detail_browser, tr("candidate.tab.detail", language=self.language))
         self.detail_tabs.addTab(self.audit_browser, tr("candidate.tab.audit", language=self.language))
+        self.detail_tabs.tabBar().setExpanding(True)
+        self.detail_tabs.tabBar().setUsesScrollButtons(False)
         self.detail_tabs.setMaximumHeight(300)
 
         splitter = QSplitter()
-        splitter.addWidget(self.table_stack)
+        splitter.addWidget(self.table)
         splitter.addWidget(self.detail_tabs)
         splitter.setChildrenCollapsible(False)
         splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        splitter.setSizes([760, 540])
+        splitter.setSizes([820, 480])
         self.splitter = splitter
 
         layout = QVBoxLayout(self)
@@ -164,12 +152,10 @@ class CandidateWidget(QWidget):
         self.table.setHorizontalHeaderLabels(self._headers())
         self.detail_tabs.setTabText(0, tr("candidate.tab.detail", language=self.language))
         self.detail_tabs.setTabText(1, tr("candidate.tab.audit", language=self.language))
-        self.empty_title.setText(tr("candidate.empty", language=self.language))
-        self.empty_body.setText(tr("candidate.empty_body", language=self.language))
         self._update_metric_cards()
         if not self.candidates:
             self.summary_label.setText(tr("candidate.empty", language=self.language))
-            self.detail_browser.setHtml(f"<p>{tr('candidate.empty', language=self.language)}</p>")
+            self.detail_browser.setHtml(self._empty_detail_html())
             self.audit_browser.setHtml(self._generation_audit_html({}))
 
     def _source_counter(self) -> dict[str, int]:
@@ -249,31 +235,24 @@ class CandidateWidget(QWidget):
             f"{reasons_html}"
         )
 
+    def _empty_detail_html(self) -> str:
+        title = escape(tr("candidate.empty", language=self.language))
+        body = escape(tr("candidate.empty_body", language=self.language))
+        return f"<h4>{title}</h4><p>{body}</p>"
+
     def update_candidates(self, candidates: Iterable[dict], results_by_session_id: dict[str, dict] | None = None) -> None:
         self.candidates = list(candidates)
         if results_by_session_id is not None:
             self.results_by_session_id = dict(results_by_session_id)
 
         self.table.setRowCount(len(self.candidates))
-        self.table_stack.setCurrentIndex(1 if self.candidates else 0)
-        if self.candidates:
-            self.setMinimumHeight(260)
-            self.setMaximumHeight(16777215)
-            self.metric_widget.setVisible(True)
-            self.table_stack.setMaximumHeight(16777215)
-            self.table_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-            self.detail_tabs.setMaximumHeight(16777215)
-            self.detail_tabs.setVisible(True)
-            self.splitter.setSizes([760, 540])
-        else:
-            self.setMinimumHeight(132)
-            self.setMaximumHeight(156)
-            self.metric_widget.setVisible(False)
-            self.table_stack.setMaximumHeight(130)
-            self.table_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-            self.detail_tabs.setMaximumHeight(16777215)
-            self.detail_tabs.setVisible(False)
-            self.splitter.setSizes([1200, 0])
+        self.setMinimumHeight(260)
+        self.setMaximumHeight(16777215)
+        self.metric_widget.setVisible(True)
+        self.table.setVisible(True)
+        self.detail_tabs.setMaximumHeight(16777215)
+        self.detail_tabs.setVisible(True)
+        self.splitter.setSizes([760, 540])
         source_counter: dict[str, int] = {}
 
         for row, candidate in enumerate(self.candidates):
@@ -298,6 +277,7 @@ class CandidateWidget(QWidget):
             ]
             for col, value in enumerate(values):
                 item = QTableWidgetItem(str(value))
+                item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 if screening_selected is False and not result:
                     item.setForeground(QColor("#8796aa"))
                     item.setToolTip("未进入默认 Top-K 校核队列；仍可人工选择进入 FEM 校核。")
@@ -319,12 +299,13 @@ class CandidateWidget(QWidget):
         if self.candidates:
             self.table.selectRow(0)
         else:
-            self.detail_browser.setHtml(f"<p>{tr('candidate.empty', language=self.language)}</p>")
+            self.detail_browser.setHtml(self._empty_detail_html())
             self.audit_browser.setHtml(self._generation_audit_html({}))
+        self._sync_detail_tab_widths()
 
     def reset_view(self) -> None:
         if hasattr(self, "detail_browser"):
-            self.detail_browser.setHtml(f"<p>{tr('candidate.empty', language=self.language)}</p>")
+            self.detail_browser.setHtml(self._empty_detail_html())
         if hasattr(self, "audit_browser"):
             self.audit_browser.setHtml(self._generation_audit_html({}))
 
@@ -424,3 +405,17 @@ class CandidateWidget(QWidget):
             f"{result_html}"
         )
         self.detail_browser.setHtml(html)
+
+    def _sync_detail_tab_widths(self) -> None:
+        if not hasattr(self, "detail_tabs"):
+            return
+        width = max(104, (max(220, self.detail_tabs.width()) - 8) // 2)
+        self.detail_tabs.setStyleSheet(
+            "QTabWidget#candidateDetailTabs QTabBar::tab {"
+            f"min-width: {width}px; max-width: {width}px;"
+            "}"
+        )
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._sync_detail_tab_widths()

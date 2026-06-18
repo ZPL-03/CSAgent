@@ -45,7 +45,7 @@ class AgentStatusCard(QFrame):
         self.state = "waiting"
         self.setObjectName("agentStatusCard")
         self.setProperty("state", self.state)
-        self.setMinimumHeight(66)
+        self.setFixedHeight(60)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         self.dot = QLabel()
@@ -73,7 +73,7 @@ class AgentStatusCard(QFrame):
         text_layout.addWidget(self.detail)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 10, 14, 10)
+        layout.setContentsMargins(14, 8, 14, 8)
         layout.setSpacing(0)
         layout.addLayout(text_layout, 1)
 
@@ -311,8 +311,8 @@ class FlowDagWidget(QWidget):
         self.agent_states: dict[str, str] = {node.agent: "waiting" for node in self.MAIN_NODES}
         self.agent_states["KNOWLEDGE_AGENT"] = "waiting"
         self.stage_text = "等待任务输入"
-        self.setMinimumHeight(178)
-        self.setMaximumHeight(206)
+        self.setMinimumHeight(174)
+        self.setMaximumHeight(202)
 
     def sizeHint(self) -> QSize:
         return QSize(1040, 194)

@@ -86,15 +86,21 @@ def test_candidate_widget_metrics_span_above_table_and_detail() -> None:
     try:
         assert widget.layout().itemAt(0).widget() is widget.metric_widget
         assert widget.layout().itemAt(1).widget() is widget.splitter
-        assert widget.splitter.widget(0) is widget.table_stack
+        assert widget.splitter.widget(0) is widget.table
         assert widget.splitter.widget(1) is widget.detail_tabs
         assert widget.metric_widget.maximumHeight() <= 64
+        assert widget.metric_widget.isHidden() is False
+        assert widget.detail_tabs.isHidden() is False
+        assert widget.table.isHidden() is False
+        assert widget.table.rowCount() == 0
+        assert widget.total_metric.text().endswith("0")
+        assert "候选来源与去重审计" in widget.audit_browser.toHtml()
 
         widget.update_candidates([_candidate()])
         assert widget.metric_widget.isHidden() is False
         assert widget.detail_tabs.isHidden() is False
         assert widget.total_metric.maximumHeight() == 52
-        assert widget.table_stack.currentWidget() is widget.table
+        assert widget.table.rowCount() == 1
     finally:
         widget.close()
         app.processEvents()

@@ -364,6 +364,16 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         border-left: 4px solid {color["agent_active"]};
         color: {color["agent_text"]};
     }}
+    QScrollArea#railScroll {{
+        background: transparent;
+        border: 0;
+    }}
+    QScrollArea#railScroll > QWidget {{
+        background: transparent;
+    }}
+    QScrollArea#railScroll QWidget {{
+        background: transparent;
+    }}
     QWidget#centerWorkbench QTextBrowser {{
         background: transparent;
     }}

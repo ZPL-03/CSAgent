@@ -136,7 +136,7 @@ class KnowledgeGraphView(QWidget):
         self._last_node_radii: dict[str, float] = {}
         self._selected_node_name = ""
         self._hovered_node_name = ""
-        self.setMinimumHeight(300)
+        self.setMinimumHeight(360)
         self.setMinimumWidth(560)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMouseTracking(True)
@@ -509,8 +509,8 @@ class KnowledgeGraphView(QWidget):
         main_component = components[0]
         has_side_components = len(components) > 1 and graph_rect.width() >= 520
         main_center = QPointF(graph_center.x() - (graph_rect.width() * 0.08 if has_side_components else 0), graph_center.y())
-        main_rx = max(96.0, graph_rect.width() * (0.30 if has_side_components else 0.40)) * self._scale
-        main_ry = max(58.0, graph_rect.height() * 0.28) * self._scale
+        main_rx = max(120.0, graph_rect.width() * (0.36 if has_side_components else 0.46)) * self._scale
+        main_ry = max(72.0, graph_rect.height() * 0.34) * self._scale
         place_component(main_component, main_center, main_rx, main_ry)
 
         small_components = components[1:]
@@ -540,7 +540,7 @@ class KnowledgeGraphView(QWidget):
     def _fit_positions_to_rect(self, positions: dict[str, QPointF], graph_rect: QRectF) -> dict[str, QPointF]:
         if len(positions) < 2:
             return positions
-        padding = 54.0
+        padding = 34.0
         min_x = min(point.x() for point in positions.values())
         max_x = max(point.x() for point in positions.values())
         min_y = min(point.y() for point in positions.values())
@@ -549,85 +549,24 @@ class KnowledgeGraphView(QWidget):
         height = max(1.0, max_y - min_y)
         available_width = max(1.0, graph_rect.width() - padding * 2.0)
         available_height = max(1.0, graph_rect.height() - padding * 2.0)
-        factor = min(1.0, available_width / width, available_height / height)
+        factor = min(1.72, available_width / width, available_height / height)
+        vertical_factor = min(1.78, max(factor, available_height / height * 0.82))
         current_center = QPointF((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
-        target_center = QPointF(graph_rect.center().x(), graph_rect.center().y() - min(14.0, graph_rect.height() * 0.08))
+        vertical_offset = min(44.0, graph_rect.height() * 0.11)
+        target_center = QPointF(graph_rect.center().x(), graph_rect.center().y() - vertical_offset)
         fitted: dict[str, QPointF] = {}
+        safe_left = graph_rect.left() + 34.0
+        safe_right = graph_rect.right() - 34.0
+        safe_top = graph_rect.top() + 37.0
+        safe_bottom = graph_rect.bottom() - 34.0
         for name, point in positions.items():
+            x = target_center.x() + (point.x() - current_center.x()) * factor
+            y = target_center.y() + (point.y() - current_center.y()) * vertical_factor
             fitted[name] = QPointF(
-                target_center.x() + (point.x() - current_center.x()) * factor,
-                target_center.y() + (point.y() - current_center.y()) * factor,
+                min(max(x, safe_left), safe_right),
+                min(max(y, safe_top), safe_bottom),
             )
         return fitted
-
-    def _component_groups(
-        self,
-        visible_nodes: list[tuple[str, str]],
-        visible_relations: list[dict[str, Any]],
-    ) -> list[list[str]]:
-        node_names = {name for name, _entity_type in visible_nodes}
-        adjacency: dict[str, set[str]] = {name: set() for name in node_names}
-        for relation in visible_relations:
-            source = str(relation.get("source") or "").strip()
-            target = str(relation.get("target") or "").strip()
-            if source in adjacency and target in adjacency:
-                adjacency[source].add(target)
-                adjacency[target].add(source)
-        groups: list[list[str]] = []
-        seen: set[str] = set()
-        for name in sorted(node_names):
-            if name in seen:
-                continue
-            stack = [name]
-            seen.add(name)
-            group: list[str] = []
-            while stack:
-                current = stack.pop()
-                group.append(current)
-                for neighbor in sorted(adjacency.get(current, set())):
-                    if neighbor not in seen:
-                        seen.add(neighbor)
-                        stack.append(neighbor)
-            groups.append(group)
-        return sorted(groups, key=lambda item: (-len(item), item[0] if item else ""))
-
-    def _draw_component_halos(
-        self,
-        painter: QPainter,
-        groups: list[list[str]],
-        positions: dict[str, QPointF],
-        visible_nodes: list[tuple[str, str]],
-        graph_rect: QRectF,
-        colors: dict[str, QColor],
-    ) -> None:
-        type_by_name = {name: entity_type for name, entity_type in visible_nodes}
-        painter.save()
-        for group_index, group in enumerate(groups[:6]):
-            group_points = [positions[name] for name in group if name in positions]
-            if len(group_points) < 2:
-                continue
-            min_x = min(point.x() for point in group_points)
-            max_x = max(point.x() for point in group_points)
-            min_y = min(point.y() for point in group_points)
-            max_y = max(point.y() for point in group_points)
-            halo_rect = QRectF(min_x, min_y, max_x - min_x, max_y - min_y).adjusted(-34, -28, 34, 30)
-            halo_rect = halo_rect.intersected(graph_rect.adjusted(4, 4, -4, -4))
-            if halo_rect.width() < 34 or halo_rect.height() < 28:
-                continue
-            type_counts: dict[str, int] = {}
-            for name in group:
-                entity_type = type_by_name.get(name, "Entity")
-                type_counts[entity_type] = type_counts.get(entity_type, 0) + 1
-            dominant_type = sorted(type_counts.items(), key=lambda item: (-item[1], item[0]))[0][0]
-            accent = self._type_color(dominant_type)
-            fill = QColor(accent)
-            fill.setAlpha(16 if self.theme == "light" else 18)
-            pen_color = QColor(accent)
-            pen_color.setAlpha(44 if group_index == 0 else 30)
-            painter.setBrush(QBrush(fill))
-            painter.setPen(QPen(pen_color, 1.0))
-            painter.drawRoundedRect(halo_rect, 18, 18)
-        painter.restore()
 
     def _draw_grid(self, painter: QPainter, rect: QRectF, color: QColor) -> None:
         painter.save()
@@ -646,7 +585,9 @@ class KnowledgeGraphView(QWidget):
 
     def _draw_background(self, painter: QPainter, panel: QRectF, graph_rect: QRectF, colors: dict[str, QColor]) -> None:
         painter.save()
-        painter.setPen(QPen(colors["border"], 1.0))
+        border = QColor(colors["border"])
+        border.setAlpha(86 if self.theme == "light" else 78)
+        painter.setPen(QPen(border, 0.9))
         painter.setBrush(QBrush(colors["panel"]))
         painter.drawRoundedRect(panel, 12, 12)
 
@@ -661,7 +602,7 @@ class KnowledgeGraphView(QWidget):
             glow.setColorAt(1.0, QColor(15, 23, 42, 0))
         painter.setPen(Qt.PenStyle.NoPen)
         painter.setBrush(QBrush(glow))
-        painter.drawRoundedRect(graph_rect, 10, 10)
+        painter.drawRect(graph_rect.adjusted(1.0, 1.0, -1.0, -1.0))
         painter.restore()
 
     def _draw_node(
@@ -741,13 +682,13 @@ class KnowledgeGraphView(QWidget):
         curve = 6.0 if not highlight else 26.0
         control = QPointF((source.x() + target.x()) / 2.0 + normal.x() * curve, (source.y() + target.y()) / 2.0 + normal.y() * curve)
 
-        painter.setPen(QPen(color, 1.9 if highlight else 0.24, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.setPen(QPen(color, 1.05 if highlight else 0.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         path = QPainterPath(source)
         path.quadTo(control, target)
         painter.drawPath(path)
 
         if show_arrow:
-            arrow_len = 7.0 if highlight else 5.6
+            arrow_len = 5.4 if highlight else 4.2
             angle = math.atan2(target.y() - control.y(), target.x() - control.x())
             arrow = QPolygonF(
                 [
@@ -838,7 +779,7 @@ class KnowledgeGraphView(QWidget):
         painter.setFont(font)
         metrics = QFontMetrics(font)
         x = self.width() - 18.0
-        y = 14.0
+        y = 8.0
         for entity_type, count in reversed(items):
             label = f"{entity_type} {count}"
             width = metrics.horizontalAdvance(label) + 22
@@ -860,7 +801,7 @@ class KnowledgeGraphView(QWidget):
         painter.fillRect(self.rect(), colors["bg"])
 
         panel = QRectF(1, 1, self.width() - 2, self.height() - 2)
-        graph_rect = panel.adjusted(18, 24, -18, -56)
+        graph_rect = panel.adjusted(14, 26, -14, -12)
         self._draw_background(painter, panel, graph_rect, colors)
         self._draw_grid(painter, graph_rect, colors["grid"])
 
@@ -888,15 +829,6 @@ class KnowledgeGraphView(QWidget):
         self._last_node_positions = positions
         degrees = self._visible_degrees(visible_relations)
         counts = self._entity_counts()
-        self._draw_component_halos(
-            painter,
-            self._component_groups(visible_nodes, visible_relations),
-            positions,
-            visible_nodes,
-            graph_rect,
-            colors,
-        )
-
         highlighted = {
             (
                 str(relation.get("source") or ""),
@@ -934,7 +866,7 @@ class KnowledgeGraphView(QWidget):
         label_font.setPointSize(8)
         label_font.setBold(True)
         label_metrics = QFontMetrics(label_font)
-        label_budget = 3 if len(visible_nodes) > 24 else 5
+        label_budget = min(len(visible_nodes), 7 if len(visible_nodes) <= 16 else 9)
         ranked_label_names = {
             name
             for name, _entity_type in sorted(
@@ -1184,10 +1116,10 @@ class KnowledgeWidget(QWidget):
         self.source_overview_scroll = self._scrollable_panel(self.source_overview_label)
 
         self.pipeline_widget = PipelineStatusWidget("入库流水线 · PIPELINE")
-        self.pipeline_widget.setMinimumHeight(172)
-        self.pipeline_widget.setMaximumHeight(204)
+        self.pipeline_widget.setMinimumHeight(174)
+        self.pipeline_widget.setMaximumHeight(188)
         self.graph_view = KnowledgeGraphView()
-        self.graph_view.setMinimumHeight(340)
+        self.graph_view.setMinimumHeight(560)
         self.graph_summary_label = QLabel("核心图谱等待知识库数据")
         self.graph_summary_label.setObjectName("graphSummaryLabel")
         self.graph_summary_label.setWordWrap(True)
@@ -1228,7 +1160,7 @@ class KnowledgeWidget(QWidget):
         self.graph_detail_browser.setOpenExternalLinks(False)
         self._configure_panel_browser(self.graph_detail_browser)
         self.graph_detail_browser.setMinimumWidth(220)
-        self.graph_detail_browser.setMinimumHeight(118)
+        self.graph_detail_browser.setMinimumHeight(74)
         self.graph_type_chip_layout: QGridLayout | None = None
         self.graph_relation_chip_layout: QGridLayout | None = None
         self.graph_type_chip_buttons: list[QPushButton] = []
@@ -1236,13 +1168,13 @@ class KnowledgeWidget(QWidget):
         self.evidence_browser = QTextBrowser()
         self.evidence_browser.setOpenExternalLinks(True)
         self._configure_panel_browser(self.evidence_browser)
-        self.evidence_browser.setMinimumHeight(118)
+        self.evidence_browser.setMinimumHeight(74)
         self.summary_label = self._make_panel_label()
         self.summary_scroll = self._scrollable_panel(self.summary_label)
         self._summary_html_cache = ""
         for overview_scroll in [self.summary_scroll, self.source_overview_scroll, self.document_overview_scroll]:
-            overview_scroll.setMinimumHeight(68)
-            overview_scroll.setMaximumHeight(84)
+            overview_scroll.setMinimumHeight(58)
+            overview_scroll.setMaximumHeight(72)
             overview_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self._build_layout()
@@ -1386,7 +1318,7 @@ class KnowledgeWidget(QWidget):
 
         overview_panel = QFrame()
         overview_panel.setObjectName("knowledgeOverviewPanel")
-        overview_panel.setMinimumHeight(122)
+        overview_panel.setMinimumHeight(124)
         overview_panel.setMaximumHeight(138)
         overview_layout = QHBoxLayout(overview_panel)
         overview_layout.setContentsMargins(10, 10, 10, 10)
@@ -1398,6 +1330,7 @@ class KnowledgeWidget(QWidget):
 
         graph_panel = QFrame()
         graph_panel.setObjectName("knowledgeGraphPanel")
+        graph_panel.setMinimumHeight(680)
         graph_layout = QVBoxLayout(graph_panel)
         graph_layout.setContentsMargins(12, 12, 12, 12)
         graph_layout.setSpacing(10)
@@ -1440,12 +1373,11 @@ class KnowledgeWidget(QWidget):
         self.graph_relation_chip_layout.setHorizontalSpacing(6)
         self.graph_relation_chip_layout.setVerticalSpacing(6)
         graph_layout.addWidget(graph_filter_panel, 0)
-        graph_layout.addWidget(self.graph_view, 1)
+        graph_layout.addWidget(self.graph_view, 2)
 
         evidence_panel = QFrame()
         evidence_panel.setObjectName("knowledgeEvidencePanel")
-        evidence_panel.setMinimumHeight(194)
-        evidence_panel.setMaximumHeight(224)
+        evidence_panel.setMinimumHeight(220)
         evidence_layout = QVBoxLayout(evidence_panel)
         evidence_layout.setContentsMargins(12, 12, 12, 12)
         evidence_layout.setSpacing(8)
@@ -1458,7 +1390,7 @@ class KnowledgeWidget(QWidget):
         evidence_splitter.addWidget(titled_panel("图谱审计", self.graph_detail_browser))
         evidence_splitter.addWidget(titled_panel("混合检索结果", self.evidence_browser))
         evidence_splitter.setChildrenCollapsible(False)
-        evidence_splitter.setMinimumHeight(144)
+        evidence_splitter.setMinimumHeight(132)
         evidence_splitter.setSizes([360, 720])
         evidence_splitter.setStretchFactor(0, 0)
         evidence_splitter.setStretchFactor(1, 1)
@@ -1466,11 +1398,12 @@ class KnowledgeWidget(QWidget):
 
         main = QWidget()
         main.setMinimumWidth(0)
+        main.setMinimumHeight(1048)
         main_layout = QVBoxLayout(main)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(10)
         main_layout.addWidget(overview_panel, 0)
-        main_layout.addWidget(graph_panel, 1)
+        main_layout.addWidget(graph_panel, 2)
         main_layout.addWidget(evidence_panel, 0)
 
         layout = QVBoxLayout(self)
@@ -1479,7 +1412,15 @@ class KnowledgeWidget(QWidget):
         layout.addLayout(top_layout)
         layout.addLayout(action_layout)
         layout.addLayout(pill_layout)
-        layout.addWidget(main, 1)
+        main_scroll = QScrollArea()
+        main_scroll.setObjectName("knowledgeMainScroll")
+        main_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        main_scroll.setWidgetResizable(True)
+        main_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        main_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        main_scroll.setStyleSheet("background: transparent; border: none;")
+        main_scroll.setWidget(main)
+        layout.addWidget(main_scroll, 1)
 
     def _connect_signals(self) -> None:
         self.search_button.clicked.connect(self._search_from_input)
@@ -2089,12 +2030,12 @@ class KnowledgeWidget(QWidget):
         builtin_relations = int(status.get("builtin_kg_relation_count", 0) or 0)
         runtime_relations = int(status.get("runtime_kg_relation_count", 0) or 0)
         display_lines = [
-            "项目知识库由内置数据和用户增量组成，检索入口读取合并后的总 RAG/KG。",
             f"内置数据：{builtin_chunks} 文本块，{status.get('builtin_kg_entity_count', 0)} 实体，{builtin_relations} 关系。",
             f"用户增量：{doc_count} 文档，{runtime_chunks} 文本块，{runtime_relations} 关系。",
             f"合并索引：{status.get('rag_chunk_count', 0)} 文本块，{status.get('kg_entity_count', 0)} 实体，"
             f"{status.get('kg_relation_count', 0)} 关系。",
             f"案例记忆：会话案例 {len(archive_cases)}，正式案例 {len(formal_cases)}，ODB {odb_count}，云图 {vis_count}。",
+            f"分块：{chunk_size} token / overlap {overlap}；Vector：{status.get('vector_status') or '-'}。",
         ]
         display_html = [
             "<p>项目知识库由内置数据和用户增量组成，检索入口读取合并后的总 RAG/KG。</p>",
@@ -2138,6 +2079,8 @@ class KnowledgeWidget(QWidget):
                     f"用户增量：{runtime_docs} 文档，{runtime_chunks} 文本块，{runtime_relations} 关系。",
                     f"合并索引：{status.get('rag_chunk_count', 0)} 文本块，{status.get('kg_entity_count', 0)} 实体，"
                     f"{status.get('kg_relation_count', 0)} 关系。",
+                    f"案例记忆：会话案例 {len(list(CASES_DIR.glob('CASE_*.json')))}，"
+                    f"正式案例 {len(list(CASE_LIBRARY_DIR.glob('CASE_*.json')))}。",
                     f"向量状态：{vector_status}；chunk {status.get('chunk_token_size', '-')} / "
                     f"overlap {status.get('chunk_overlap_tokens', '-')}。",
                 ]
