@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-UI_LAYOUT_VERSION = 7
+UI_LAYOUT_VERSION = 8
 
 from PyQt6 import sip
 from PyQt6.QtCore import QObject, QRectF, QSettings, QSize, Qt, QThread, QUrl, pyqtSignal
@@ -1919,11 +1919,27 @@ class MainWindow(QMainWindow):
     def _resize_to_available_work_area(self) -> None:
         self.resize(self._target_window_size())
 
-    def _ensure_window_within_work_area(self) -> None:
+    def _ensure_window_within_work_area(self, *, clamp_to_target: bool = False) -> None:
         screen = self.screen() or QApplication.primaryScreen()
         if screen is None:
             return
         available = screen.availableGeometry()
+        target = self._target_window_size()
+        if clamp_to_target:
+            aspect = self.width() / max(1, self.height())
+            target_aspect = target.width() / max(1, target.height())
+            abnormal_aspect = aspect > max(1.72, target_aspect + 0.18)
+            oversized = self.width() > target.width() or self.height() > target.height()
+            if self.isMaximized() and (abnormal_aspect or oversized):
+                self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMaximized)
+            if abnormal_aspect:
+                width = min(target.width(), available.width())
+                height = min(target.height(), available.height())
+                self.resize(width, height)
+            else:
+                width = min(self.width(), target.width(), available.width())
+                height = min(self.height(), target.height(), available.height())
+                self.resize(width, height)
         if self.width() > available.width() or self.height() > available.height():
             self.resize(
                 min(self.width(), available.width()),
@@ -1942,15 +1958,19 @@ class MainWindow(QMainWindow):
     def _restore_window_layout(self) -> None:
         if int(self.ui_state_settings.value("layout_version", 0) or 0) != UI_LAYOUT_VERSION:
             self.ui_state_settings.clear()
-            self._ensure_window_within_work_area()
+            self._resize_to_available_work_area()
+            self._ensure_window_within_work_area(clamp_to_target=True)
             return
         geometry = self.ui_state_settings.value("window_geometry")
         state = self.ui_state_settings.value("window_state")
+        geometry_restored = False
         if geometry:
-            self.restoreGeometry(geometry)
+            geometry_restored = self.restoreGeometry(geometry)
         if state:
             self.restoreState(state)
-        self._ensure_window_within_work_area()
+        if not geometry_restored:
+            self._resize_to_available_work_area()
+        self._ensure_window_within_work_area(clamp_to_target=True)
 
     def _save_window_layout(self) -> None:
         self.ui_state_settings.setValue("layout_version", UI_LAYOUT_VERSION)
@@ -3135,7 +3155,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     install_application_font(app)
     window = MainWindow()
-    window._ensure_window_within_work_area()
+    window._ensure_window_within_work_area(clamp_to_target=True)
     window.show()
     return app.exec()
 

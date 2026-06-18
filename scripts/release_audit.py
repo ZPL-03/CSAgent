@@ -499,7 +499,10 @@ class ReleaseAudit:
 
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
         previous_llm_auto = os.environ.get("CSDM_cph_DISABLE_LLM_AUTO")
+        previous_ui_settings = os.environ.get("CSDM_cph_UI_SETTINGS")
+        ui_settings_temp_dir = tempfile.TemporaryDirectory(prefix="csagent_ui_settings_")
         os.environ["CSDM_cph_DISABLE_LLM_AUTO"] = "1"
+        os.environ["CSDM_cph_UI_SETTINGS"] = str(Path(ui_settings_temp_dir.name) / "ui_settings.json")
 
         from PyQt6.QtCore import QPoint, QRect, Qt
         from PyQt6.QtGui import QColor
@@ -824,6 +827,11 @@ class ReleaseAudit:
                 os.environ.pop("CSDM_cph_DISABLE_LLM_AUTO", None)
             else:
                 os.environ["CSDM_cph_DISABLE_LLM_AUTO"] = previous_llm_auto
+            if previous_ui_settings is None:
+                os.environ.pop("CSDM_cph_UI_SETTINGS", None)
+            else:
+                os.environ["CSDM_cph_UI_SETTINGS"] = previous_ui_settings
+            ui_settings_temp_dir.cleanup()
 
         detail = (
             f"深浅主题四页渲染通过，截图 {screenshots} 张，关键按钮绑定完整，对话气泡布局紧凑"

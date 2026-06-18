@@ -466,6 +466,36 @@ def test_main_window_initial_geometry_fits_available_work_area(monkeypatch) -> N
         app.processEvents()
 
 
+def test_main_window_default_theme_is_dark(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        assert window.locale.theme == "dark"
+        assert window.theme_selector.currentData() == "dark"
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_restored_oversized_window_geometry_is_clamped(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        target = window._target_window_size()
+        window.resize(target.width() * 2, target.height())
+        window._ensure_window_within_work_area(clamp_to_target=True)
+        app.processEvents()
+
+        assert window.width() <= target.width()
+        assert window.height() <= target.height()
+        assert window.width() / max(1, window.height()) <= 1.72
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_status_pill_centers_status_dot_and_text_group() -> None:
     app = _app()
     _ = app
