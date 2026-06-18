@@ -772,6 +772,33 @@ def test_report_all_generates_overall_fem_and_solution_artifacts(monkeypatch, tm
             assert payload["pdf_path"] is None
 
 
+def test_design_solution_report_can_be_generated_before_fem(monkeypatch, tmp_path):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, _results, candidates = _report_sample()
+    agent = ReportGenAgent()
+
+    report = agent.run(
+        {
+            "task": task,
+            "results": [],
+            "candidates": candidates,
+            "report_kind": "design_solution",
+            "output_dir": str(tmp_path),
+        }
+    )
+
+    markdown_path = tmp_path / "recommended_design_solution.md"
+    assert report["report_kind"] == "design_solution"
+    assert report["markdown_path"] == str(markdown_path)
+    assert set(report["report_outputs"]) == {"design_solution"}
+    assert markdown_path.is_file()
+    markdown = markdown_path.read_text(encoding="utf-8")
+    assert "CSAgent 推荐设计方案" in markdown
+    assert "尚未校核" in markdown
+    assert "CSAgent FEM 校核报告" not in markdown
+    assert not (tmp_path / "latest_report.md").exists()
+
+
 def test_report_uses_llm_only_for_grounded_engineering_explanation(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task, results, candidates = _report_sample()

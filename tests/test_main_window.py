@@ -107,6 +107,68 @@ def test_report_button_allows_partial_evaluated_results(monkeypatch) -> None:
         app.processEvents()
 
 
+def test_design_solution_report_uses_candidates_before_fem(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window.session.task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
+        window.session.candidates = [_candidate("TMP_1"), _candidate("TMP_2")]
+        window.session.screened_candidates = [_candidate("TMP_2")]
+        window.report_output_dir = tmp_path
+        index = window.report_type_selector.findData("design_solution")
+        window.report_type_selector.setCurrentIndex(index)
+
+        window._update_button_states()
+        assert window.report_button.isEnabled() is True
+
+        captured = {}
+        window._run_action = lambda action, payload, status_text: captured.update(
+            {"action": action, "payload": payload, "status_text": status_text}
+        )
+        window._start_report()
+
+        assert captured["action"] == "report"
+        assert captured["payload"]["report_kind"] == "design_solution"
+        assert captured["payload"]["output_dir"] == str(tmp_path)
+        assert [item["candidate_id"] for item in captured["payload"]["candidates"]] == ["TMP_2"]
+        assert captured["payload"]["results"] == []
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_fem_report_uses_output_dir_and_evaluated_results(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window.session.task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
+        window.session.candidates = [_candidate("TMP_1"), _candidate("TMP_2")]
+        window.session.results_by_session_id = {"TMP_1": {"candidate_id": "C1", "session_candidate_id": "TMP_1"}}
+        window.report_output_dir = tmp_path
+        index = window.report_type_selector.findData("fem")
+        window.report_type_selector.setCurrentIndex(index)
+
+        window._update_button_states()
+        assert window.report_button.isEnabled() is True
+
+        captured = {}
+        window._run_action = lambda action, payload, status_text: captured.update(
+            {"action": action, "payload": payload, "status_text": status_text}
+        )
+        window._start_report()
+
+        assert captured["action"] == "report"
+        assert captured["payload"]["report_kind"] == "fem"
+        assert captured["payload"]["output_dir"] == str(tmp_path)
+        assert [item["candidate_id"] for item in captured["payload"]["candidates"]] == ["TMP_1"]
+        assert [item["candidate_id"] for item in captured["payload"]["results"]] == ["C1"]
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_report_completion_updates_session_and_open_button(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()

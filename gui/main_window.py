@@ -2715,6 +2715,13 @@ class MainWindow(QMainWindow):
     def _selected_candidates_for_evaluation(self) -> list[dict]:
         return self.workbench_candidate_widget.selected_candidates()
 
+    def _design_solution_candidate_set(self) -> list[dict]:
+        if self.session.screened_candidates:
+            return list(self.session.screened_candidates)
+        if self.session.candidates:
+            return list(self.session.candidates)
+        return list(self.session.current_candidates)
+
     def _report_candidate_set(self) -> list[dict]:
         evaluated = set(self.session.results_by_session_id.keys())
         return [
@@ -2775,13 +2782,15 @@ class MainWindow(QMainWindow):
         if not self.session.task:
             return
         report_kind = str(self.report_type_selector.currentData() or "all")
-        report_candidates = self._report_candidate_set()
         ordered_results = self._ordered_report_results()
         if report_kind == "design_solution":
+            report_candidates = self._design_solution_candidate_set()
             if not report_candidates:
                 return
-        elif not ordered_results:
-            return
+        else:
+            report_candidates = self._report_candidate_set()
+            if not ordered_results:
+                return
         output_dir = str(self.report_output_dir) if self.report_output_dir else None
         self._run_action(
             "report",
