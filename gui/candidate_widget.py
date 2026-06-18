@@ -85,6 +85,7 @@ class CandidateWidget(QWidget):
         for column, width in enumerate([92, 104, 118, 100, 112, 118, 116, 98]):
             self.table.setColumnWidth(column, width)
         self.table.itemSelectionChanged.connect(self._refresh_detail)
+        self.table.setMinimumWidth(280)
         self.table.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
 
         self.summary_label = QLabel(tr("candidate.empty", language=self.language))
@@ -117,6 +118,7 @@ class CandidateWidget(QWidget):
         self.detail_tabs.addTab(self.audit_browser, tr("candidate.tab.audit", language=self.language))
         self.detail_tabs.tabBar().setExpanding(True)
         self.detail_tabs.tabBar().setUsesScrollButtons(False)
+        self.detail_tabs.setMinimumWidth(300)
         self.detail_tabs.setMaximumHeight(300)
 
         splitter = QSplitter()
@@ -124,7 +126,9 @@ class CandidateWidget(QWidget):
         splitter.addWidget(self.detail_tabs)
         splitter.setChildrenCollapsible(False)
         splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
-        splitter.setSizes([820, 480])
+        splitter.setStretchFactor(0, 1)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([640, 640])
         self.splitter = splitter
 
         layout = QVBoxLayout(self)
@@ -252,7 +256,7 @@ class CandidateWidget(QWidget):
         self.table.setVisible(True)
         self.detail_tabs.setMaximumHeight(16777215)
         self.detail_tabs.setVisible(True)
-        self.splitter.setSizes([760, 540])
+        self.splitter.setSizes([640, 640])
         source_counter: dict[str, int] = {}
 
         for row, candidate in enumerate(self.candidates):

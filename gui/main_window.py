@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-UI_LAYOUT_VERSION = 8
+UI_LAYOUT_VERSION = 9
 
 from PyQt6 import sip
 from PyQt6.QtCore import QObject, QRectF, QSettings, QSize, Qt, QThread, QUrl, pyqtSignal
@@ -241,6 +241,29 @@ class PipelineWorker(QObject):
                 "payload": payload or {},
             },
         )
+
+
+class CenterStackedWidget(QStackedWidget):
+    """中心页面栈只向主窗口暴露可控的最小尺寸。"""
+
+    MAX_MINIMUM_WIDTH = 600
+    MAX_MINIMUM_HEIGHT = 720
+
+    def minimumSizeHint(self) -> QSize:
+        current = self.currentWidget()
+        if current is None:
+            return QSize(0, 0)
+        hint = current.minimumSizeHint()
+        return QSize(
+            min(hint.width(), self.MAX_MINIMUM_WIDTH),
+            min(hint.height(), self.MAX_MINIMUM_HEIGHT),
+        )
+
+    def sizeHint(self) -> QSize:
+        current = self.currentWidget()
+        if current is None:
+            return super().sizeHint()
+        return current.sizeHint()
 
 
 class MainWindow(QMainWindow):
@@ -675,7 +698,7 @@ class MainWindow(QMainWindow):
         workbench_right.setMinimumWidth(330)
         workbench_right.setMaximumWidth(430)
 
-        self.stack = QStackedWidget()
+        self.stack = CenterStackedWidget()
         self.stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
         self.stack.addWidget(workbench_page)
         self.stack.addWidget(self.knowledge_widget)

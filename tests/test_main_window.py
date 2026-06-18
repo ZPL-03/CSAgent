@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QLineEdit, QPushButton
 
 import gui.main_window as main_window_module
 from core.task_parser import TaskParser
+from gui.candidate_widget import CandidateWidget
 from gui.chat_widget import ChatWidget
 from gui.main_window import MainWindow
 from gui.theme import application_stylesheet
@@ -493,6 +494,50 @@ def test_restored_oversized_window_geometry_is_clamped(monkeypatch) -> None:
         assert window.width() / max(1, window.height()) <= 1.72
     finally:
         window.close()
+        app.processEvents()
+
+
+def test_main_window_requested_width_is_not_expanded_by_hidden_pages(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        requested_width = 1280
+        for index in range(len(window.nav_buttons)):
+            window._switch_workspace_page(index)
+            window.resize(requested_width, 960)
+            window.show()
+            app.processEvents()
+
+            assert window.stack.minimumSizeHint().width() <= 600
+            assert window.main_splitter.minimumSizeHint().width() <= requested_width
+            assert window.width() <= requested_width
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_candidate_pool_empty_and_runtime_use_same_splitter_balance() -> None:
+    app = _app()
+    widget = CandidateWidget()
+    try:
+        widget.resize(760, 280)
+        widget.show()
+        app.processEvents()
+        empty_sizes = widget.splitter.sizes()
+
+        widget.update_candidates([_candidate(f"C{index}") for index in range(1, 7)])
+        app.processEvents()
+        runtime_sizes = widget.splitter.sizes()
+
+        for sizes in [empty_sizes, runtime_sizes]:
+            table_width, detail_width = sizes
+            assert table_width >= 260
+            assert detail_width >= 280
+            assert 0.8 <= table_width / max(1, detail_width) <= 1.25
+        assert abs(empty_sizes[0] - runtime_sizes[0]) <= 32
+    finally:
+        widget.close()
         app.processEvents()
 
 
