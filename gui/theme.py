@@ -397,7 +397,7 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         border: 1px solid {color["border_soft"]};
         border-left: 0;
         border-radius: 8px;
-        padding: 8px 12px;
+        padding: 6px 10px;
         font-weight: 600;
         color: {color["text"]};
     }}
@@ -455,8 +455,8 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         margin-right: 8px;
     }}
     QLineEdit#settingsInput, QComboBox#settingsInput {{
-        min-height: 34px;
-        padding: 2px 10px;
+        min-height: 30px;
+        padding: 1px 10px;
         padding-right: 28px;
     }}
     QComboBox#settingsInput::drop-down {{

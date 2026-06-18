@@ -304,12 +304,14 @@ class MainWindow(QMainWindow):
             self.nav_group.addButton(button, index)
         self.nav_buttons[0].setChecked(True)
         self.language_selector = QComboBox()
+        self.language_selector.setObjectName("settingsInput")
         for language, label in LANGUAGE_OPTIONS.items():
             self.language_selector.addItem(label, language)
         current_language_index = self.language_selector.findData(self.locale.language)
         if current_language_index >= 0:
             self.language_selector.setCurrentIndex(current_language_index)
         self.theme_selector = QComboBox()
+        self.theme_selector.setObjectName("settingsInput")
         for theme, label in THEME_OPTIONS[self.locale.language].items():
             self.theme_selector.addItem(label, theme)
         current_theme_index = self.theme_selector.findData(self.locale.theme)
@@ -370,15 +372,11 @@ class MainWindow(QMainWindow):
         self.pending_card = QLabel(self.locale.text("metric.pending_zero"))
         self.pass_card = QLabel(self.locale.text("metric.pass", count=0))
         for metric_card in [self.stage_card, self.candidate_card, self.pending_card, self.pass_card]:
-            metric_card.setFixedHeight(76)
+            metric_card.setFixedHeight(64)
             metric_card.setWordWrap(True)
             metric_card.setTextFormat(Qt.TextFormat.RichText)
             metric_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             metric_card.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        for metric_card in [self.stage_card, self.pending_card]:
-            metric_card.setMinimumWidth(184)
-        for metric_card in [self.candidate_card, self.pass_card]:
-            metric_card.setMinimumWidth(112)
         self.stats_header = QLabel(self.locale.text("section.session"))
         self.stats_header.setObjectName("sectionTitle")
         self.log_header = QLabel(self.locale.text("section.runtime_log"))
@@ -451,7 +449,6 @@ class MainWindow(QMainWindow):
         self._refresh_run_selector()
         self.knowledge_widget.refresh(load_evidence=False)
         self._refresh_knowledge_sidebar()
-        self.live_result_view.show_reference_hull()
 
     def _sync_brand_logo(self) -> None:
         if not self._brand_badge_path.exists():
@@ -515,12 +512,12 @@ class MainWindow(QMainWindow):
         stats_layout.addWidget(self.candidate_card, 0, 1)
         stats_layout.addWidget(self.pending_card, 1, 0)
         stats_layout.addWidget(self.pass_card, 1, 1)
-        stats_layout.setColumnMinimumWidth(0, 184)
-        stats_layout.setColumnMinimumWidth(1, 108)
-        stats_layout.setColumnStretch(0, 4)
-        stats_layout.setColumnStretch(1, 2)
-        stats_layout.setRowMinimumHeight(0, 76)
-        stats_layout.setRowMinimumHeight(1, 76)
+        stats_layout.setColumnMinimumWidth(0, 0)
+        stats_layout.setColumnMinimumWidth(1, 0)
+        stats_layout.setColumnStretch(0, 1)
+        stats_layout.setColumnStretch(1, 1)
+        stats_layout.setRowMinimumHeight(0, 64)
+        stats_layout.setRowMinimumHeight(1, 64)
         stats_layout.setRowStretch(0, 0)
         stats_layout.setRowStretch(1, 0)
 
@@ -579,7 +576,7 @@ class MainWindow(QMainWindow):
         workbench_layout.addWidget(workbench_splitter)
 
         right_layout = QVBoxLayout()
-        right_layout.setContentsMargins(14, 14, 14, 14)
+        right_layout.setContentsMargins(10, 14, 22, 14)
         right_layout.setSpacing(8)
         live_header_layout = QHBoxLayout()
         live_header_layout.setContentsMargins(0, 0, 0, 0)
@@ -1338,12 +1335,12 @@ class MainWindow(QMainWindow):
         card = QFrame()
         card.setObjectName("configCard")
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        card.setMinimumHeight(92)
-        card.setMaximumHeight(92)
+        card.setMinimumHeight(74)
+        card.setMaximumHeight(74)
         layout = QGridLayout(card)
-        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setContentsMargins(12, 7, 12, 7)
         layout.setHorizontalSpacing(12)
-        layout.setVerticalSpacing(8)
+        layout.setVerticalSpacing(4)
         title = QLabel("界面语言与主题")
         title.setObjectName("configCardTitle")
         layout.addWidget(title, 0, 0, 1, 4)
@@ -1357,9 +1354,9 @@ class MainWindow(QMainWindow):
             key_label.setObjectName("configKey")
             key_label.setWordWrap(False)
             key_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-            key_label.setFixedHeight(38)
+            key_label.setFixedHeight(30)
             key_label.setMinimumWidth(92)
-            widget.setFixedHeight(38)
+            widget.setFixedHeight(30)
             layout.addWidget(key_label, 1, column * 2, Qt.AlignmentFlag.AlignVCenter)
             layout.addWidget(widget, 1, column * 2 + 1, Qt.AlignmentFlag.AlignVCenter)
             layout.setColumnStretch(column * 2 + 1, 1)
@@ -1487,17 +1484,20 @@ class MainWindow(QMainWindow):
     def _settings_path_field(self, key: str, value: object, mode: str) -> QWidget:
         wrapper = QWidget()
         wrapper.setObjectName("settingsPathField")
+        wrapper.setFixedHeight(38)
         layout = QHBoxLayout(wrapper)
-        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setContentsMargins(0, 2, 0, 2)
         layout.setSpacing(8)
+        layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         field = self._settings_line(key, value)
+        field.setFixedHeight(34)
         button = QPushButton("…")
         self._set_button_variant(button, "icon")
-        button.setFixedSize(34, 30)
+        button.setFixedSize(34, 34)
         button.setToolTip("选择本地路径")
         button.clicked.connect(lambda _checked=False, line=field, pick_mode=mode: self._browse_settings_path(line, pick_mode))
-        layout.addWidget(field, 1)
-        layout.addWidget(button)
+        layout.addWidget(field, 1, Qt.AlignmentFlag.AlignVCenter)
+        layout.addWidget(button, 0, Qt.AlignmentFlag.AlignVCenter)
         return wrapper
 
     def _browse_settings_path(self, field: QLineEdit, mode: str) -> None:
@@ -1528,20 +1528,22 @@ class MainWindow(QMainWindow):
         card = QFrame()
         card.setObjectName("configCard")
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        row_height = 40
-        row_gap = 10
-        title_height = 24
-        vertical_margins = 28
-        title_gap = 8
+        row_height = 38
+        row_gap = 9
+        title_height = 22
+        vertical_margins = 24
+        title_gap = 10
         form_height = len(rows) * row_height + max(0, len(rows) - 1) * row_gap
         card_height = max(118, vertical_margins + title_height + title_gap + form_height)
         card.setMinimumHeight(card_height)
         card.setMaximumHeight(card_height)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 10, 12, 10)
-        layout.setSpacing(8)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(title_gap)
         title_label = QLabel(title)
         title_label.setObjectName("configCardTitle")
+        title_label.setFixedHeight(title_height)
+        title_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         layout.addWidget(title_label)
         form = QGridLayout()
         form.setContentsMargins(0, 0, 0, 0)
@@ -1563,6 +1565,7 @@ class MainWindow(QMainWindow):
         form_widget = QWidget()
         form_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         form_widget.setLayout(form)
+        form_widget.setFixedHeight(form_height)
         layout.addWidget(form_widget)
         return card
 
@@ -2155,7 +2158,7 @@ class MainWindow(QMainWindow):
             return (
                 f"<span style='color:{label_color};font-size:12px;'>"
                 f"{label}</span><br>"
-                f"<span style='color:{value_color};font-size:17px;font-weight:800;'>"
+                f"<span style='color:{value_color};font-size:15px;font-weight:800;'>"
                 f"{value}</span>"
             )
 
@@ -2197,7 +2200,7 @@ class MainWindow(QMainWindow):
             "awaiting_screen_confirmation": "等待初筛确认",
             "screen_candidates": "代理初筛中",
             "screen_candidates_failed": "初筛失败",
-            "awaiting_fem_confirmation": "等待 FEM 确认",
+            "awaiting_fem_confirmation": "等待FEM确认",
             "evaluate_candidates": "有限元校核中",
             "evaluate_candidates_failed": "有限元失败",
             "persist_knowledge": "知识回流中",
@@ -2597,7 +2600,7 @@ class MainWindow(QMainWindow):
         if self.session.display_candidates:
             self.live_result_view.show_candidate(self.session.display_candidates[0])
             return
-        self.live_result_view.show_reference_hull()
+        self.live_result_view.reset_plotter(self.locale.text("live_view.empty"))
 
     def _start_conversation(self) -> None:
         instruction = self.input_line.text().strip()
@@ -2866,7 +2869,6 @@ class MainWindow(QMainWindow):
         self.result_trace_widget.update_trace([])
         self.workbench_candidate_widget.reset_view()
         self.live_result_view.reset_plotter(self.locale.text("live_view.empty"))
-        self.live_result_view.show_reference_hull()
         self.result_trace_widget.reset_view()
         self.workflow_widget.reset_view()
         self.model_status_label.set_state(self.locale.text("model.current"), "success")
