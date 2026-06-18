@@ -48,7 +48,7 @@ rag:
   embedding_cache_dir: models/embedding_cache
   local_files_only: true
   use_hash_embedding_only: false
-  allow_hash_fallback: true
+  allow_hash_fallback: false
 
 case_memory:
   collection_name: csdm_cph_case_memory

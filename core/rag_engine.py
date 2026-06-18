@@ -106,7 +106,7 @@ class RAGEngine:
         self.use_hash_embedding_only = (os.getenv("CSDM_cph_USE_HASH_EMBEDDING", "0") == "1") or bool(
             rag_config.get("use_hash_embedding_only", False)
         )
-        self.allow_hash_fallback = bool(rag_config.get("allow_hash_fallback", True))
+        self.allow_hash_fallback = bool(rag_config.get("allow_hash_fallback", False))
 
         self._embedder = None
         self._embedder_failed = False
@@ -139,6 +139,9 @@ class RAGEngine:
         return self._embedder
 
     def _embedding(self, text: str) -> List[float]:
+        if self.use_hash_embedding_only:
+            self._embedder_failed = True
+            return self._hash_embedding(text)
         if self._embedder_failed:
             return self._hash_embedding(text)
 

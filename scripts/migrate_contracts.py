@@ -226,7 +226,7 @@ def rebuild_case_memory_index() -> Dict[str, int]:
 
 
 def rebuild_rag_index() -> Dict[str, int]:
-    """向后兼容旧函数名；实际重建的是案例记忆索引。"""
+    """重建案例记忆索引。"""
     return rebuild_case_memory_index()
 
 
