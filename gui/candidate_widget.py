@@ -10,7 +10,6 @@ from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QGridLayout,
     QHeaderView,
-    QHBoxLayout,
     QFrame,
     QLabel,
     QSizePolicy,
@@ -122,6 +121,8 @@ class CandidateWidget(QWidget):
             metric_layout.setColumnStretch(index, 1)
         self.metric_widget = QWidget()
         self.metric_widget.setLayout(metric_layout)
+        self.metric_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.metric_widget.setMaximumHeight(64)
 
         self.detail_browser = QTextBrowser()
         self.audit_browser = QTextBrowser()
@@ -130,42 +131,28 @@ class CandidateWidget(QWidget):
         self.detail_tabs.addTab(self.audit_browser, tr("candidate.tab.audit", language=self.language))
         self.detail_tabs.setMaximumHeight(300)
 
-        left_layout = QVBoxLayout()
-        left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(8)
-        left_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        left_layout.addWidget(self.metric_widget, 0)
-        left_layout.addWidget(self.table_stack, 1)
-        left_widget = QWidget()
-        left_widget.setLayout(left_layout)
-        left_widget.setMinimumWidth(560)
-        self.left_widget = left_widget
-
-        right_layout = QVBoxLayout()
-        right_layout.setContentsMargins(0, 0, 0, 0)
-        right_layout.setSpacing(8)
-        right_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        right_layout.addWidget(self.detail_tabs, 1)
-
-        right_widget = QWidget()
-        right_widget.setLayout(right_layout)
-        right_widget.setMinimumWidth(360)
-        self.right_widget = right_widget
-
         splitter = QSplitter()
-        splitter.addWidget(left_widget)
-        splitter.addWidget(right_widget)
-        splitter.setSizes([860, 500])
+        splitter.addWidget(self.table_stack)
+        splitter.addWidget(self.detail_tabs)
+        splitter.setChildrenCollapsible(False)
+        splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        splitter.setSizes([760, 540])
         self.splitter = splitter
 
-        layout = QHBoxLayout(self)
-        layout.addWidget(splitter)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+        layout.addWidget(self.metric_widget, 0)
+        layout.addWidget(splitter, 1)
         self.update_candidates([])
 
     def _metric_label(self) -> QLabel:
         label = QLabel()
         label.setWordWrap(False)
         label.setMinimumWidth(92)
+        label.setMinimumHeight(52)
+        label.setMaximumHeight(52)
+        label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         label.setProperty("role", "metricCard")
         return label
 
@@ -277,8 +264,7 @@ class CandidateWidget(QWidget):
             self.table_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
             self.detail_tabs.setMaximumHeight(16777215)
             self.detail_tabs.setVisible(True)
-            self.right_widget.setVisible(True)
-            self.splitter.setSizes([860, 500])
+            self.splitter.setSizes([760, 540])
         else:
             self.setMinimumHeight(132)
             self.setMaximumHeight(156)
@@ -287,7 +273,6 @@ class CandidateWidget(QWidget):
             self.table_stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             self.detail_tabs.setMaximumHeight(16777215)
             self.detail_tabs.setVisible(False)
-            self.right_widget.setVisible(False)
             self.splitter.setSizes([1200, 0])
         source_counter: dict[str, int] = {}
 

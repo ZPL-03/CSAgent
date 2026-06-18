@@ -78,3 +78,23 @@ def test_candidate_widget_renders_generation_audit() -> None:
     finally:
         widget.close()
         app.processEvents()
+
+
+def test_candidate_widget_metrics_span_above_table_and_detail() -> None:
+    app = _app()
+    widget = CandidateWidget()
+    try:
+        assert widget.layout().itemAt(0).widget() is widget.metric_widget
+        assert widget.layout().itemAt(1).widget() is widget.splitter
+        assert widget.splitter.widget(0) is widget.table_stack
+        assert widget.splitter.widget(1) is widget.detail_tabs
+        assert widget.metric_widget.maximumHeight() <= 64
+
+        widget.update_candidates([_candidate()])
+        assert widget.metric_widget.isHidden() is False
+        assert widget.detail_tabs.isHidden() is False
+        assert widget.total_metric.maximumHeight() == 52
+        assert widget.table_stack.currentWidget() is widget.table
+    finally:
+        widget.close()
+        app.processEvents()

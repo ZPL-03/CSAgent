@@ -332,6 +332,9 @@ class MainWindow(QMainWindow):
         self.generate_button = QPushButton(self.locale.text("button.start"))
         self.confirm_yes_button = QPushButton(self.locale.text("button.confirm"))
         self.confirm_no_button = QPushButton(self.locale.text("button.pause"))
+        self.generate_button.setFixedWidth(56)
+        self.confirm_yes_button.setFixedWidth(88)
+        self.confirm_no_button.setFixedWidth(88)
         self.trace_button = QPushButton(self.locale.text("button.view_trace"))
         self.trace_button.setObjectName("traceLinkButton")
         self.trace_button.setMinimumWidth(132)
@@ -495,6 +498,7 @@ class MainWindow(QMainWindow):
         input_action_layout.addWidget(self.generate_button)
         input_action_layout.addWidget(self.confirm_yes_button)
         input_action_layout.addWidget(self.confirm_no_button)
+        self.input_action_layout = input_action_layout
 
         stats_layout = QGridLayout()
         stats_layout.setHorizontalSpacing(10)
@@ -1751,6 +1755,15 @@ class MainWindow(QMainWindow):
                 button.setMinimumWidth(84)
         button.setProperty("variant", variant)
 
+    def _fit_input_action_buttons(self) -> None:
+        for button, minimum_width in [
+            (self.generate_button, 56),
+            (self.confirm_yes_button, 88),
+            (self.confirm_no_button, 88),
+        ]:
+            text_width = button.fontMetrics().horizontalAdvance(button.text())
+            button.setFixedWidth(max(minimum_width, text_width + 24))
+
     def _apply_styles(self) -> None:
         for card in [self.stage_card, self.candidate_card, self.pending_card, self.pass_card]:
             card.setProperty("role", "metricCard")
@@ -1771,6 +1784,7 @@ class MainWindow(QMainWindow):
         self._set_button_variant(self.evaluate_all_button)
         self._set_button_variant(self.report_button, "primary")
         self._set_button_variant(self.reset_button, "danger")
+        self._fit_input_action_buttons()
         self.workflow_widget.set_theme(self.locale.theme)
         self.flow_dag_widget.set_theme(self.locale.theme)
         self.flow_dag_widget.set_language(self.locale.language)

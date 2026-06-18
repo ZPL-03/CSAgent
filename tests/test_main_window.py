@@ -58,6 +58,28 @@ class FakeKnowledge:
         return {"query": query, "chunks": [], "relations": []}
 
 
+def test_confirmation_controls_share_input_action_row(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        row_widgets = [window.input_action_layout.itemAt(index).widget() for index in range(window.input_action_layout.count())]
+        assert row_widgets == [
+            window.example_button,
+            window.input_line,
+            window.generate_button,
+            window.confirm_yes_button,
+            window.confirm_no_button,
+        ]
+        assert window.input_line.sizePolicy().horizontalPolicy().name == "Expanding"
+        for button in [window.generate_button, window.confirm_yes_button, window.confirm_no_button]:
+            text_width = button.fontMetrics().horizontalAdvance(button.text())
+            assert text_width <= max(0, button.width() - 18)
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_report_button_allows_partial_evaluated_results(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
