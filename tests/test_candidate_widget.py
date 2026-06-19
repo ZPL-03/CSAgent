@@ -2,6 +2,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication
 
 from gui.candidate_widget import CandidateWidget
@@ -94,6 +95,7 @@ def test_candidate_widget_metrics_span_above_table_and_detail() -> None:
         assert widget.table.isHidden() is False
         assert widget.table.rowCount() == 0
         assert widget.total_metric.text().endswith("0")
+        assert widget.total_metric.alignment() == Qt.AlignmentFlag.AlignCenter
         assert "候选来源与去重审计" in widget.audit_browser.toHtml()
 
         widget.update_candidates([_candidate()])

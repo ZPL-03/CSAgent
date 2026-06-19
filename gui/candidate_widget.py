@@ -141,6 +141,7 @@ class CandidateWidget(QWidget):
     def _metric_label(self) -> QLabel:
         label = QLabel()
         label.setWordWrap(False)
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         label.setMinimumWidth(92)
         label.setMinimumHeight(52)
         label.setMaximumHeight(52)

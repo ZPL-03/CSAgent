@@ -139,10 +139,11 @@ def test_knowledge_widget_renders_runtime_pipeline_and_evidence(monkeypatch, tmp
         assert "检索命中 3 个当前文档证据" in html
         assert "Composite pressure hull buckling evidence" in html
         assert "Initial Imperfection" in html
-        assert widget.store_pill.text == "合并 RAG 9 文本块"
-        assert widget.rag_pill.text == "RAG 9 文本块"
+        assert widget.store_pill.text == "合并 RAG 9 块"
+        assert widget.rag_pill.text == "RAG 9 块"
         assert widget.vector_pill.text == "Vector 9 向量块"
         assert widget.kg_pill.text == "KG 12 关系"
+        assert widget.case_pill.text.startswith("案例库 ")
         assert widget.document_table.rowCount() == 1
         assert len(widget.graph_view.relations) == 1
         assert widget.graph_view.relations[0]["source"] == "Initial Imperfection"
@@ -156,6 +157,12 @@ def test_knowledge_widget_renders_runtime_pipeline_and_evidence(monkeypatch, tmp
         assert widget.graph_relation_chip_buttons
         assert widget.pipeline_widget.minimumHeight() >= 170
         assert len(widget.pipeline_widget.steps) == 5
+        widget.resize(980, 760)
+        widget.show()
+        app.processEvents()
+        assert widget.kg_pill.y() > widget.store_pill.y()
+        assert widget.parser_pill.y() == widget.kg_pill.y()
+        assert widget.case_pill.y() == widget.kg_pill.y()
     finally:
         widget.close()
         app.processEvents()
@@ -664,10 +671,11 @@ def test_knowledge_widget_runs_real_ingestion_pipeline(monkeypatch, tmp_path) ->
         app.processEvents()
 
         assert widget._ingest_thread is None
-        assert widget.store_pill.text == "合并 RAG 51794 文本块"
+        assert widget.store_pill.text == "合并 RAG 51794 块"
         assert widget.rag_pill.text.startswith("RAG ")
         assert widget.vector_pill.text.startswith("Vector ")
         assert widget.kg_pill.text.startswith("KG ")
+        assert widget.case_pill.text.startswith("案例库 ")
         assert widget.parser_pill.status == "success"
         assert widget.document_table.rowCount() == 1
         assert widget.pipeline_widget.steps[0].status == "success"

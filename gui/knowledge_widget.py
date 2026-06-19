@@ -1089,6 +1089,7 @@ class KnowledgeWidget(QWidget):
         self.vector_pill = StatusPill("Vector 0 向量块", "pending")
         self.kg_pill = StatusPill("KG 0 关系", "pending")
         self.parser_pill = StatusPill("解析器待调用", "pending")
+        self.case_pill = StatusPill("案例库 0 条", "pending")
 
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("搜索知识库：外压圆柱壳 屈曲 缺陷敏感性 制造质量")
@@ -1272,7 +1273,7 @@ class KnowledgeWidget(QWidget):
     def set_theme(self, theme: str) -> None:
         self.theme = resolve_theme(theme)
         self._set_document_empty_html()
-        for pill in [self.store_pill, self.rag_pill, self.vector_pill, self.kg_pill, self.parser_pill]:
+        for pill in [self.store_pill, self.rag_pill, self.vector_pill, self.kg_pill, self.parser_pill, self.case_pill]:
             pill.set_theme(self.theme)
         self.pipeline_widget.set_theme(self.theme)
         self.graph_view.set_theme(self.theme)
@@ -1298,9 +1299,13 @@ class KnowledgeWidget(QWidget):
         pill_layout.setContentsMargins(0, 0, 0, 0)
         pill_layout.setHorizontalSpacing(8)
         pill_layout.setVerticalSpacing(8)
-        for index, pill in enumerate([self.store_pill, self.rag_pill, self.vector_pill, self.kg_pill, self.parser_pill]):
-            pill_layout.addWidget(pill, 0, index)
-            pill_layout.setColumnStretch(index, 1)
+        for index, pill in enumerate(
+            [self.store_pill, self.rag_pill, self.vector_pill, self.kg_pill, self.parser_pill, self.case_pill]
+        ):
+            row = index // 3
+            column = index % 3
+            pill_layout.addWidget(pill, row, column)
+            pill_layout.setColumnStretch(column, 1)
 
         def titled_panel(title: str, widget: QWidget, object_name: str = "knowledgeMiniPanel") -> QFrame:
             card = QFrame()
@@ -2007,13 +2012,15 @@ class KnowledgeWidget(QWidget):
         vector_ready = bool(status.get("vector_ready")) and vector_status == "success"
         relation_count = int(status.get("kg_relation_count", 0) or 0)
         parser = (status.get("last_ingestion") or {}).get("parser_backend") if isinstance(status.get("last_ingestion"), dict) else ""
-        self.store_pill.set_state(f"合并 RAG {chunk_count} 文本块", "success" if ready else "pending")
-        self.rag_pill.set_state(f"RAG {chunk_count} 文本块", "success" if chunk_count else "pending")
+        self.store_pill.set_state(f"合并 RAG {chunk_count} 块", "success" if ready else "pending")
+        self.rag_pill.set_state(f"RAG {chunk_count} 块", "success" if chunk_count else "pending")
         vector_label = f"Vector {vector_count} 向量块" if vector_count else f"Vector {vector_status or 'pending'}"
         vector_state = "success" if vector_ready else ("warning" if vector_status in {"warning", "failed"} else "pending")
         self.vector_pill.set_state(vector_label, vector_state)
         self.kg_pill.set_state(f"KG {relation_count} 关系", "success" if relation_count else "pending")
         self.parser_pill.set_state(str(parser or "解析器待调用"), "success" if parser else "pending")
+        case_count = len(list(CASES_DIR.glob("CASE_*.json"))) + len(list(CASE_LIBRARY_DIR.glob("CASE_*.json")))
+        self.case_pill.set_state(f"案例库 {case_count} 条", "success" if case_count else "pending")
 
     def _update_summary(self, status: dict[str, Any]) -> None:
         metrics = self._load_metrics()
