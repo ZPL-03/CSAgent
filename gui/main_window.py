@@ -545,7 +545,7 @@ class MainWindow(QMainWindow):
         stats_layout.setRowStretch(1, 0)
 
         agent_layout = QVBoxLayout()
-        agent_layout.setContentsMargins(14, 14, 14, 10)
+        agent_layout.setContentsMargins(14, 14, 12, 10)
         agent_layout.setSpacing(11)
         agent_layout.addWidget(self.agent_header)
         for agent_name, description_key in self.AGENT_DESCRIPTIONS:
@@ -561,7 +561,7 @@ class MainWindow(QMainWindow):
             agent_layout.addWidget(card)
 
         queue_layout = QVBoxLayout()
-        queue_layout.setContentsMargins(14, 8, 14, 14)
+        queue_layout.setContentsMargins(14, 8, 12, 14)
         queue_layout.setSpacing(10)
         queue_layout.addWidget(self.queue_header)
         queue_layout.addWidget(self.queue_progress)
@@ -739,7 +739,7 @@ class MainWindow(QMainWindow):
         page = QWidget()
         page.setObjectName("agentRail")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setContentsMargins(14, 14, 0, 14)
         layout.setSpacing(9)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         header = QLabel(title)
@@ -747,7 +747,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(header)
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setContentsMargins(0, 0, 12, 0)
         content_layout.setSpacing(9)
         content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         for primary, secondary in cards:
@@ -779,7 +779,7 @@ class MainWindow(QMainWindow):
         page = QWidget()
         page.setObjectName("resultRail")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setContentsMargins(14, 14, 0, 14)
         layout.setSpacing(9)
         header = QLabel(title)
         header.setObjectName("sectionTitle")
@@ -802,7 +802,7 @@ class MainWindow(QMainWindow):
         page = QWidget()
         page.setObjectName("agentRail")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setContentsMargins(14, 14, 0, 14)
         layout.setSpacing(8)
 
         header = QLabel("知识库 · CORPUS")
@@ -811,7 +811,7 @@ class MainWindow(QMainWindow):
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setContentsMargins(0, 0, 12, 0)
         content_layout.setSpacing(8)
         content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
@@ -960,7 +960,7 @@ class MainWindow(QMainWindow):
         page = QWidget()
         page.setObjectName("agentRail")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setContentsMargins(14, 14, 0, 14)
         layout.setSpacing(9)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
@@ -970,7 +970,7 @@ class MainWindow(QMainWindow):
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 0, 0)
+        content_layout.setContentsMargins(0, 0, 12, 0)
         content_layout.setSpacing(9)
         content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 

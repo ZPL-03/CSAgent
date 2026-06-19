@@ -552,13 +552,13 @@ class KnowledgeGraphView(QWidget):
         factor = min(1.72, available_width / width, available_height / height)
         vertical_factor = min(1.78, max(factor, available_height / height * 0.82))
         current_center = QPointF((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
-        vertical_offset = min(44.0, graph_rect.height() * 0.11)
+        vertical_offset = min(88.0, graph_rect.height() * 0.20)
         target_center = QPointF(graph_rect.center().x(), graph_rect.center().y() - vertical_offset)
         fitted: dict[str, QPointF] = {}
         safe_left = graph_rect.left() + 34.0
         safe_right = graph_rect.right() - 34.0
-        safe_top = graph_rect.top() + 37.0
-        safe_bottom = graph_rect.bottom() - 34.0
+        safe_top = graph_rect.top() + 33.0
+        safe_bottom = graph_rect.bottom() - 88.0
         for name, point in positions.items():
             x = target_center.x() + (point.x() - current_center.x()) * factor
             y = target_center.y() + (point.y() - current_center.y()) * vertical_factor
@@ -767,7 +767,15 @@ class KnowledgeGraphView(QWidget):
             occupied.append(label_rect.adjusted(-5, -4, 5, 4))
         return True
 
-    def _draw_legend(self, painter: QPainter, visible_nodes: list[tuple[str, str]], colors: dict[str, QColor]) -> None:
+    def _draw_legend(
+        self,
+        painter: QPainter,
+        visible_nodes: list[tuple[str, str]],
+        colors: dict[str, QColor],
+        min_left: float,
+        row_top: float,
+        row_height: float,
+    ) -> None:
         type_counts: dict[str, int] = {}
         for _name, entity_type in visible_nodes:
             type_counts[entity_type] = type_counts.get(entity_type, 0) + 1
@@ -779,11 +787,14 @@ class KnowledgeGraphView(QWidget):
         painter.setFont(font)
         metrics = QFontMetrics(font)
         x = self.width() - 18.0
-        y = 8.0
+        y = row_top + (row_height - 20.0) / 2.0
         for entity_type, count in reversed(items):
             label = f"{entity_type} {count}"
             width = metrics.horizontalAdvance(label) + 22
-            x -= width
+            next_x = x - width
+            if next_x < min_left:
+                break
+            x = next_x
             rect = QRectF(x, y, width - 6, 20)
             painter.setBrush(QBrush(colors["label_bg"]))
             painter.setPen(QPen(colors["border"], 0.8))
@@ -801,7 +812,7 @@ class KnowledgeGraphView(QWidget):
         painter.fillRect(self.rect(), colors["bg"])
 
         panel = QRectF(1, 1, self.width() - 2, self.height() - 2)
-        graph_rect = panel.adjusted(14, 26, -14, -12)
+        graph_rect = panel.adjusted(14, 30, -14, -12)
         self._draw_background(painter, panel, graph_rect, colors)
         self._draw_grid(painter, graph_rect, colors["grid"])
 
@@ -814,8 +825,15 @@ class KnowledgeGraphView(QWidget):
         small_font.setBold(True)
         painter.setFont(small_font)
         painter.setPen(colors["muted"])
-        painter.drawText(QRectF(18, 8, self.width() - 36, 20), Qt.AlignmentFlag.AlignLeft, subtitle)
-        self._draw_legend(painter, visible_nodes, colors)
+        legend_left = max(300.0, self.width() * 0.56)
+        header_top = 5.0
+        header_height = 24.0
+        painter.drawText(
+            QRectF(18, header_top, max(120.0, legend_left - 28.0), header_height),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            subtitle,
+        )
+        self._draw_legend(painter, visible_nodes, colors, legend_left, header_top, header_height)
 
         if not visible_nodes:
             painter.drawText(
@@ -1123,7 +1141,11 @@ class KnowledgeWidget(QWidget):
         self.graph_view.setMinimumHeight(560)
         self.graph_summary_label = QLabel("核心图谱等待知识库数据")
         self.graph_summary_label.setObjectName("graphSummaryLabel")
-        self.graph_summary_label.setWordWrap(True)
+        self.graph_summary_label.setWordWrap(False)
+        self.graph_summary_label.setMinimumWidth(0)
+        self.graph_summary_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.graph_summary_label.setFixedHeight(28)
+        self.graph_summary_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.graph_search_input = QLineEdit()
         self.graph_search_input.setObjectName("graphSearchInput")
         self.graph_search_input.setPlaceholderText("搜索图谱节点或关系")
@@ -1132,8 +1154,8 @@ class KnowledgeWidget(QWidget):
         self.graph_relation_filter = QComboBox()
         self.graph_relation_filter.setObjectName("graphFilterCombo")
         for combo in [self.graph_type_filter, self.graph_relation_filter]:
-            combo.setMinimumWidth(108)
-            combo.setMaximumWidth(150)
+            combo.setMinimumWidth(152)
+            combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.graph_reset_button = QPushButton("F")
         self.graph_reset_button.setToolTip("适配图谱")
         self.graph_zoom_in_button = QPushButton("+")
@@ -1156,7 +1178,7 @@ class KnowledgeWidget(QWidget):
             self.graph_relation_button,
         ]:
             button.setObjectName("graphToolButton")
-            button.setFixedSize(34, 32)
+            button.setFixedSize(32, 28)
         self.graph_detail_browser = QTextBrowser()
         self.graph_detail_browser.setOpenExternalLinks(False)
         self._configure_panel_browser(self.graph_detail_browser)
@@ -1323,10 +1345,10 @@ class KnowledgeWidget(QWidget):
 
         overview_panel = QFrame()
         overview_panel.setObjectName("knowledgeOverviewPanel")
-        overview_panel.setMinimumHeight(124)
-        overview_panel.setMaximumHeight(138)
+        overview_panel.setMinimumHeight(112)
+        overview_panel.setMaximumHeight(124)
         overview_layout = QHBoxLayout(overview_panel)
-        overview_layout.setContentsMargins(10, 10, 10, 10)
+        overview_layout.setContentsMargins(10, 8, 10, 8)
         overview_layout.setSpacing(10)
         overview_layout.addWidget(titled_panel("资料状态 · STATUS", self.summary_scroll), 1)
         overview_layout.addWidget(titled_panel("知识来源 · SOURCES", self.source_overview_scroll), 1)
@@ -1337,34 +1359,38 @@ class KnowledgeWidget(QWidget):
         graph_panel.setObjectName("knowledgeGraphPanel")
         graph_panel.setMinimumHeight(680)
         graph_layout = QVBoxLayout(graph_panel)
-        graph_layout.setContentsMargins(12, 12, 12, 12)
-        graph_layout.setSpacing(10)
+        graph_layout.setContentsMargins(8, 4, 8, 8)
+        graph_layout.setSpacing(1)
         graph_header = QHBoxLayout()
         graph_header.setContentsMargins(0, 0, 0, 0)
         graph_header.setSpacing(8)
         graph_label = QLabel("知识图谱 · GRAPH")
-        graph_label.setObjectName("sectionTitle")
-        graph_label.setMinimumWidth(graph_label.fontMetrics().horizontalAdvance(graph_label.text()) + 18)
-        graph_header.addWidget(graph_label)
-        graph_header.addWidget(self.graph_summary_label, 1)
-        graph_header.addWidget(self.graph_reset_button)
-        graph_header.addWidget(self.graph_zoom_in_button)
-        graph_header.addWidget(self.graph_zoom_out_button)
-        graph_header.addWidget(self.graph_label_button)
-        graph_header.addWidget(self.graph_relation_button)
+        graph_label.setObjectName("graphHeaderTitle")
+        graph_label.setMinimumWidth(graph_label.fontMetrics().horizontalAdvance(graph_label.text()) + 6)
+        graph_label.setFixedHeight(28)
+        graph_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        graph_header.addWidget(graph_label, 0, Qt.AlignmentFlag.AlignVCenter)
+        graph_header.addWidget(self.graph_summary_label, 1, Qt.AlignmentFlag.AlignVCenter)
+        graph_header.addWidget(self.graph_reset_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        graph_header.addWidget(self.graph_zoom_in_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        graph_header.addWidget(self.graph_zoom_out_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        graph_header.addWidget(self.graph_label_button, 0, Qt.AlignmentFlag.AlignVCenter)
+        graph_header.addWidget(self.graph_relation_button, 0, Qt.AlignmentFlag.AlignVCenter)
         graph_layout.addLayout(graph_header)
 
         graph_filter_panel = QFrame()
         graph_filter_panel.setObjectName("graphFilterPanel")
-        graph_filter_panel.setMaximumHeight(52)
+        graph_filter_panel.setMinimumHeight(36)
+        graph_filter_panel.setMaximumHeight(38)
+        self.graph_filter_panel = graph_filter_panel
         graph_filter_layout = QHBoxLayout(graph_filter_panel)
-        graph_filter_layout.setContentsMargins(10, 9, 10, 9)
+        graph_filter_layout.setContentsMargins(8, 2, 8, 2)
         graph_filter_layout.setSpacing(8)
-        graph_filter_layout.addWidget(self.graph_search_input, 1)
         self.graph_type_filter.setVisible(True)
         self.graph_relation_filter.setVisible(True)
-        graph_filter_layout.addWidget(self.graph_type_filter)
-        graph_filter_layout.addWidget(self.graph_relation_filter)
+        graph_filter_layout.addWidget(self.graph_search_input, 3)
+        graph_filter_layout.addWidget(self.graph_type_filter, 1)
+        graph_filter_layout.addWidget(self.graph_relation_filter, 1)
         hidden_type_chip_widget = QWidget(graph_filter_panel)
         hidden_relation_chip_widget = QWidget(graph_filter_panel)
         hidden_type_chip_widget.hide()
@@ -1406,7 +1432,7 @@ class KnowledgeWidget(QWidget):
         main.setMinimumHeight(1048)
         main_layout = QVBoxLayout(main)
         main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(10)
+        main_layout.setSpacing(6)
         main_layout.addWidget(overview_panel, 0)
         main_layout.addWidget(graph_panel, 2)
         main_layout.addWidget(evidence_panel, 0)
@@ -1886,10 +1912,9 @@ class KnowledgeWidget(QWidget):
             active_filters.append("节点类型")
         if str(self.graph_relation_filter.currentData() or ""):
             active_filters.append("关系类型")
-        filter_text = f"；过滤：{' / '.join(active_filters)}" if active_filters else ""
+        filter_text = f" · 过滤 {'/'.join(active_filters)}" if active_filters else ""
         self.graph_summary_label.setText(
-            f"合并知识图谱 {total_nodes} 实体 / {total_relations} 关系；"
-            f"当前显示 {len(visible_nodes)} 节点 / {len(visible_relations)} 关系{filter_text}"
+            f"{total_nodes} 实体 / {total_relations} 关系 · 可见 {len(visible_nodes)} / {len(visible_relations)}{filter_text}"
         )
 
     def _graph_detail_card(self, title: str, value: str, detail: str = "") -> str:

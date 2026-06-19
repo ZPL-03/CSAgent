@@ -199,7 +199,7 @@ class ChatWidget(QWidget):
         metrics = self._text_metrics(13)
         value = str(text)
         line_widths = [metrics.horizontalAdvance(line.rstrip()) for line in value.splitlines() if line.strip()]
-        raw_natural = max(line_widths, default=0) + 28
+        raw_natural = max(line_widths, default=0) + 22
         if raw_natural >= target_max:
             return target_max
         return max(target_min, raw_natural)
@@ -233,16 +233,16 @@ class ChatWidget(QWidget):
             f"QFrame#chatBubble {{ background:{bg}; border:1px solid {border}; border-radius:14px; }}"
         )
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(10, 7, 10, 7)
+        layout.setContentsMargins(8, 4, 8, 4)
         layout.setSpacing(0)
         text_label = self._label(text, fg, 13)
-        text_width = max(120, bubble_width - 20)
+        text_width = max(120, bubble_width - 16)
         text_label.setFixedWidth(text_width)
         text_height = self._wrapped_text_height(text, text_width)
-        text_label.setFixedHeight(text_height + 5)
+        text_label.setFixedHeight(text_height + 2)
         text_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
         layout.addWidget(text_label)
-        frame.setFixedHeight(max(42, text_height + 22))
+        frame.setFixedHeight(max(34, text_height + 12))
         return frame
 
     def _avatar_label(self, text: str, bg: str, fg: str) -> QLabel:
@@ -268,7 +268,7 @@ class ChatWidget(QWidget):
             bubble = self._bubble(message, palette["user_bg"], palette["user_bg"], palette["user_text"], 1120, 220, fit_content=True)
             row_layout.addWidget(bubble)
             row_layout.addWidget(self._avatar_label("U", palette["user_bg"], palette["user_text"]), 0, Qt.AlignmentFlag.AlignTop)
-            row.setFixedHeight(bubble.height() + 6)
+            row.setFixedHeight(bubble.height() + 4)
             return row
 
         if role == "system":
@@ -284,13 +284,13 @@ class ChatWidget(QWidget):
         column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         column_layout = QVBoxLayout(column)
         column_layout.setContentsMargins(0, 0, 0, 0)
-        column_layout.setSpacing(6)
+        column_layout.setSpacing(4)
         sender_label = self._label(sender, fg, 12, True)
         bubble = self._bubble(message, bg, border, fg, 1120, 220, fit_content=True)
         column_layout.addWidget(sender_label)
         column_layout.addWidget(bubble)
         row_layout.addWidget(column, 1)
-        row_height = max(avatar.height(), sender_label.sizeHint().height() + 5 + bubble.height()) + 8
+        row_height = max(avatar.height(), sender_label.sizeHint().height() + 4 + bubble.height()) + 6
         row.setFixedHeight(row_height)
         return row
 

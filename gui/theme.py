@@ -614,6 +614,13 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         font-weight: 600;
         padding: 0 4px;
     }}
+    QLabel#graphHeaderTitle {{
+        background: transparent;
+        color: {color["section"]};
+        font-size: 12px;
+        font-weight: 800;
+        padding: 0;
+    }}
     QLabel#knowledgePanelTitle {{
         background: transparent;
         color: {color["section"]};
@@ -645,8 +652,9 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         padding: 4px 2px 0 2px;
     }}
     QLineEdit#graphSearchInput {{
-        min-height: 34px;
-        padding: 5px 10px;
+        min-height: 30px;
+        max-height: 30px;
+        padding: 3px 10px;
         padding-right: 10px;
     }}
     QTextBrowser#knowledgePanelBrowser {{
@@ -793,8 +801,8 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
     }}
     QScrollBar:vertical {{
         background: {color["app_bg"]};
-        width: 10px;
-        margin: 2px 2px 2px 2px;
+        width: 8px;
+        margin: 2px 1px 2px 1px;
         border: 0;
     }}
     QScrollBar::handle:vertical {{
