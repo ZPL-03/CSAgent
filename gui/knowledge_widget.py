@@ -550,15 +550,15 @@ class KnowledgeGraphView(QWidget):
         available_width = max(1.0, graph_rect.width() - padding * 2.0)
         available_height = max(1.0, graph_rect.height() - padding * 2.0)
         factor = min(1.72, available_width / width, available_height / height)
-        vertical_factor = min(1.78, max(factor, available_height / height * 0.82))
+        vertical_factor = min(2.35, max(factor, available_height / height * 0.98))
         current_center = QPointF((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
-        vertical_offset = min(88.0, graph_rect.height() * 0.20)
-        target_center = QPointF(graph_rect.center().x(), graph_rect.center().y() - vertical_offset)
+        label_balance_offset = min(14.0, graph_rect.height() * 0.03)
+        target_center = QPointF(graph_rect.center().x(), graph_rect.center().y() - label_balance_offset)
         fitted: dict[str, QPointF] = {}
         safe_left = graph_rect.left() + 34.0
         safe_right = graph_rect.right() - 34.0
-        safe_top = graph_rect.top() + 33.0
-        safe_bottom = graph_rect.bottom() - 88.0
+        safe_top = graph_rect.top() + 34.0
+        safe_bottom = graph_rect.bottom() - 34.0
         for name, point in positions.items():
             x = target_center.x() + (point.x() - current_center.x()) * factor
             y = target_center.y() + (point.y() - current_center.y()) * vertical_factor
