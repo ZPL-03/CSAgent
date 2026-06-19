@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-UI_LAYOUT_VERSION = 9
+UI_LAYOUT_VERSION = 10
 
 from PyQt6 import sip
 from PyQt6.QtCore import QObject, QRectF, QSettings, QSize, Qt, QThread, QUrl, pyqtSignal
@@ -599,7 +599,7 @@ class MainWindow(QMainWindow):
         workbench_layout.addWidget(workbench_splitter)
 
         right_layout = QVBoxLayout()
-        right_layout.setContentsMargins(10, 14, 22, 14)
+        right_layout.setContentsMargins(12, 14, 12, 14)
         right_layout.setSpacing(8)
         live_header_layout = QHBoxLayout()
         live_header_layout.setContentsMargins(0, 0, 0, 0)
@@ -681,6 +681,7 @@ class MainWindow(QMainWindow):
 
         workbench_right_content = QWidget()
         workbench_right_content.setObjectName("resultRailContent")
+        workbench_right_content.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         workbench_right_content.setLayout(right_layout)
         workbench_right_scroll = QScrollArea()
         workbench_right_scroll.setObjectName("resultRail")
@@ -688,6 +689,8 @@ class MainWindow(QMainWindow):
         workbench_right_scroll.setFrameShape(QFrame.Shape.NoFrame)
         workbench_right_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         workbench_right_scroll.setWidget(workbench_right_content)
+        self.workbench_right_scroll = workbench_right_scroll
+        self.workbench_right_content = workbench_right_content
 
         workbench_right = QWidget()
         workbench_right.setObjectName("resultRailShell")
@@ -731,9 +734,23 @@ class MainWindow(QMainWindow):
         main_splitter.addWidget(self.stack)
         main_splitter.addWidget(self.right_stack)
         main_splitter.setChildrenCollapsible(False)
+        main_splitter.setStretchFactor(0, 0)
+        main_splitter.setStretchFactor(1, 1)
+        main_splitter.setStretchFactor(2, 0)
         main_splitter.setSizes([270, 980, 370])
         self.main_splitter = main_splitter
         self.setCentralWidget(main_splitter)
+
+    def _sync_main_splitter_sizes(self) -> None:
+        if not hasattr(self, "main_splitter"):
+            return
+        total_width = max(0, self.main_splitter.width())
+        if total_width <= 0:
+            total_width = max(0, self.width())
+        right_width = min(386, max(350, int(total_width * 0.24)))
+        left_width = min(286, max(248, int(total_width * 0.18)))
+        center_width = max(520, total_width - left_width - right_width)
+        self.main_splitter.setSizes([left_width, center_width, right_width])
 
     def _sidebar_page(self, title: str, cards: list[tuple[str, str]], footer: str = "") -> QWidget:
         page = QWidget()
@@ -1983,6 +2000,7 @@ class MainWindow(QMainWindow):
             self.ui_state_settings.clear()
             self._resize_to_available_work_area()
             self._ensure_window_within_work_area(clamp_to_target=True)
+            self._sync_main_splitter_sizes()
             return
         geometry = self.ui_state_settings.value("window_geometry")
         state = self.ui_state_settings.value("window_state")
@@ -1994,6 +2012,7 @@ class MainWindow(QMainWindow):
         if not geometry_restored:
             self._resize_to_available_work_area()
         self._ensure_window_within_work_area(clamp_to_target=True)
+        self._sync_main_splitter_sizes()
 
     def _save_window_layout(self) -> None:
         self.ui_state_settings.setValue("layout_version", UI_LAYOUT_VERSION)

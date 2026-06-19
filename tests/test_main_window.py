@@ -517,6 +517,27 @@ def test_main_window_requested_width_is_not_expanded_by_hidden_pages(monkeypatch
         app.processEvents()
 
 
+def test_workbench_right_rail_fits_non_maximized_viewport(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window.locale.set_theme("dark")
+        window._apply_styles()
+        window.resize(1280, 960)
+        window._sync_main_splitter_sizes()
+        window.show()
+        app.processEvents()
+
+        margins = window.workbench_right_content.layout().contentsMargins()
+        assert margins.left() == margins.right()
+        assert window.workbench_right_scroll.viewport().width() >= window.workbench_right_content.width() - 1
+        assert window.right_stack.width() >= 350
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_candidate_pool_empty_and_runtime_use_same_splitter_balance() -> None:
     app = _app()
     widget = CandidateWidget()
