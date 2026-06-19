@@ -222,10 +222,12 @@ def test_knowledge_widget_graph_search_filters_visible_graph(monkeypatch, tmp_pa
         assert "总实体" in widget.graph_detail_browser.toHtml()
         widget.graph_relation_button.setChecked(False)
         app.processEvents()
-        assert widget.graph_view.show_relations is False
+        assert widget.graph_view.show_relations is True
+        assert widget.graph_view.show_relation_labels is False
         widget.graph_relation_button.setChecked(True)
         app.processEvents()
         assert widget.graph_view.show_relations is True
+        assert widget.graph_view.show_relation_labels is True
 
         widget.graph_view._selected_node_name = "Initial Imperfection"
         widget._update_graph_detail("Initial Imperfection")
@@ -455,7 +457,7 @@ def test_knowledge_graph_view_default_layout_fits_canvas() -> None:
         graph.set_graph(entities=entities, relations=relations)
         _nodes, visible_relations, _total_nodes, total_relations = graph._node_payload()
         assert total_relations == 90
-        assert len(visible_relations) <= 16
+        assert len(visible_relations) <= 28
 
         graph.set_filter_text("Node")
         _nodes, filtered_relations, _total_nodes, _total_relations = graph._node_payload()

@@ -16,10 +16,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-UI_LAYOUT_VERSION = 10
+UI_LAYOUT_VERSION = 11
 
 from PyQt6 import sip
-from PyQt6.QtCore import QObject, QRectF, QSettings, QSize, Qt, QThread, QUrl, pyqtSignal
+from PyQt6.QtCore import QObject, QRectF, QSettings, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QCloseEvent, QDesktopServices, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
@@ -290,6 +290,7 @@ class MainWindow(QMainWindow):
         self._resize_to_available_work_area()
         self.ui_state_settings = QSettings("CSAgent", "Workbench")
         self.session = PipelineSession()
+        self._splitter_sync_pending = False
         self.worker_thread: QThread | None = None
         self.worker: PipelineWorker | None = None
         self.workflow_event_store = WorkflowEventStore()
@@ -742,15 +743,24 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(main_splitter)
 
     def _sync_main_splitter_sizes(self) -> None:
+        self._splitter_sync_pending = False
         if not hasattr(self, "main_splitter"):
             return
         total_width = max(0, self.main_splitter.width())
         if total_width <= 0:
             total_width = max(0, self.width())
-        right_width = min(386, max(350, int(total_width * 0.24)))
+        right_width = 370 if total_width >= 1180 else 340
         left_width = min(286, max(248, int(total_width * 0.18)))
         center_width = max(520, total_width - left_width - right_width)
+        self.right_stack.setMinimumWidth(right_width)
+        self.right_stack.setMaximumWidth(right_width)
         self.main_splitter.setSizes([left_width, center_width, right_width])
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        if hasattr(self, "main_splitter") and not self._splitter_sync_pending:
+            self._splitter_sync_pending = True
+            QTimer.singleShot(0, self._sync_main_splitter_sizes)
 
     def _sidebar_page(self, title: str, cards: list[tuple[str, str]], footer: str = "") -> QWidget:
         page = QWidget()

@@ -5,6 +5,7 @@ from __future__ import annotations
 import gzip
 import json
 import math
+import re
 from dataclasses import asdict
 from html import escape
 from pathlib import Path
@@ -124,6 +125,7 @@ class KnowledgeGraphView(QWidget):
         self.active_relation_types: set[str] = set()
         self.show_labels = True
         self.show_relations = True
+        self.show_relation_labels = True
         self._scale = 1.0
         self._pan = QPointF(0.0, 0.0)
         self._drag_start: QPointF | None = None
@@ -218,9 +220,15 @@ class KnowledgeGraphView(QWidget):
         self.update()
 
     def set_show_relations(self, enabled: bool) -> None:
-        """设置关系线显示状态。"""
+        """兼容旧调用，实际控制关系标签显示状态。"""
 
-        self.show_relations = bool(enabled)
+        self.set_show_relation_labels(enabled)
+
+    def set_show_relation_labels(self, enabled: bool) -> None:
+        """设置关系标签显示状态。"""
+
+        self.show_relation_labels = bool(enabled)
+        self.show_relations = True
         self.update()
 
     def _colors(self) -> dict[str, QColor]:
@@ -375,7 +383,7 @@ class KnowledgeGraphView(QWidget):
                 str(relation.get("relation") or ""),
             )
         )
-        relation_limit = 90 if self.filter_text or self.active_node_types or self.active_relation_types else 16
+        relation_limit = 120 if self.filter_text or self.active_node_types or self.active_relation_types else 28
         visible_relations = visible_relations[:relation_limit]
         if visible_relations:
             connected_names: set[str] = set()
@@ -682,9 +690,14 @@ class KnowledgeGraphView(QWidget):
         curve = 6.0 if not highlight else 26.0
         control = QPointF((source.x() + target.x()) / 2.0 + normal.x() * curve, (source.y() + target.y()) / 2.0 + normal.y() * curve)
 
-        painter.setPen(QPen(color, 1.05 if highlight else 0.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         path = QPainterPath(source)
         path.quadTo(control, target)
+        width = 2.05 if highlight else 1.46
+        shadow = QColor("#020617" if self.theme == "dark" else "#ffffff")
+        shadow.setAlpha(112 if self.theme == "dark" else 150)
+        painter.setPen(QPen(shadow, width + 1.25, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawPath(path)
+        painter.setPen(QPen(color, width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         painter.drawPath(path)
 
         if show_arrow:
@@ -709,26 +722,87 @@ class KnowledgeGraphView(QWidget):
         relation_name: str,
         graph_rect: QRectF,
         colors: dict[str, QColor],
-    ) -> None:
+        occupied: list[QRectF] | None = None,
+        force: bool = False,
+    ) -> bool:
         label = str(relation_name or "RELATED_TO").strip()
         if not label:
-            return
+            return False
         font = QFont(self.font())
         font.setPointSize(7)
         font.setBold(True)
         painter.setFont(font)
         metrics = QFontMetrics(font)
-        text = metrics.elidedText(label, Qt.TextElideMode.ElideRight, 82)
-        width = max(44.0, float(metrics.horizontalAdvance(text) + 12))
-        mid = QPointF((source.x() + target.x()) / 2.0, (source.y() + target.y()) / 2.0)
-        rect = QRectF(mid.x() - width / 2.0, mid.y() - 10.0, width, 18.0)
-        rect.moveLeft(min(max(rect.left(), graph_rect.left() + 4.0), graph_rect.right() - rect.width() - 4.0))
-        rect.moveTop(min(max(rect.top(), graph_rect.top() + 4.0), graph_rect.bottom() - rect.height() - 4.0))
+        text = metrics.elidedText(label, Qt.TextElideMode.ElideRight, 122)
+        width = min(132.0, max(48.0, float(metrics.horizontalAdvance(text) + 14)))
+        height = 18.0
+        dx = target.x() - source.x()
+        dy = target.y() - source.y()
+        length = max(1.0, math.hypot(dx, dy))
+        normal = QPointF(-dy / length, dx / length)
+        candidates: list[QRectF] = []
+        for ratio, offset in ((0.50, 12.0), (0.38, -12.0), (0.62, 12.0)):
+            mid = QPointF(source.x() + dx * ratio + normal.x() * offset, source.y() + dy * ratio + normal.y() * offset)
+            rect = QRectF(mid.x() - width / 2.0, mid.y() - height / 2.0, width, height)
+            rect.moveLeft(min(max(rect.left(), graph_rect.left() + 4.0), graph_rect.right() - rect.width() - 4.0))
+            rect.moveTop(min(max(rect.top(), graph_rect.top() + 4.0), graph_rect.bottom() - rect.height() - 4.0))
+            candidates.append(rect)
+
+        selected_rect = candidates[0]
+        if occupied is not None and not force:
+            selected_rect = QRectF()
+            for candidate in candidates:
+                padded = candidate.adjusted(-4, -3, 4, 3)
+                if not any(padded.intersects(existing) for existing in occupied):
+                    selected_rect = candidate
+                    break
+            if selected_rect.isNull():
+                return False
+        rect = selected_rect
         painter.setBrush(QBrush(colors["label_bg"]))
         painter.setPen(QPen(colors["highlight"], 0.8))
         painter.drawRoundedRect(rect, 5, 5)
         painter.setPen(colors["text"])
         painter.drawText(rect.adjusted(5, 0, -5, 0), Qt.AlignmentFlag.AlignCenter, text)
+        if occupied is not None:
+            occupied.append(rect.adjusted(-4, -3, 4, 3))
+        return True
+
+    def _wrapped_label_lines(self, name: str, metrics: QFontMetrics, max_width: int, max_lines: int = 2) -> list[str]:
+        raw = str(name or "").strip()
+        if not raw:
+            return []
+        text_width = max(24, max_width - 16)
+        if metrics.horizontalAdvance(raw) <= text_width:
+            return [raw]
+
+        tokens = [token for token in re.split(r"([\s/_-]+)", raw) if token]
+        lines: list[str] = []
+        current = ""
+        for token in tokens:
+            candidate = f"{current}{token}" if current else token.strip()
+            if not current or metrics.horizontalAdvance(candidate) <= text_width:
+                current = candidate
+                continue
+            lines.append(current.strip())
+            current = token.strip()
+            if len(lines) == max_lines - 1:
+                break
+        rest = current.strip()
+        if len(lines) == max_lines - 1:
+            consumed = "".join(lines)
+            if raw.startswith(consumed):
+                rest = raw[len(consumed) :].strip(" /_-")
+            if not rest:
+                rest = current.strip()
+        if rest:
+            lines.append(metrics.elidedText(rest, Qt.TextElideMode.ElideRight, text_width))
+        if not lines:
+            lines = [metrics.elidedText(raw, Qt.TextElideMode.ElideRight, text_width)]
+        if len(lines) > max_lines:
+            tail = " ".join(lines[max_lines - 1 :])
+            lines = lines[: max_lines - 1] + [metrics.elidedText(tail, Qt.TextElideMode.ElideRight, text_width)]
+        return [line for line in lines if line]
 
     def _draw_label(
         self,
@@ -743,26 +817,45 @@ class KnowledgeGraphView(QWidget):
         occupied: list[QRectF] | None = None,
         force: bool = False,
     ) -> bool:
-        label = metrics.elidedText(name, Qt.TextElideMode.ElideRight, 116)
-        width = min(124.0, max(48.0, float(metrics.horizontalAdvance(label) + 14)))
-        height = 20.0
-        x = point.x() - width / 2.0
-        y = point.y() + radius + 5.0
-        if y + height > graph_rect.bottom():
-            y = point.y() - radius - height - 5.0
-        x = min(max(x, graph_rect.left() + 2.0), graph_rect.right() - width - 2.0)
-        y = min(max(y, graph_rect.top() + 2.0), graph_rect.bottom() - height - 2.0)
-        label_rect = QRectF(x, y, width, height)
+        max_width = 172
+        lines = self._wrapped_label_lines(name, metrics, max_width=max_width, max_lines=2)
+        if not lines:
+            return False
+        width = min(float(max_width), max(52.0, float(max(metrics.horizontalAdvance(line) for line in lines) + 16)))
+        line_height = max(12, metrics.height())
+        height = float(line_height * len(lines) + 7)
+        raw_candidates = [
+            QRectF(point.x() - width / 2.0, point.y() + radius + 5.0, width, height),
+            QRectF(point.x() - width / 2.0, point.y() - radius - height - 5.0, width, height),
+            QRectF(point.x() + radius + 7.0, point.y() - height / 2.0, width, height),
+            QRectF(point.x() - radius - width - 7.0, point.y() - height / 2.0, width, height),
+        ]
+        candidates: list[QRectF] = []
+        for candidate in raw_candidates:
+            candidate = QRectF(candidate)
+            candidate.moveLeft(min(max(candidate.left(), graph_rect.left() + 2.0), graph_rect.right() - candidate.width() - 2.0))
+            candidate.moveTop(min(max(candidate.top(), graph_rect.top() + 2.0), graph_rect.bottom() - candidate.height() - 2.0))
+            candidates.append(candidate)
+
+        label_rect = candidates[0]
         if occupied is not None and not force:
-            padded_rect = label_rect.adjusted(-5, -4, 5, 4)
-            if any(padded_rect.intersects(existing) for existing in occupied):
+            label_rect = QRectF()
+            for candidate in candidates:
+                padded_rect = candidate.adjusted(-5, -4, 5, 4)
+                if not any(padded_rect.intersects(existing) for existing in occupied):
+                    label_rect = candidate
+                    break
+            if label_rect.isNull():
                 return False
         painter.setBrush(QBrush(colors["label_bg"]))
         painter.setPen(QPen(colors["border"], 0.8))
         painter.drawRoundedRect(label_rect, 5, 5)
         painter.setFont(font)
         painter.setPen(colors["text"])
-        painter.drawText(label_rect.adjusted(6, 0, -6, 0), Qt.AlignmentFlag.AlignCenter, label)
+        text_rect = label_rect.adjusted(7, 3, -7, -3)
+        for index, line in enumerate(lines):
+            line_rect = QRectF(text_rect.left(), text_rect.top() + index * line_height, text_rect.width(), line_height)
+            painter.drawText(line_rect, Qt.AlignmentFlag.AlignCenter, line)
         if occupied is not None:
             occupied.append(label_rect.adjusted(-5, -4, 5, 4))
         return True
@@ -812,7 +905,7 @@ class KnowledgeGraphView(QWidget):
         painter.fillRect(self.rect(), colors["bg"])
 
         panel = QRectF(1, 1, self.width() - 2, self.height() - 2)
-        graph_rect = panel.adjusted(14, 30, -14, -12)
+        graph_rect = panel.adjusted(14, 30, -14, -8)
         self._draw_background(painter, panel, graph_rect, colors)
         self._draw_grid(painter, graph_rect, colors["grid"])
 
@@ -855,36 +948,37 @@ class KnowledgeGraphView(QWidget):
             )
             for relation in self.highlight_relations
         }
-        if self.show_relations:
-            for relation in visible_relations:
-                source = str(relation.get("source") or "")
-                target = str(relation.get("target") or "")
-                if source not in positions or target not in positions:
-                    continue
-                key = (source, str(relation.get("relation") or ""), target)
-                selected_edge = bool(self._selected_node_name and self._selected_node_name in {source, target})
-                highlight = key in highlighted or selected_edge
-                edge_color = QColor(colors["highlight"]) if highlight else QColor("#9aa9bb" if self.theme == "light" else "#4d5d73")
-                edge_color.setAlpha(218 if key in highlighted else (164 if selected_edge else 14))
-                source_radius = self._node_radius(source, degrees, counts) + 3.0
-                target_radius = self._node_radius(target, degrees, counts) + 5.0
-                edge_source, edge_target = self._trim_edge(positions[source], positions[target], source_radius, target_radius)
-                self._draw_edge(painter, edge_source, edge_target, edge_color, highlight, show_arrow=highlight)
-                if key in highlighted or selected_edge:
-                    self._draw_edge_label(
-                        painter,
+        edge_label_requests: list[tuple[QPointF, QPointF, str, bool]] = []
+        show_all_relation_labels = self.show_relation_labels and self.show_labels and len(visible_relations) <= 28
+        for relation in visible_relations:
+            source = str(relation.get("source") or "")
+            target = str(relation.get("target") or "")
+            if source not in positions or target not in positions:
+                continue
+            key = (source, str(relation.get("relation") or ""), target)
+            selected_edge = bool(self._selected_node_name and self._selected_node_name in {source, target})
+            highlight = key in highlighted or selected_edge
+            edge_color = QColor(colors["highlight"]) if highlight else QColor("#1d4ed8" if self.theme == "light" else "#f59e0b")
+            edge_color.setAlpha(244 if key in highlighted else (218 if selected_edge else (186 if self.theme == "light" else 202)))
+            source_radius = self._node_radius(source, degrees, counts) + 3.0
+            target_radius = self._node_radius(target, degrees, counts) + 5.0
+            edge_source, edge_target = self._trim_edge(positions[source], positions[target], source_radius, target_radius)
+            self._draw_edge(painter, edge_source, edge_target, edge_color, highlight, show_arrow=highlight)
+            if show_all_relation_labels or (self.show_relation_labels and (key in highlighted or selected_edge)):
+                edge_label_requests.append(
+                    (
                         edge_source,
                         edge_target,
                         str(relation.get("relation") or ""),
-                        graph_rect,
-                        colors,
+                        key in highlighted or selected_edge,
                     )
+                )
 
         label_font = QFont(self.font())
         label_font.setPointSize(8)
         label_font.setBold(True)
         label_metrics = QFontMetrics(label_font)
-        label_budget = min(len(visible_nodes), 7 if len(visible_nodes) <= 16 else 9)
+        label_budget = len(visible_nodes) if len(visible_nodes) <= 20 else min(len(visible_nodes), 16)
         ranked_label_names = {
             name
             for name, _entity_type in sorted(
@@ -920,8 +1014,21 @@ class KnowledgeGraphView(QWidget):
                     label_font,
                     label_metrics,
                     occupied_label_rects,
-                    force=is_selected,
+                    force=is_selected or len(visible_nodes) <= 14,
                 )
+
+        edge_label_rects = list(occupied_label_rects)
+        for edge_source, edge_target, relation_name, force_relation_label in edge_label_requests:
+            self._draw_edge_label(
+                painter,
+                edge_source,
+                edge_target,
+                relation_name,
+                graph_rect,
+                colors,
+                edge_label_rects,
+                force=force_relation_label,
+            )
 
     def wheelEvent(self, event) -> None:
         old_scale = self._scale
@@ -1138,7 +1245,7 @@ class KnowledgeWidget(QWidget):
         self.pipeline_widget.setMinimumHeight(174)
         self.pipeline_widget.setMaximumHeight(188)
         self.graph_view = KnowledgeGraphView()
-        self.graph_view.setMinimumHeight(560)
+        self.graph_view.setMinimumHeight(360)
         self.graph_summary_label = QLabel("核心图谱等待知识库数据")
         self.graph_summary_label.setObjectName("graphSummaryLabel")
         self.graph_summary_label.setWordWrap(False)
@@ -1166,8 +1273,8 @@ class KnowledgeWidget(QWidget):
         self.graph_label_button.setToolTip("显示或隐藏节点标签")
         self.graph_label_button.setCheckable(True)
         self.graph_label_button.setChecked(True)
-        self.graph_relation_button = QPushButton("线")
-        self.graph_relation_button.setToolTip("显示或隐藏关系线")
+        self.graph_relation_button = QPushButton("标")
+        self.graph_relation_button.setToolTip("显示或隐藏关系标签")
         self.graph_relation_button.setCheckable(True)
         self.graph_relation_button.setChecked(True)
         for button in [
@@ -1357,7 +1464,8 @@ class KnowledgeWidget(QWidget):
 
         graph_panel = QFrame()
         graph_panel.setObjectName("knowledgeGraphPanel")
-        graph_panel.setMinimumHeight(680)
+        graph_panel.setMinimumHeight(480)
+        graph_panel.setMaximumHeight(520)
         graph_layout = QVBoxLayout(graph_panel)
         graph_layout.setContentsMargins(8, 4, 8, 8)
         graph_layout.setSpacing(1)
@@ -1429,7 +1537,7 @@ class KnowledgeWidget(QWidget):
 
         main = QWidget()
         main.setMinimumWidth(0)
-        main.setMinimumHeight(1048)
+        main.setMinimumHeight(840)
         main_layout = QVBoxLayout(main)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(6)
@@ -1469,7 +1577,7 @@ class KnowledgeWidget(QWidget):
         self.graph_zoom_in_button.clicked.connect(lambda: self.graph_view.zoom_by(1.18))
         self.graph_zoom_out_button.clicked.connect(lambda: self.graph_view.zoom_by(0.84))
         self.graph_label_button.toggled.connect(self.graph_view.set_show_labels)
-        self.graph_relation_button.toggled.connect(self.graph_view.set_show_relations)
+        self.graph_relation_button.toggled.connect(self.graph_view.set_show_relation_labels)
         self.graph_view.nodeSelected.connect(self._update_graph_detail)
 
     def refresh(
