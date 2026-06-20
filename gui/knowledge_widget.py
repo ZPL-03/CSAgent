@@ -692,10 +692,10 @@ class KnowledgeGraphView(QWidget):
 
         path = QPainterPath(source)
         path.quadTo(control, target)
-        width = 2.05 if highlight else 1.46
+        width = 1.78 if highlight else 1.22
         shadow = QColor("#020617" if self.theme == "dark" else "#ffffff")
-        shadow.setAlpha(112 if self.theme == "dark" else 150)
-        painter.setPen(QPen(shadow, width + 1.25, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        shadow.setAlpha(96 if self.theme == "dark" else 132)
+        painter.setPen(QPen(shadow, width + 0.95, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         painter.drawPath(path)
         painter.setPen(QPen(color, width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         painter.drawPath(path)
@@ -959,7 +959,7 @@ class KnowledgeGraphView(QWidget):
             selected_edge = bool(self._selected_node_name and self._selected_node_name in {source, target})
             highlight = key in highlighted or selected_edge
             edge_color = QColor(colors["highlight"]) if highlight else QColor("#1d4ed8" if self.theme == "light" else "#f59e0b")
-            edge_color.setAlpha(244 if key in highlighted else (218 if selected_edge else (186 if self.theme == "light" else 202)))
+            edge_color.setAlpha(238 if key in highlighted else (206 if selected_edge else (172 if self.theme == "light" else 184)))
             source_radius = self._node_radius(source, degrees, counts) + 3.0
             target_radius = self._node_radius(target, degrees, counts) + 5.0
             edge_source, edge_target = self._trim_edge(positions[source], positions[target], source_radius, target_radius)

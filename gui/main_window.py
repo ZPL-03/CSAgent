@@ -359,8 +359,8 @@ class MainWindow(QMainWindow):
         self.confirm_yes_button = QPushButton(self.locale.text("button.confirm"))
         self.confirm_no_button = QPushButton(self.locale.text("button.pause"))
         self.generate_button.setFixedWidth(56)
-        self.confirm_yes_button.setFixedWidth(88)
-        self.confirm_no_button.setFixedWidth(88)
+        self.confirm_yes_button.setFixedWidth(84)
+        self.confirm_no_button.setFixedWidth(100)
         self.trace_button = QPushButton(self.locale.text("button.view_trace"))
         self.trace_button.setObjectName("traceLinkButton")
         self.trace_button.setMinimumWidth(132)
@@ -1861,8 +1861,8 @@ class MainWindow(QMainWindow):
     def _fit_input_action_buttons(self) -> None:
         for button, minimum_width in [
             (self.generate_button, 56),
-            (self.confirm_yes_button, 88),
-            (self.confirm_no_button, 88),
+            (self.confirm_yes_button, 84),
+            (self.confirm_no_button, 100),
         ]:
             text_width = button.fontMetrics().horizontalAdvance(button.text())
             button.setFixedWidth(max(minimum_width, text_width + 24))

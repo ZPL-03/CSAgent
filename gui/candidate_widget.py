@@ -335,7 +335,6 @@ class CandidateWidget(QWidget):
         rule_check = candidate.get("rule_check", {})
         screening_summary = candidate.get("screening_summary") or "尚未完成代理模型初筛。"
         selection_reason = candidate.get("selection_reason") or "当前样本尚未进入优先校核队列。"
-        generation_audit_html = self._generation_audit_html(candidate.get("generation_audit") or {})
 
         ply_items = "".join(
             f"<li>第 {index + 1} 层：{angle}&deg;</li>"
@@ -381,7 +380,6 @@ class CandidateWidget(QWidget):
             f"<b>正式编号：</b>{archive_id}</p>"
             f"<p><b>生成说明：</b>{candidate.get('rationale', '-')}</p>"
             f"<p><b>来源补充：</b>{candidate.get('origin_summary') or '当前候选未附带额外来源说明。'}</p>"
-            f"{generation_audit_html}"
             f"<p><b>代理预测：</b> 极限压力={_format_number(candidate.get('surrogate_ultimate_pressure_MPa'))} MPa，"
             f"ASME RD-1172线性屈曲压力={_format_number(candidate.get('asme_linear_buckling_pressure_MPa'))} MPa，"
             f"PBIPF 预测极限压力为 {_format_number(candidate.get('surrogate_PBIPF_MPa'))} MPa，"

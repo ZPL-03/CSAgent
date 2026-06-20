@@ -65,9 +65,11 @@ def test_candidate_widget_renders_generation_audit() -> None:
         widget.candidateSelected.connect(lambda candidate: selected.append(candidate))
         widget.update_candidates([_candidate()])
         html = widget.audit_browser.toHtml()
+        detail_html = widget.detail_browser.toHtml()
 
         assert "来源审计" in widget.summary_label.text()
         assert "候选来源与去重审计" in html
+        assert "候选来源与去重审计" not in detail_html
         assert "初始配额" in html
         assert "规则过滤原因" in html
         assert "radius_mm 超出范围" in html

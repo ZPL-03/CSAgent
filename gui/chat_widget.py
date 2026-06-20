@@ -19,6 +19,7 @@ class ChatWidget(QWidget):
         self.empty_text = ""
         self.empty_state: dict[str, str] = {}
         self._last_render_width = 0
+        self._resize_render_pending = False
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -60,9 +61,15 @@ class ChatWidget(QWidget):
         self._render_messages()
 
     def add_message(self, sender: str, message: str) -> None:
+        follow_latest = self._should_follow_latest()
+        was_empty = not self._messages
         self._messages.append((str(sender), str(message)))
-        self._render_messages()
-        QTimer.singleShot(0, self._scroll_to_bottom)
+        if was_empty:
+            self._clear_layout()
+        self._append_content_widget(self._message_widget(str(sender), str(message)))
+        self._sync_content_minimum_height()
+        if follow_latest:
+            QTimer.singleShot(0, self._scroll_to_bottom)
 
     def toPlainText(self) -> str:
         if not self._messages:
@@ -142,6 +149,18 @@ class ChatWidget(QWidget):
                 widget.deleteLater()
         self.content.setMinimumHeight(0)
 
+    def _append_content_widget(self, widget: QWidget) -> None:
+        count = self.content_layout.count()
+        if count and self.content_layout.itemAt(count - 1).spacerItem() is not None:
+            self.content_layout.insertWidget(count - 1, widget)
+            return
+        self.content_layout.addWidget(widget)
+        self.content_layout.addStretch(1)
+
+    def _should_follow_latest(self) -> bool:
+        scrollbar = self.scroll_area.verticalScrollBar()
+        return scrollbar.maximum() <= 0 or scrollbar.value() >= scrollbar.maximum() - 24
+
     def _scroll_to_bottom(self) -> None:
         scrollbar = self.scroll_area.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
@@ -183,7 +202,7 @@ class ChatWidget(QWidget):
         conversational_cap = max(420, int(viewport_width * 0.76))
         available = min(available, conversational_cap)
         target_max = min(max_width, available)
-        target_min = min(max(min_width, 180), target_max)
+        target_min = min(max(min_width, 48), target_max)
         return target_max, target_min
 
     def _wrapped_line_count(self, text: str, content_width: int) -> int:
@@ -233,16 +252,16 @@ class ChatWidget(QWidget):
             f"QFrame#chatBubble {{ background:{bg}; border:1px solid {border}; border-radius:14px; }}"
         )
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setContentsMargins(8, 3, 8, 3)
         layout.setSpacing(0)
         text_label = self._label(text, fg, 13)
         text_width = max(120, bubble_width - 16)
         text_label.setFixedWidth(text_width)
         text_height = self._wrapped_text_height(text, text_width)
-        text_label.setFixedHeight(text_height + 2)
+        text_label.setFixedHeight(text_height + 3)
         text_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
         layout.addWidget(text_label)
-        frame.setFixedHeight(max(34, text_height + 12))
+        frame.setFixedHeight(max(32, text_height + 11))
         return frame
 
     def _avatar_label(self, text: str, bg: str, fg: str) -> QLabel:
@@ -265,10 +284,10 @@ class ChatWidget(QWidget):
 
         if role == "user":
             row_layout.addStretch(1)
-            bubble = self._bubble(message, palette["user_bg"], palette["user_bg"], palette["user_text"], 1120, 220, fit_content=True)
+            bubble = self._bubble(message, palette["user_bg"], palette["user_bg"], palette["user_text"], 1120, 72, fit_content=True)
             row_layout.addWidget(bubble)
             row_layout.addWidget(self._avatar_label("U", palette["user_bg"], palette["user_text"]), 0, Qt.AlignmentFlag.AlignTop)
-            row.setFixedHeight(bubble.height() + 4)
+            row.setMinimumHeight(bubble.height() + 4)
             return row
 
         if role == "system":
@@ -291,7 +310,7 @@ class ChatWidget(QWidget):
         column_layout.addWidget(bubble)
         row_layout.addWidget(column, 1)
         row_height = max(avatar.height(), sender_label.sizeHint().height() + 4 + bubble.height()) + 6
-        row.setFixedHeight(row_height)
+        row.setMinimumHeight(row_height)
         return row
 
     def _empty_widget(self) -> QWidget:
@@ -385,5 +404,10 @@ class ChatWidget(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if abs(event.size().width() - self._last_render_width) >= 32:
-            self._render_messages()
+        if abs(event.size().width() - self._last_render_width) >= 32 and not self._resize_render_pending:
+            self._resize_render_pending = True
+            QTimer.singleShot(60, self._render_after_resize)
+
+    def _render_after_resize(self) -> None:
+        self._resize_render_pending = False
+        self._render_messages()
