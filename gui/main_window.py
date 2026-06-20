@@ -298,6 +298,14 @@ class MainWindow(QMainWindow):
         self.runtime_agent_states: dict[str, str] = {}
         self.runtime_stage_text = ""
         self.report_output_dir: Path | None = None
+        self._live_refresh_pending = False
+        self._pending_live_candidate: dict | None = None
+        self._run_selector_refresh_pending = False
+        self._knowledge_refresh_pending = False
+        self._pending_knowledge_task: dict | None = None
+        self._pending_knowledge_load_evidence = False
+        self._pending_knowledge_force = False
+        self._last_knowledge_refresh_key = ""
 
         self.app_title_label = QLabel(self.locale.text("app.title"))
         self.app_title_label.setObjectName("appTitle")
@@ -471,8 +479,7 @@ class MainWindow(QMainWindow):
         self._update_button_states()
         self._update_overview_cards()
         self._refresh_run_selector()
-        self.knowledge_widget.refresh(load_evidence=False)
-        self._refresh_knowledge_sidebar()
+        self._queue_knowledge_refresh(load_evidence=False, force=True, delay_ms=0)
 
     def _sync_brand_logo(self) -> None:
         if not self._brand_badge_path.exists():
@@ -1014,7 +1021,7 @@ class MainWindow(QMainWindow):
             card.setObjectName("agentCard")
             card.setWordWrap(True)
             card.setProperty("state", "waiting")
-            card.setMinimumHeight(68)
+            card.setMinimumHeight(78)
             card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             content_layout.addWidget(card)
             self.settings_sidebar_labels[key] = card
@@ -1055,7 +1062,11 @@ class MainWindow(QMainWindow):
             "llm": ("模型与 API", f"{primary.get('model') or primary.get('model_env') or '-'} / {fallback.get('model') or fallback.get('model_env') or '-'}"),
             "solver": ("求解器集成", f"{abaqus.get('command') or 'abaqus'} · 用户子程序 {'启用' if abaqus.get('use_user_subroutine') else '关闭'}"),
             "workflow": ("智能体编排", f"确认节点 {confirm_count} 个 · 随机种子 {pipeline.get('random_seed', '-')}"),
-            "knowledge": ("知识库 / RAG", f"top_k {knowledge.get('top_k', '-')} / KG {knowledge.get('kg_top_k', '-')} · chunk {knowledge.get('chunk_token_size', '-')}"),
+            "knowledge": (
+                "知识库 / RAG",
+                f"top_k {knowledge.get('top_k', '-')} · KG {knowledge.get('kg_top_k', '-')}<br>"
+                f"chunk {knowledge.get('chunk_token_size', '-')} · overlap {knowledge.get('chunk_overlap_tokens', '-')}",
+            ),
             "ui": ("界面偏好", f"{self.locale.language} · {self.locale.theme}"),
             "files": ("配置文件", "config/app_config.yaml · config/llm_config.yaml · .env"),
         }
@@ -1124,9 +1135,13 @@ class MainWindow(QMainWindow):
         layout.addStretch(1)
         layout.addWidget(self.run_selector)
         row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
         row.setSpacing(10)
-        row.addWidget(self.refresh_runs_button)
-        row.addWidget(self.restore_run_button)
+        for button in [self.refresh_runs_button, self.restore_run_button]:
+            button.setMinimumHeight(44)
+            button.setMaximumWidth(16777215)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            row.addWidget(button, 1)
         layout.addLayout(row)
         return page
 
@@ -1212,8 +1227,7 @@ class MainWindow(QMainWindow):
         self.left_stack.setCurrentIndex(index)
         self.right_stack.setCurrentIndex(index)
         if index == 1:
-            self.knowledge_widget.refresh(load_evidence=False)
-            self._refresh_knowledge_sidebar()
+            self._queue_knowledge_refresh(self.session.task, load_evidence=False, force=False, delay_ms=0)
         if index == 2:
             self.monitor_dashboard_widget.refresh()
         if index == 3:
@@ -1288,8 +1302,8 @@ class MainWindow(QMainWindow):
             self._settings_summary_card("ABAQUS", str(abaqus.get("command") or "abaqus"), f"timeout {abaqus.get('job_timeout_seconds', 3600)} s"),
             self._settings_summary_card(
                 "RAG / KG",
-                f"top_k {knowledge.get('top_k', 5)} / KG {knowledge.get('kg_top_k', 8)}",
-                f"chunk {knowledge.get('chunk_token_size', 512)} / overlap {knowledge.get('chunk_overlap_tokens', 64)}",
+                f"top_k {knowledge.get('top_k', 5)} · KG {knowledge.get('kg_top_k', 8)}",
+                f"chunk {knowledge.get('chunk_token_size', 512)} · ov {knowledge.get('chunk_overlap_tokens', 64)}",
             ),
         ]
         for index, card in enumerate(overview_cards):
@@ -1506,9 +1520,10 @@ class MainWindow(QMainWindow):
         card = QFrame()
         card.setObjectName("configCard")
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        card.setMinimumHeight(76)
+        card.setMinimumHeight(86)
+        card.setMaximumHeight(92)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 9, 12, 9)
+        layout.setContentsMargins(12, 8, 12, 8)
         layout.setSpacing(3)
         title_label = QLabel(title)
         title_label.setObjectName("configKey")
@@ -1882,6 +1897,10 @@ class MainWindow(QMainWindow):
         self._set_button_variant(self.fit_view_button, "icon")
         self._set_button_variant(self.refresh_runs_button)
         self._set_button_variant(self.restore_run_button, "secondary")
+        for button in [self.refresh_runs_button, self.restore_run_button]:
+            button.setMinimumHeight(44)
+            button.setMaximumWidth(16777215)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self._set_button_variant(self.screen_button)
         self._set_button_variant(self.evaluate_selected_button)
         self._set_button_variant(self.evaluate_all_button)
@@ -2047,7 +2066,7 @@ class MainWindow(QMainWindow):
         self.report_type_selector.currentIndexChanged.connect(lambda: self._update_button_states())
         self.reset_view_button.clicked.connect(self.live_result_view.reset_view)
         self.fit_view_button.clicked.connect(self.live_result_view.fit_view)
-        self.workbench_candidate_widget.candidateSelected.connect(self.live_result_view.show_candidate)
+        self.workbench_candidate_widget.candidateSelected.connect(self._queue_candidate_preview)
         self.refresh_runs_button.clicked.connect(self._refresh_run_selector)
         self.restore_run_button.clicked.connect(self._restore_selected_run)
         self.run_selector.currentIndexChanged.connect(lambda: self._update_button_states())
@@ -2552,6 +2571,7 @@ class MainWindow(QMainWindow):
         return f"{updated_at} | {stage} | {run_id} | {instruction}"
 
     def _refresh_run_selector(self) -> None:
+        self._run_selector_refresh_pending = False
         current_run_id = self.run_selector.currentData()
         self.run_selector.blockSignals(True)
         self.run_selector.clear()
@@ -2567,6 +2587,12 @@ class MainWindow(QMainWindow):
                     self.run_selector.setCurrentIndex(index)
         self.run_selector.blockSignals(False)
         self._update_button_states()
+
+    def _queue_refresh_run_selector(self) -> None:
+        if self._run_selector_refresh_pending:
+            return
+        self._run_selector_refresh_pending = True
+        QTimer.singleShot(250, self._refresh_run_selector)
 
     def _session_from_workflow_state(self, state: dict) -> PipelineSession:
         results_by_session_id: dict[str, dict] = {}
@@ -2633,8 +2659,7 @@ class MainWindow(QMainWindow):
             self.session.stage,
             self.session.pending_confirmation,
         )
-        self.knowledge_widget.refresh(self.session.task)
-        self._refresh_knowledge_sidebar()
+        self._queue_knowledge_refresh(self.session.task, load_evidence=False)
         self._refresh_live_view()
         self._update_overview_cards()
         self._sync_status_label_with_session()
@@ -2652,8 +2677,7 @@ class MainWindow(QMainWindow):
             self.session.stage,
             self.session.pending_confirmation,
         )
-        self.knowledge_widget.refresh(self.session.task)
-        self._refresh_knowledge_sidebar()
+        self._queue_knowledge_refresh(self.session.task, load_evidence=False)
         self._refresh_live_view()
         self._update_overview_cards()
         self._sync_status_label_with_session()
@@ -2665,6 +2689,14 @@ class MainWindow(QMainWindow):
         self.status_label.setText(self.locale.text("queue.stage", stage=self._display_stage(self.session.stage)))
 
     def _refresh_live_view(self) -> None:
+        if self._live_refresh_pending:
+            return
+        self._live_refresh_pending = True
+        QTimer.singleShot(45, self._flush_live_view)
+
+    def _flush_live_view(self) -> None:
+        self._live_refresh_pending = False
+        self._pending_live_candidate = None
         results = list(self.session.results_by_session_id.values())
         if results:
             self.live_result_view.show_mode_shape(results[0])
@@ -2674,12 +2706,24 @@ class MainWindow(QMainWindow):
             return
         self.live_result_view.reset_plotter(self.locale.text("live_view.empty"))
 
+    def _queue_candidate_preview(self, candidate: dict) -> None:
+        self._pending_live_candidate = dict(candidate)
+        QTimer.singleShot(25, self._flush_candidate_preview)
+
+    def _flush_candidate_preview(self) -> None:
+        candidate = self._pending_live_candidate
+        self._pending_live_candidate = None
+        if candidate:
+            self.live_result_view.show_candidate(candidate)
+
     def _start_conversation(self) -> None:
         instruction = self.input_line.text().strip()
         if not instruction:
             return
         self.session = PipelineSession(instruction=instruction)
         self.chat_widget.add_message("USER", instruction)
+        self.input_line.clear()
+        self.input_line.setFocus()
         self._run_action(
             "conversation_start",
             {"instruction": instruction},
@@ -2693,9 +2737,52 @@ class MainWindow(QMainWindow):
         self.input_line.setFocus()
 
     def _refresh_knowledge_view(self) -> None:
-        self.knowledge_widget.refresh(self.session.task)
-        self._refresh_knowledge_sidebar()
+        self._queue_knowledge_refresh(self.session.task, load_evidence=True, force=True, delay_ms=0)
         self.status_label.setText(self.locale.text("status.knowledge_refreshed"))
+
+    def _knowledge_task_key(self, task: dict | None) -> str:
+        if not task:
+            return ""
+        try:
+            return json.dumps(task, sort_keys=True, ensure_ascii=False, default=str)
+        except TypeError:
+            return repr(task)
+
+    def _queue_knowledge_refresh(
+        self,
+        task: dict | None = None,
+        load_evidence: bool = False,
+        force: bool = False,
+        delay_ms: int = 160,
+    ) -> None:
+        if task is not None:
+            self._pending_knowledge_task = task
+        elif self._pending_knowledge_task is None:
+            self._pending_knowledge_task = self.session.task
+        self._pending_knowledge_load_evidence = self._pending_knowledge_load_evidence or bool(load_evidence)
+        self._pending_knowledge_force = self._pending_knowledge_force or bool(force)
+        if self._knowledge_refresh_pending:
+            return
+        self._knowledge_refresh_pending = True
+        QTimer.singleShot(max(0, delay_ms), self._flush_knowledge_refresh)
+
+    def _flush_knowledge_refresh(self) -> None:
+        self._knowledge_refresh_pending = False
+        task = self._pending_knowledge_task
+        load_evidence = self._pending_knowledge_load_evidence
+        force = self._pending_knowledge_force
+        self._pending_knowledge_task = None
+        self._pending_knowledge_load_evidence = False
+        self._pending_knowledge_force = False
+
+        task_key = self._knowledge_task_key(task)
+        if not force and not load_evidence and task_key == self._last_knowledge_refresh_key:
+            self._refresh_knowledge_sidebar()
+            return
+
+        self.knowledge_widget.refresh(task, load_evidence=bool(load_evidence))
+        self._last_knowledge_refresh_key = task_key
+        self._refresh_knowledge_sidebar()
 
     def _choose_report_output_dir(self) -> None:
         initial_dir = str(self.report_output_dir or RESULTS_DIR)
@@ -2945,8 +3032,8 @@ class MainWindow(QMainWindow):
         self.workflow_widget.reset_view()
         self.model_status_label.set_state(self.locale.text("model.current"), "success")
         self.flow_dag_widget.update_state(self._agent_state_map(), self.locale.text("queue.idle"))
-        self.knowledge_widget.refresh(load_evidence=False)
-        self._refresh_knowledge_sidebar()
+        self._last_knowledge_refresh_key = ""
+        self._queue_knowledge_refresh(load_evidence=False, force=True, delay_ms=0)
         self.status_label.setText(self.locale.text("status.waiting"))
         self.input_line.clear()
         self._update_overview_cards()
@@ -3017,7 +3104,7 @@ class MainWindow(QMainWindow):
             ui_agent = self._ui_agent_for_runtime_stage(runtime_stage, runtime_agent)
             self.log_widget.append_log(ui_agent, f"[{runtime_type}{suffix}] {message}")
             self.monitor_log_widget.append_log(ui_agent, f"[{runtime_type}{suffix}] {message}")
-            self._refresh_run_selector()
+            self._queue_refresh_run_selector()
             if run_id:
                 self.workflow_widget.refresh(run_id, runtime_stage, self.session.pending_confirmation)
             return

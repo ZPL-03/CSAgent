@@ -5,7 +5,7 @@ from __future__ import annotations
 from html import escape
 from typing import Iterable
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSize, Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QGridLayout,
@@ -13,6 +13,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QSizePolicy,
     QSplitter,
+    QTabBar,
     QTableWidget,
     QTableWidgetItem,
     QTabWidget,
@@ -24,6 +25,18 @@ from PyQt6.QtWidgets import (
 from gui.i18n import DEFAULT_LANGUAGE, text as tr
 from core.pressure_hull_profile import GEOMETRY_LABELS, TYPE_DISPLAY_NAMES
 from core.task_contract import describe_boundary_conditions, describe_load_conditions
+
+
+class EqualWidthTabBar(QTabBar):
+    """候选详情页签等宽显示，宽度来自当前控件实际可用空间。"""
+
+    def tabSizeHint(self, index: int) -> QSize:
+        size = super().tabSizeHint(index)
+        count = max(1, self.count())
+        available = max(self.width(), self.parentWidget().width() if self.parentWidget() else 0)
+        if available > 0:
+            size.setWidth(max(96, available // count))
+        return size
 
 
 def _format_generation_label(source: object, language: str = DEFAULT_LANGUAGE) -> str:
@@ -113,11 +126,13 @@ class CandidateWidget(QWidget):
         self.audit_browser = QTextBrowser()
         self.detail_tabs = QTabWidget()
         self.detail_tabs.setObjectName("candidateDetailTabs")
+        self.detail_tabs.setTabBar(EqualWidthTabBar(self.detail_tabs))
         self.detail_tabs.setDocumentMode(True)
         self.detail_tabs.addTab(self.detail_browser, tr("candidate.tab.detail", language=self.language))
         self.detail_tabs.addTab(self.audit_browser, tr("candidate.tab.audit", language=self.language))
         self.detail_tabs.tabBar().setExpanding(True)
         self.detail_tabs.tabBar().setUsesScrollButtons(False)
+        self.detail_tabs.tabBar().setElideMode(Qt.TextElideMode.ElideNone)
         self.detail_tabs.setMinimumWidth(300)
         self.detail_tabs.setMaximumHeight(300)
 
@@ -215,7 +230,8 @@ class CandidateWidget(QWidget):
         return (
             "<h4>候选来源与去重审计</h4>"
             f"<p><b>摘要：</b>{escape(str(audit.get('summary') or '-'))}</p>"
-            "<table border='1' cellspacing='0' cellpadding='5'>"
+            "<p style='margin: 6px 0 4px 0;'></p>"
+            "<table border='1' cellspacing='0' cellpadding='5' style='margin-top: 6px;'>"
             "<tr><th>项目</th><th>LLM</th><th>案例迁移</th><th>DOE</th><th>合计</th></tr>"
             f"<tr><td>初始配额</td><td>{escape(str((audit.get('source_targets') or {}).get('LLM', '-')))}</td>"
             f"<td>{escape(str((audit.get('source_targets') or {}).get('CASE_TRANSFER', '-')))}</td>"
@@ -333,8 +349,6 @@ class CandidateWidget(QWidget):
         load_conditions = candidate.get("load_conditions", {})
         design_targets = candidate.get("design_targets", {})
         rule_check = candidate.get("rule_check", {})
-        screening_summary = candidate.get("screening_summary") or "尚未完成代理模型初筛。"
-        selection_reason = candidate.get("selection_reason") or "当前样本尚未进入优先校核队列。"
 
         ply_items = "".join(
             f"<li>第 {index + 1} 层：{angle}&deg;</li>"
@@ -379,15 +393,12 @@ class CandidateWidget(QWidget):
             f"<p><b>会话编号：</b>{candidate.get('candidate_id', '-')}<br>"
             f"<b>正式编号：</b>{archive_id}</p>"
             f"<p><b>生成说明：</b>{candidate.get('rationale', '-')}</p>"
-            f"<p><b>来源补充：</b>{candidate.get('origin_summary') or '当前候选未附带额外来源说明。'}</p>"
             f"<p><b>代理预测：</b> 极限压力={_format_number(candidate.get('surrogate_ultimate_pressure_MPa'))} MPa，"
             f"ASME RD-1172线性屈曲压力={_format_number(candidate.get('asme_linear_buckling_pressure_MPa'))} MPa，"
             f"PBIPF 预测极限压力为 {_format_number(candidate.get('surrogate_PBIPF_MPa'))} MPa，"
             f"面密度={_format_number(candidate.get('surrogate_weight'))} kg/m^2，"
             f"评分={_format_number(candidate.get('rank_score'), 4)}<br>"
             f"线性屈曲压力来源：{candidate.get('linear_buckling_source') or '-'}</p>"
-            f"<p><b>代理模型初筛摘要：</b>{screening_summary}</p>"
-            f"<p><b>优先校核原因：</b>{selection_reason}</p>"
             "<h4>几何设计参数</h4><ul>"
             f"{geometry_items}</ul>"
             "<h4>材料系统</h4><ul>"
@@ -412,12 +423,8 @@ class CandidateWidget(QWidget):
     def _sync_detail_tab_widths(self) -> None:
         if not hasattr(self, "detail_tabs"):
             return
-        width = max(104, (max(220, self.detail_tabs.width()) - 8) // 2)
-        self.detail_tabs.setStyleSheet(
-            "QTabWidget#candidateDetailTabs QTabBar::tab {"
-            f"min-width: {width}px; max-width: {width}px;"
-            "}"
-        )
+        self.detail_tabs.tabBar().updateGeometry()
+        self.detail_tabs.tabBar().update()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)

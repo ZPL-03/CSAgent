@@ -587,6 +587,24 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         border-color: {color["accent"]};
         color: {color["accent"]};
     }}
+    QPushButton#graphRelationButton {{
+        background: {color["button_bg"]};
+        border: 1px solid {color["border_soft"]};
+        color: {color["text"]};
+        border-radius: 8px;
+        min-width: 70px;
+        max-width: 70px;
+        min-height: 28px;
+        max-height: 28px;
+        padding: 0;
+        font-size: 13px;
+        font-weight: 800;
+    }}
+    QPushButton#graphRelationButton:hover, QPushButton#graphRelationButton:checked {{
+        background: {color["accent_soft"]};
+        border-color: {color["accent"]};
+        color: {color["accent"]};
+    }}
     QFrame#knowledgeSidePanel, QFrame#knowledgeOverviewPanel, QFrame#knowledgeGraphPanel, QFrame#knowledgeEvidencePanel {{
         background: {color["surface_alt"]};
         border: 1px solid {color["border_soft"]};

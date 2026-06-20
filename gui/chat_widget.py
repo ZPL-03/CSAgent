@@ -20,6 +20,7 @@ class ChatWidget(QWidget):
         self.empty_state: dict[str, str] = {}
         self._last_render_width = 0
         self._resize_render_pending = False
+        self._scroll_pending = False
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -69,7 +70,7 @@ class ChatWidget(QWidget):
         self._append_content_widget(self._message_widget(str(sender), str(message)))
         self._sync_content_minimum_height()
         if follow_latest:
-            QTimer.singleShot(0, self._scroll_to_bottom)
+            self._queue_scroll_to_bottom()
 
     def toPlainText(self) -> str:
         if not self._messages:
@@ -162,8 +163,16 @@ class ChatWidget(QWidget):
         return scrollbar.maximum() <= 0 or scrollbar.value() >= scrollbar.maximum() - 24
 
     def _scroll_to_bottom(self) -> None:
+        self._scroll_pending = False
         scrollbar = self.scroll_area.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
+
+    def _queue_scroll_to_bottom(self) -> None:
+        if self._scroll_pending:
+            return
+        self._scroll_pending = True
+        QTimer.singleShot(0, self._scroll_to_bottom)
+        QTimer.singleShot(35, self._scroll_to_bottom)
 
     def _label(self, text: str, color: str, size: int = 13, bold: bool = False) -> QLabel:
         label = QLabel(text)
@@ -208,7 +217,7 @@ class ChatWidget(QWidget):
     def _wrapped_line_count(self, text: str, content_width: int) -> int:
         metrics = self._text_metrics(13)
         rect = metrics.boundingRect(
-            QRect(0, 0, max(120, content_width), 4000),
+            QRect(0, 0, max(24, content_width), 4000),
             Qt.TextFlag.TextWordWrap,
             str(text),
         )
@@ -226,7 +235,7 @@ class ChatWidget(QWidget):
     def _wrapped_text_height(self, text: str, width: int) -> int:
         metrics = self._text_metrics(13)
         rect = metrics.boundingRect(
-            QRect(0, 0, max(120, width), 4000),
+            QRect(0, 0, max(24, width), 4000),
             Qt.TextFlag.TextWordWrap,
             str(text),
         )
@@ -252,16 +261,17 @@ class ChatWidget(QWidget):
             f"QFrame#chatBubble {{ background:{bg}; border:1px solid {border}; border-radius:14px; }}"
         )
         layout = QVBoxLayout(frame)
-        layout.setContentsMargins(8, 3, 8, 3)
+        horizontal_padding = 14
+        layout.setContentsMargins(7, 2, 7, 2)
         layout.setSpacing(0)
         text_label = self._label(text, fg, 13)
-        text_width = max(120, bubble_width - 16)
+        text_width = max(24, bubble_width - horizontal_padding)
         text_label.setFixedWidth(text_width)
         text_height = self._wrapped_text_height(text, text_width)
-        text_label.setFixedHeight(text_height + 3)
+        text_label.setFixedHeight(text_height + 2)
         text_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
         layout.addWidget(text_label)
-        frame.setFixedHeight(max(32, text_height + 11))
+        frame.setFixedHeight(max(28, text_height + 7))
         return frame
 
     def _avatar_label(self, text: str, bg: str, fg: str) -> QLabel:
@@ -284,7 +294,7 @@ class ChatWidget(QWidget):
 
         if role == "user":
             row_layout.addStretch(1)
-            bubble = self._bubble(message, palette["user_bg"], palette["user_bg"], palette["user_text"], 1120, 72, fit_content=True)
+            bubble = self._bubble(message, palette["user_bg"], palette["user_bg"], palette["user_text"], 1120, 54, fit_content=True)
             row_layout.addWidget(bubble)
             row_layout.addWidget(self._avatar_label("U", palette["user_bg"], palette["user_text"]), 0, Qt.AlignmentFlag.AlignTop)
             row.setMinimumHeight(bubble.height() + 4)

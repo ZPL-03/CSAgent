@@ -692,7 +692,7 @@ class KnowledgeGraphView(QWidget):
 
         path = QPainterPath(source)
         path.quadTo(control, target)
-        width = 1.78 if highlight else 1.22
+        width = 1.56 if highlight else 1.04
         shadow = QColor("#020617" if self.theme == "dark" else "#ffffff")
         shadow.setAlpha(96 if self.theme == "dark" else 132)
         painter.setPen(QPen(shadow, width + 0.95, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
@@ -772,11 +772,30 @@ class KnowledgeGraphView(QWidget):
         raw = str(name or "").strip()
         if not raw:
             return []
-        text_width = max(24, max_width - 16)
+        text_width = max(24, max_width - 14)
         if metrics.horizontalAdvance(raw) <= text_width:
             return [raw]
 
         tokens = [token for token in re.split(r"([\s/_-]+)", raw) if token]
+        if len(tokens) == 1:
+            current = ""
+            lines: list[str] = []
+            for char in raw:
+                candidate = current + char
+                if current and metrics.horizontalAdvance(candidate) > text_width:
+                    lines.append(current)
+                    current = char
+                    if len(lines) == max_lines - 1:
+                        break
+                else:
+                    current = candidate
+            if current:
+                lines.append(current)
+            if len(lines) > max_lines:
+                tail = "".join(lines[max_lines - 1 :])
+                lines = lines[: max_lines - 1] + [metrics.elidedText(tail, Qt.TextElideMode.ElideRight, text_width)]
+            return [metrics.elidedText(line, Qt.TextElideMode.ElideRight, text_width) for line in lines[:max_lines] if line]
+
         lines: list[str] = []
         current = ""
         for token in tokens:
@@ -817,7 +836,7 @@ class KnowledgeGraphView(QWidget):
         occupied: list[QRectF] | None = None,
         force: bool = False,
     ) -> bool:
-        max_width = 172
+        max_width = 190
         lines = self._wrapped_label_lines(name, metrics, max_width=max_width, max_lines=2)
         if not lines:
             return False
@@ -1261,7 +1280,7 @@ class KnowledgeWidget(QWidget):
         self.graph_relation_filter = QComboBox()
         self.graph_relation_filter.setObjectName("graphFilterCombo")
         for combo in [self.graph_type_filter, self.graph_relation_filter]:
-            combo.setMinimumWidth(152)
+            combo.setMinimumWidth(176)
             combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.graph_reset_button = QPushButton("F")
         self.graph_reset_button.setToolTip("适配图谱")
@@ -1273,7 +1292,7 @@ class KnowledgeWidget(QWidget):
         self.graph_label_button.setToolTip("显示或隐藏节点标签")
         self.graph_label_button.setCheckable(True)
         self.graph_label_button.setChecked(True)
-        self.graph_relation_button = QPushButton("标")
+        self.graph_relation_button = QPushButton("线标")
         self.graph_relation_button.setToolTip("显示或隐藏关系标签")
         self.graph_relation_button.setCheckable(True)
         self.graph_relation_button.setChecked(True)
@@ -1285,7 +1304,9 @@ class KnowledgeWidget(QWidget):
             self.graph_relation_button,
         ]:
             button.setObjectName("graphToolButton")
-            button.setFixedSize(32, 28)
+            button.setFixedSize(70 if button is self.graph_relation_button else 32, 28)
+        self.graph_relation_button.setObjectName("graphRelationButton")
+        self.graph_relation_button.setFixedSize(70, 28)
         self.graph_detail_browser = QTextBrowser()
         self.graph_detail_browser.setOpenExternalLinks(False)
         self._configure_panel_browser(self.graph_detail_browser)
