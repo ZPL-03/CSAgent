@@ -227,7 +227,7 @@ class ChatWidget(QWidget):
         metrics = self._text_metrics(13)
         value = str(text)
         line_widths = [metrics.horizontalAdvance(line.rstrip()) for line in value.splitlines() if line.strip()]
-        raw_natural = max(line_widths, default=0) + 22
+        raw_natural = max(line_widths, default=0) + 18
         if raw_natural >= target_max:
             return target_max
         return max(target_min, raw_natural)
@@ -261,8 +261,8 @@ class ChatWidget(QWidget):
             f"QFrame#chatBubble {{ background:{bg}; border:1px solid {border}; border-radius:14px; }}"
         )
         layout = QVBoxLayout(frame)
-        horizontal_padding = 14
-        layout.setContentsMargins(7, 2, 7, 2)
+        horizontal_padding = 12
+        layout.setContentsMargins(6, 2, 6, 2)
         layout.setSpacing(0)
         text_label = self._label(text, fg, 13)
         text_width = max(24, bubble_width - horizontal_padding)
@@ -315,7 +315,7 @@ class ChatWidget(QWidget):
         column_layout.setContentsMargins(0, 0, 0, 0)
         column_layout.setSpacing(4)
         sender_label = self._label(sender, fg, 12, True)
-        bubble = self._bubble(message, bg, border, fg, 1120, 220, fit_content=True)
+        bubble = self._bubble(message, bg, border, fg, 1120, 54, fit_content=True)
         column_layout.addWidget(sender_label)
         column_layout.addWidget(bubble)
         row_layout.addWidget(column, 1)
@@ -348,7 +348,7 @@ class ChatWidget(QWidget):
                 palette["user_bg"],
                 palette["user_text"],
                 1120,
-                220,
+                54,
                 fit_content=True,
             )
         )
@@ -374,7 +374,7 @@ class ChatWidget(QWidget):
                 palette["agent_border"],
                 palette["agent_text"],
                 1120,
-                220,
+                54,
                 fit_content=True,
             )
         )

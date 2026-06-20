@@ -10,6 +10,7 @@ from agents.orchestrator import OrchestratorAgent
 from agents.report_gen import ReportGenAgent
 from core.id_utils import format_temp_candidate_id
 from core.llm_backend import LLMBackend
+from core.rag_engine import RAGEngine
 from core.schema_validator import SchemaValidationError, validate_or_raise
 from core.task_contract import requested_candidate_pool_size, requested_screen_top_k, task_payload_from_request
 from core.task_parser import TaskParser
@@ -671,6 +672,50 @@ def test_knowledge_case_record_keeps_only_real_task_trace(monkeypatch):
 
     assert "task_id" not in untraced_record
     assert traced_record["task_id"] == task_record["task_id"]
+
+
+def test_rag_engine_matches_installed_sentence_transformer_signature(tmp_path):
+    class LegacySentenceTransformer:
+        def __init__(self, model_name_or_path=None, cache_folder=None):
+            pass
+
+    class ModernSentenceTransformer:
+        def __init__(self, model_name_or_path=None, cache_folder=None, local_files_only=False):
+            pass
+
+    engine = RAGEngine.__new__(RAGEngine)
+    engine.embedding_cache_dir = tmp_path
+    engine.local_files_only = True
+
+    legacy_kwargs = engine._sentence_transformer_kwargs(LegacySentenceTransformer)
+    modern_kwargs = engine._sentence_transformer_kwargs(ModernSentenceTransformer)
+
+    assert legacy_kwargs == {"cache_folder": str(tmp_path)}
+    assert modern_kwargs == {"cache_folder": str(tmp_path), "local_files_only": True}
+
+
+def test_knowledge_record_survives_case_memory_vector_failure(monkeypatch, tmp_path):
+    import agents.knowledge_agent as knowledge_module
+
+    class BrokenCaseMemory:
+        def upsert_cases(self, *_args, **_kwargs):
+            raise TypeError("__init__() got an unexpected keyword argument 'local_files_only'")
+
+    emitted = []
+    monkeypatch.setattr(knowledge_module, "CASES_DIR", tmp_path / "cases")
+    monkeypatch.setattr(knowledge_module, "CASE_LIBRARY_DIR", tmp_path / "case_library")
+    agent = KnowledgeAgent.__new__(KnowledgeAgent)
+    agent.case_memory = BrokenCaseMemory()
+    agent.emit = emitted.append
+
+    record = {"case_id": "CASE_VECTOR_FAILURE", "abaqus_results": {"status": "success", "verdict": "通过"}}
+
+    agent._store_record(record)
+
+    assert (tmp_path / "cases" / "CASE_VECTOR_FAILURE.json").is_file()
+    assert (tmp_path / "case_library" / "CASE_VECTOR_FAILURE.json").is_file()
+    assert agent.case_memory is None
+    assert emitted and "案例向量记忆写入失败" in emitted[0]
 
 
 def _report_sample():

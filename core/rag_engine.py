@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import os
 from pathlib import Path
@@ -111,6 +112,37 @@ class RAGEngine:
         self._embedder = None
         self._embedder_failed = False
 
+    def _sentence_transformer_kwargs(self, sentence_transformer_cls) -> Dict[str, Any]:
+        kwargs: Dict[str, Any] = {"cache_folder": str(self.embedding_cache_dir)}
+        try:
+            parameters = inspect.signature(sentence_transformer_cls.__init__).parameters
+        except (TypeError, ValueError):
+            parameters = {}
+        if "local_files_only" in parameters:
+            kwargs["local_files_only"] = self.local_files_only
+        return kwargs
+
+    def _build_sentence_transformer(self, sentence_transformer_cls):
+        kwargs = self._sentence_transformer_kwargs(sentence_transformer_cls)
+        if not self.local_files_only or "local_files_only" in kwargs:
+            return sentence_transformer_cls(self.embedding_model_name, **kwargs)
+
+        previous_transformers_offline = os.environ.get("TRANSFORMERS_OFFLINE")
+        previous_hf_offline = os.environ.get("HF_HUB_OFFLINE")
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        try:
+            return sentence_transformer_cls(self.embedding_model_name, **kwargs)
+        finally:
+            if previous_transformers_offline is None:
+                os.environ.pop("TRANSFORMERS_OFFLINE", None)
+            else:
+                os.environ["TRANSFORMERS_OFFLINE"] = previous_transformers_offline
+            if previous_hf_offline is None:
+                os.environ.pop("HF_HUB_OFFLINE", None)
+            else:
+                os.environ["HF_HUB_OFFLINE"] = previous_hf_offline
+
     def _build_client(self):
         try:
             import chromadb
@@ -128,11 +160,7 @@ class RAGEngine:
             try:
                 from sentence_transformers import SentenceTransformer
 
-                self._embedder = SentenceTransformer(
-                    self.embedding_model_name,
-                    cache_folder=str(self.embedding_cache_dir),
-                    local_files_only=self.local_files_only,
-                )
+                self._embedder = self._build_sentence_transformer(SentenceTransformer)
             except Exception:
                 self._embedder_failed = True
                 raise

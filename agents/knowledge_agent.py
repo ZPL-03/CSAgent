@@ -166,9 +166,17 @@ class KnowledgeAgent(BaseAgent):
         if self._should_store_record(record.get("abaqus_results", {})):
             write_json(CASE_LIBRARY_DIR / f"{record['case_id']}.json", record)
             if self.case_memory is not None:
-                self.case_memory.upsert_cases([record], scope="formal")
+                try:
+                    self.case_memory.upsert_cases([record], scope="formal")
+                except Exception as exc:
+                    self.case_memory = None
+                    self.emit(f"案例向量记忆写入失败，JSON 案例已保存：{exc}")
         elif self.case_memory is not None:
-            self.case_memory.upsert_cases([record], scope="archive")
+            try:
+                self.case_memory.upsert_cases([record], scope="archive")
+            except Exception as exc:
+                self.case_memory = None
+                self.emit(f"案例向量记忆写入失败，JSON 案例已保存：{exc}")
 
     def _maybe_retrain_surrogate(self) -> Dict | None:
         records = self.model_manager.load_training_records()

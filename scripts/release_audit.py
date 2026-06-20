@@ -66,6 +66,7 @@ TEXT_SUFFIXES = {
 EXCLUDED_SCAN_DIRS = {
     ".git",
     "reference",
+    "models/embedding_cache",
     "knowledge/chroma_db",
     "knowledge/runtime",
     "data/abaqus_runs",
