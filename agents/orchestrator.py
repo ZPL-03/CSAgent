@@ -10,7 +10,7 @@ from agents.fem_agent import FEMAgent
 from agents.knowledge_agent import KnowledgeAgent
 from agents.report_gen import ReportGenAgent
 from agents.screener import ScreenerAgent
-from core.id_utils import format_candidate_id, next_candidate_index, task_file_name
+from core.id_utils import format_candidate_id, next_candidate_index, reserve_candidate_ids, task_file_name
 from core.io_utils import write_json
 from core.paths import IO_DIR, TASKS_DIR
 from core.task_contract import (
@@ -62,9 +62,9 @@ class OrchestratorAgent(BaseAgent):
         enriched["material_system"] = dict(candidate.get("material_system") or task_payload["material_system"])
         return enriched
 
-    def _promote_candidate_for_fem(self, task: Dict, candidate: Dict) -> Dict:
+    def _promote_candidate_for_fem(self, task: Dict, candidate: Dict, formal_candidate_id: str | None = None) -> Dict:
         enriched_candidate = self._attach_task_context(task, candidate)
-        formal_candidate_id = format_candidate_id(next_candidate_index())
+        formal_candidate_id = formal_candidate_id or format_candidate_id(next_candidate_index())
         session_candidate_id = enriched_candidate.get("candidate_id")
         promoted = dict(enriched_candidate)
         promoted.pop("persistent_candidate_id", None)
@@ -72,6 +72,15 @@ class OrchestratorAgent(BaseAgent):
         promoted["candidate_id"] = formal_candidate_id
         promoted["display_name"] = formal_candidate_id
         return promoted
+
+    def prepare_candidates_for_fem(self, task: Dict, candidates: List[Dict]) -> List[Dict]:
+        """为同一批有限元样本生成互不重复的正式编号。"""
+
+        formal_candidate_ids = reserve_candidate_ids(len(candidates))
+        return [
+            self._promote_candidate_for_fem(task, candidate, formal_candidate_ids[index])
+            for index, candidate in enumerate(candidates)
+        ]
 
     def parse_instruction(self, text: str, overrides: Dict | None = None) -> Dict:
         task = self.task_parser.parse_instruction(text, overrides=overrides)

@@ -173,10 +173,11 @@ class DesignWorkflowRuntime:
         task = payload["task"]
         candidates = list(payload.get("candidates") or [])
         results = []
-        fem_designs = []
-        for candidate in candidates:
-            fem_candidate = self.orchestrator.prepare_candidate_for_fem(task, candidate)
-            fem_designs.append(fem_candidate)
+        if hasattr(self.orchestrator, "prepare_candidates_for_fem"):
+            fem_designs = self.orchestrator.prepare_candidates_for_fem(task, candidates)
+        else:
+            fem_designs = [self.orchestrator.prepare_candidate_for_fem(task, candidate) for candidate in candidates]
+        for fem_candidate in fem_designs:
             job_id = self.simulation_queue.enqueue(self._active_run_id, fem_candidate)
             self._emit_event(
                 "simulation_job_queued",

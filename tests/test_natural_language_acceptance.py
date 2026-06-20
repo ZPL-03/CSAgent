@@ -7,6 +7,7 @@ import pytest
 
 from agents.orchestrator import OrchestratorAgent
 from core.conversation_flow import ConversationFlowController
+from core.id_utils import candidate_index
 from core.task_contract import (
     requested_candidate_pool_size,
     requested_screen_top_k,
@@ -38,14 +39,6 @@ def _assert_unique(candidates: Iterable[dict]) -> None:
 
 
 def _patch_deterministic_downstream(monkeypatch, orchestrator: OrchestratorAgent, tmp_path) -> None:
-    def prepare_candidate_for_fem(task, candidate):
-        return {
-            **candidate,
-            "candidate_id": "C_TEST",
-            "display_name": "C_TEST",
-            "session_candidate_id": candidate["candidate_id"],
-        }
-
     def evaluate_prepared_candidate(task, candidate):
         predicted = float(candidate.get("surrogate_ultimate_pressure_MPa") or 45.0)
         return {
@@ -101,7 +94,6 @@ def _patch_deterministic_downstream(monkeypatch, orchestrator: OrchestratorAgent
             "report_outputs": report_outputs,
         }
 
-    monkeypatch.setattr(orchestrator, "prepare_candidate_for_fem", prepare_candidate_for_fem)
     monkeypatch.setattr(orchestrator, "evaluate_prepared_candidate", evaluate_prepared_candidate)
     monkeypatch.setattr(orchestrator, "persist_knowledge_records", persist_knowledge_records)
     monkeypatch.setattr(orchestrator, "generate_report", generate_report)
@@ -276,8 +268,10 @@ def test_natural_language_inputs_complete_runtime_workflow_with_real_candidate_s
 
     assert state.stage == "awaiting_report_confirmation"
     assert state.pending_confirmation == "export_report"
-    assert state.results[0]["candidate_id"] == "C_TEST"
-    assert state.results[0]["session_candidate_id"].startswith("TMP_")
+    assert len(state.results) == len(state.evaluated_candidates)
+    assert all(candidate_index(result["candidate_id"]) is not None for result in state.results)
+    assert len({result["candidate_id"] for result in state.results}) == len(state.results)
+    assert all(result["session_candidate_id"].startswith("TMP_") for result in state.results)
     assert state.knowledge_updates[0]["case_id"] == "CASE_ACCEPTANCE"
 
     state = controller.continue_after_confirmation(state, True)

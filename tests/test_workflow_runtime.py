@@ -66,6 +66,17 @@ class FakeOrchestrator:
             "session_candidate_id": candidate["candidate_id"],
         }
 
+    def prepare_candidates_for_fem(self, task, candidates):
+        return [
+            {
+                **candidate,
+                "candidate_id": f"C{index}",
+                "display_name": f"C{index}",
+                "session_candidate_id": candidate["candidate_id"],
+            }
+            for index, candidate in enumerate(candidates, start=1)
+        ]
+
     def evaluate_prepared_candidate(self, task, candidate):
         self.calls.append(f"evaluate:{candidate['session_candidate_id']}")
         self._emit("FEM", "有限元已完成", "fem_completed")

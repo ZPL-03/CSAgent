@@ -199,6 +199,15 @@ def next_candidate_index() -> int:
     return _max_candidate_index() + 1
 
 
+def reserve_candidate_ids(count: int) -> list[str]:
+    """为同一批 FEM 样本一次性预占连续正式候选编号。"""
+
+    if count <= 0:
+        return []
+    start_index = next_candidate_index()
+    return [format_candidate_id(start_index + offset) for offset in range(count)]
+
+
 def next_case_id(candidate_id: str | None = None) -> str:
     preferred_index = candidate_index(candidate_id) if candidate_id else None
     if preferred_index is not None:

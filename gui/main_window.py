@@ -190,11 +190,12 @@ class PipelineWorker(QObject):
             if self.action == "evaluate":
                 task = self.payload["task"]
                 candidates = self.payload["candidates"]
-                fem_designs = []
+                if hasattr(orchestrator, "prepare_candidates_for_fem"):
+                    fem_designs = orchestrator.prepare_candidates_for_fem(task, candidates)
+                else:
+                    fem_designs = [orchestrator.prepare_candidate_for_fem(task, candidate) for candidate in candidates]
                 results = []
-                for candidate in candidates:
-                    fem_candidate = orchestrator.prepare_candidate_for_fem(task, candidate)
-                    fem_designs.append(fem_candidate)
+                for fem_candidate in fem_designs:
                     results.append(orchestrator.evaluate_prepared_candidate(task, fem_candidate))
                 knowledge_updates = orchestrator.persist_knowledge_records(task, fem_designs, results)
                 self.finished.emit(
@@ -299,6 +300,8 @@ class MainWindow(QMainWindow):
         self.runtime_stage_text = ""
         self.report_output_dir: Path | None = None
         self._live_refresh_pending = False
+        self._live_visual_mode = "auto"
+        self._selected_live_candidate: dict | None = None
         self._pending_live_candidate: dict | None = None
         self._run_selector_refresh_pending = False
         self._knowledge_refresh_pending = False
@@ -385,6 +388,9 @@ class MainWindow(QMainWindow):
         self.report_dir_button.setToolTip(self.locale.text("tooltip.report_dir"))
         self.reset_view_button = QPushButton()
         self.reset_view_button.setToolTip(self.locale.text("button.reset_view"))
+        self.live_visual_toggle_button = QPushButton("FE")
+        self.live_visual_toggle_button.setObjectName("liveVisualToggleButton")
+        self.live_visual_toggle_button.setToolTip(self.locale.text("button.no_fem_result"))
         self.fit_view_button = QPushButton()
         self.fit_view_button.setToolTip(self.locale.text("button.fit_view"))
         self.run_selector = QComboBox()
@@ -613,6 +619,7 @@ class MainWindow(QMainWindow):
         live_header_layout.setContentsMargins(0, 0, 0, 0)
         live_header_layout.setSpacing(8)
         live_header_layout.addWidget(self.details_header, 1)
+        live_header_layout.addWidget(self.live_visual_toggle_button)
         live_header_layout.addWidget(self.reset_view_button)
         live_header_layout.addWidget(self.fit_view_button)
         right_layout.addLayout(live_header_layout)
@@ -1894,6 +1901,8 @@ class MainWindow(QMainWindow):
         self._set_button_variant(self.open_report_button, "secondary")
         self._set_button_variant(self.export_data_button, "secondary")
         self._set_button_variant(self.reset_view_button, "icon")
+        self.live_visual_toggle_button.setProperty("variant", "liveToggle")
+        self.live_visual_toggle_button.setFixedSize(48, 28)
         self._set_button_variant(self.fit_view_button, "icon")
         self._set_button_variant(self.refresh_runs_button)
         self._set_button_variant(self.restore_run_button, "secondary")
@@ -1940,6 +1949,7 @@ class MainWindow(QMainWindow):
         self.fit_view_button.setText("")
         self.fit_view_button.setIcon(self._make_view_icon("fit"))
         self.fit_view_button.setIconSize(QSize(14, 14))
+        self._sync_live_visual_toggle_button()
 
     def _make_view_icon(self, icon_type: str) -> QIcon:
         pixmap = QPixmap(20, 20)
@@ -2064,6 +2074,7 @@ class MainWindow(QMainWindow):
         self.export_data_button.clicked.connect(self._export_session_data)
         self.report_dir_button.clicked.connect(self._choose_report_output_dir)
         self.report_type_selector.currentIndexChanged.connect(lambda: self._update_button_states())
+        self.live_visual_toggle_button.clicked.connect(self._toggle_live_visual_mode)
         self.reset_view_button.clicked.connect(self.live_result_view.reset_view)
         self.fit_view_button.clicked.connect(self.live_result_view.fit_view)
         self.workbench_candidate_widget.candidateSelected.connect(self._queue_candidate_preview)
@@ -2134,6 +2145,7 @@ class MainWindow(QMainWindow):
         self.report_dir_button.setToolTip(self.locale.text("tooltip.report_dir"))
         self.reset_view_button.setText("")
         self.reset_view_button.setToolTip(self.locale.text("button.reset_view"))
+        self.live_visual_toggle_button.setToolTip(self.locale.text("button.no_fem_result"))
         self.fit_view_button.setText("")
         self.fit_view_button.setToolTip(self.locale.text("button.fit_view"))
         self._sync_view_button_icons()
@@ -2186,6 +2198,7 @@ class MainWindow(QMainWindow):
             self.report_type_selector,
             self.report_dir_button,
             self.reset_view_button,
+            self.live_visual_toggle_button,
             self.fit_view_button,
             self.refresh_runs_button,
             self.restore_run_button,
@@ -2231,6 +2244,7 @@ class MainWindow(QMainWindow):
         )
         self.refresh_runs_button.setEnabled(True)
         self.restore_run_button.setEnabled(bool(self.run_selector.currentData()))
+        self._sync_live_visual_toggle_button()
         self._update_overview_cards()
 
     def _update_overview_cards(self) -> None:
@@ -2647,6 +2661,12 @@ class MainWindow(QMainWindow):
 
     def _apply_session(self, session: PipelineSession) -> None:
         self.session = session
+        if self.session.results_by_session_id and self._live_visual_mode == "auto":
+            self._live_visual_mode = "fem"
+        elif self.session.display_candidates and self._live_visual_mode == "auto":
+            self._live_visual_mode = "geometry"
+        if self.session.display_candidates and not self._selected_live_candidate:
+            self._selected_live_candidate = self.session.display_candidates[0]
         self.workbench_candidate_widget.update_candidates(self.session.display_candidates, self.session.results_by_session_id)
         self.result_trace_widget.update_trace(
             self.session.display_candidates,
@@ -2697,16 +2717,85 @@ class MainWindow(QMainWindow):
     def _flush_live_view(self) -> None:
         self._live_refresh_pending = False
         self._pending_live_candidate = None
-        results = list(self.session.results_by_session_id.values())
-        if results:
-            self.live_result_view.show_mode_shape(results[0])
-            return
+        self._show_live_visual()
+
+    def _latest_live_result(self) -> dict | None:
+        results_by_key = self.session.results_by_session_id
+        if self._selected_live_candidate:
+            candidate_keys = [
+                self._selected_live_candidate.get("candidate_id"),
+                self._selected_live_candidate.get("session_candidate_id"),
+                self._selected_live_candidate.get("persistent_candidate_id"),
+                self._selected_live_candidate.get("formal_candidate_id"),
+            ]
+            for key in candidate_keys:
+                if key and str(key) in results_by_key:
+                    return results_by_key[str(key)]
+            candidate_key_set = {str(key) for key in candidate_keys if key}
+            for result in results_by_key.values():
+                result_keys = {
+                    str(result.get("candidate_id") or ""),
+                    str(result.get("session_candidate_id") or ""),
+                    str(result.get("display_name") or ""),
+                }
+                if candidate_key_set & result_keys:
+                    return result
+        results = list(results_by_key.values())
+        return results[-1] if results else None
+
+    def _current_live_candidate(self) -> dict | None:
+        if self._selected_live_candidate:
+            return self._selected_live_candidate
         if self.session.display_candidates:
-            self.live_result_view.show_candidate(self.session.display_candidates[0])
+            return self.session.display_candidates[0]
+        return None
+
+    def _show_live_visual(self) -> None:
+        result = self._latest_live_result()
+        candidate = self._current_live_candidate()
+        if self._live_visual_mode == "geometry" and candidate:
+            self.live_result_view.show_candidate(candidate)
+            self._sync_live_visual_toggle_button()
             return
-        self.live_result_view.reset_plotter(self.locale.text("live_view.empty"))
+        if result:
+            if self._live_visual_mode == "auto":
+                self._live_visual_mode = "fem"
+            if self._live_visual_mode == "fem":
+                self.live_result_view.show_mode_shape(result)
+                self._sync_live_visual_toggle_button()
+                return
+        if candidate:
+            self._live_visual_mode = "geometry"
+            self.live_result_view.show_candidate(candidate)
+        else:
+            self._live_visual_mode = "auto"
+            self.live_result_view.reset_plotter(self.locale.text("live_view.empty"))
+        self._sync_live_visual_toggle_button()
+
+    def _sync_live_visual_toggle_button(self) -> None:
+        result = self._latest_live_result()
+        has_result = result is not None
+        self.live_visual_toggle_button.setEnabled(has_result and self.worker_thread is None)
+        if not has_result:
+            self.live_visual_toggle_button.setText("FE")
+            self.live_visual_toggle_button.setToolTip(self.locale.text("button.no_fem_result"))
+        elif self._live_visual_mode == "fem":
+            self.live_visual_toggle_button.setText("3D")
+            self.live_visual_toggle_button.setToolTip(self.locale.text("button.show_geometry"))
+        else:
+            self.live_visual_toggle_button.setText("FE")
+            self.live_visual_toggle_button.setToolTip(self.locale.text("button.show_fem_result"))
+
+    def _toggle_live_visual_mode(self) -> None:
+        if not self._latest_live_result():
+            self._sync_live_visual_toggle_button()
+            return
+        self._live_visual_mode = "geometry" if self._live_visual_mode == "fem" else "fem"
+        self._show_live_visual()
 
     def _queue_candidate_preview(self, candidate: dict) -> None:
+        self._selected_live_candidate = dict(candidate)
+        self._live_visual_mode = "geometry"
         self._pending_live_candidate = dict(candidate)
         QTimer.singleShot(25, self._flush_candidate_preview)
 
@@ -2715,12 +2804,16 @@ class MainWindow(QMainWindow):
         self._pending_live_candidate = None
         if candidate:
             self.live_result_view.show_candidate(candidate)
+        self._sync_live_visual_toggle_button()
 
     def _start_conversation(self) -> None:
         instruction = self.input_line.text().strip()
         if not instruction:
             return
         self.session = PipelineSession(instruction=instruction)
+        self._live_visual_mode = "auto"
+        self._selected_live_candidate = None
+        self._pending_live_candidate = None
         self.chat_widget.add_message("USER", instruction)
         self.input_line.clear()
         self.input_line.setFocus()
@@ -3022,6 +3115,9 @@ class MainWindow(QMainWindow):
         self.last_llm_trace_payload = None
         self.runtime_agent_states = {}
         self.runtime_stage_text = ""
+        self._live_visual_mode = "auto"
+        self._selected_live_candidate = None
+        self._pending_live_candidate = None
         self.chat_widget.clear()
         self.log_widget.clear()
         self.workbench_candidate_widget.update_candidates([])
@@ -3192,6 +3288,8 @@ class MainWindow(QMainWindow):
             self.session.results_by_session_id = {}
             self.session.knowledge_updates = []
             self.session.report = None
+            self._live_visual_mode = "geometry" if self.session.display_candidates else "auto"
+            self._selected_live_candidate = self.session.display_candidates[0] if self.session.display_candidates else None
             self._apply_session(self.session)
             target_total = requested_candidate_pool_size(self.session.task)
             self.chat_widget.add_message(
@@ -3217,6 +3315,8 @@ class MainWindow(QMainWindow):
                 session_candidate_id = result.get("session_candidate_id", result["candidate_id"])
                 self.session.results_by_session_id[session_candidate_id] = result
             self.session.knowledge_updates = list(payload.get("knowledge_updates") or self.session.knowledge_updates)
+            if payload["results"]:
+                self._live_visual_mode = "fem"
             self._apply_session(self.session)
             passed_count = sum(1 for item in payload["results"] if item.get("verdict") == "通过")
             self.chat_widget.add_message(

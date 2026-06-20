@@ -410,7 +410,15 @@ class ConversationFlowController:
             self._emit_commentary("conversation_paused", {"stage": state.stage})
             return state
 
-        results = [self.orchestrator.evaluate_candidate(state.task, candidate) for candidate in state.evaluated_candidates]
+        if hasattr(self.orchestrator, "prepare_candidates_for_fem"):
+            fem_designs = self.orchestrator.prepare_candidates_for_fem(state.task, state.evaluated_candidates)
+        else:
+            fem_designs = [
+                self.orchestrator.prepare_candidate_for_fem(state.task, candidate)
+                for candidate in state.evaluated_candidates
+            ]
+        results = [self.orchestrator.evaluate_prepared_candidate(state.task, design) for design in fem_designs]
+        self.orchestrator.persist_knowledge_records(state.task, fem_designs, results)
         state.results = results
         passed_count = sum(1 for result in results if result.get("verdict") == "通过")
         state.pending_confirmation = "export_report"

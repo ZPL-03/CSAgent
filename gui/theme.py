@@ -569,6 +569,24 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         border-color: {color["accent"]};
         color: {color["accent"]};
     }}
+    QPushButton[variant="liveToggle"] {{
+        background: {color["button_bg"]};
+        border: 1px solid {color["border_soft"]};
+        color: {color["text"]};
+        min-width: 48px;
+        max-width: 48px;
+        min-height: 28px;
+        max-height: 28px;
+        border-radius: 8px;
+        padding: 0;
+        font-size: 13px;
+        font-weight: 800;
+    }}
+    QPushButton[variant="liveToggle"]:hover {{
+        background: {color["button_hover"]};
+        border-color: {color["accent"]};
+        color: {color["accent"]};
+    }}
     QPushButton#graphToolButton {{
         background: {color["button_bg"]};
         border: 1px solid {color["border_soft"]};

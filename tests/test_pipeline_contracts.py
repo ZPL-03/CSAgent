@@ -6,6 +6,7 @@ import pytest
 
 from agents.candidate_gen import CandidateGenAgent
 from agents.knowledge_agent import KnowledgeAgent
+import agents.orchestrator as orchestrator_module
 from agents.orchestrator import OrchestratorAgent
 from agents.report_gen import ReportGenAgent
 from core.id_utils import format_temp_candidate_id
@@ -643,6 +644,37 @@ def test_orchestrator_promotes_candidate_to_formal_identity_without_persistent_i
     assert "persistent_candidate_id" not in promoted
     assert candidate["candidate_id"] == "TMP_1"
     validate_or_raise("candidate.schema.json", promoted)
+
+
+def test_orchestrator_reserves_unique_formal_ids_for_fem_batch(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    monkeypatch.setattr(
+        orchestrator_module,
+        "reserve_candidate_ids",
+        lambda count: [f"C{16 + index}" for index in range(count)],
+    )
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
+    base_candidates = CandidateGenAgent().doe_sampler.sample_candidates(
+        task,
+        n_samples=3,
+        start_index=1,
+        strict_solver_window=True,
+        id_factory=format_temp_candidate_id,
+    )
+    for candidate, candidate_id in zip(base_candidates, ["TMP_10", "TMP_4", "TMP_9"]):
+        candidate["candidate_id"] = candidate_id
+        candidate["display_name"] = candidate_id
+    orchestrator = OrchestratorAgent.__new__(OrchestratorAgent)
+
+    promoted = orchestrator.prepare_candidates_for_fem(task, base_candidates)
+
+    assert [item["candidate_id"] for item in promoted] == ["C16", "C17", "C18"]
+    assert [item["display_name"] for item in promoted] == ["C16", "C17", "C18"]
+    assert [item["session_candidate_id"] for item in promoted] == ["TMP_10", "TMP_4", "TMP_9"]
+    assert len({item["candidate_id"] for item in promoted}) == len(promoted)
+    assert all("persistent_candidate_id" not in item for item in promoted)
+    for item in promoted:
+        validate_or_raise("candidate.schema.json", item)
 
 
 def test_knowledge_case_record_keeps_only_real_task_trace(monkeypatch):

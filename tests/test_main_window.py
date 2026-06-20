@@ -108,6 +108,76 @@ def test_report_button_allows_partial_evaluated_results(monkeypatch) -> None:
         app.processEvents()
 
 
+def test_live_visual_toggle_keeps_fem_result_available(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        calls: list[tuple[str, str]] = []
+
+        def record_candidate(candidate: dict) -> None:
+            calls.append(("candidate", str(candidate.get("candidate_id"))))
+
+        def record_result(result: dict) -> None:
+            calls.append(("fem", str(result.get("candidate_id"))))
+
+        monkeypatch.setattr(window.live_result_view, "show_candidate", record_candidate)
+        monkeypatch.setattr(window.live_result_view, "show_mode_shape", record_result)
+
+        candidate = _candidate("TMP_1")
+        result = {"candidate_id": "C1", "session_candidate_id": "TMP_1", "status": "success"}
+        window.session.candidates = [candidate]
+        window.session.results_by_session_id = {"TMP_1": result}
+        window._live_visual_mode = "fem"
+
+        window._show_live_visual()
+        assert calls[-1] == ("fem", "C1")
+
+        window._queue_candidate_preview(candidate)
+        window._flush_candidate_preview()
+        assert calls[-1] == ("candidate", "TMP_1")
+        assert window.live_visual_toggle_button.text() == "FE"
+
+        window._toggle_live_visual_mode()
+        assert calls[-1] == ("fem", "C1")
+        assert window.live_visual_toggle_button.text() == "3D"
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_live_visual_toggle_prefers_selected_candidate_result(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        calls: list[tuple[str, str]] = []
+
+        monkeypatch.setattr(window.live_result_view, "show_candidate", lambda candidate: None)
+        monkeypatch.setattr(
+            window.live_result_view,
+            "show_mode_shape",
+            lambda result: calls.append(("fem", str(result.get("candidate_id")))),
+        )
+
+        first = _candidate("TMP_1")
+        second = _candidate("TMP_2")
+        window.session.candidates = [first, second]
+        window.session.results_by_session_id = {
+            "TMP_1": {"candidate_id": "C1", "session_candidate_id": "TMP_1", "status": "success"},
+            "TMP_2": {"candidate_id": "C2", "session_candidate_id": "TMP_2", "status": "success"},
+        }
+        window._selected_live_candidate = first
+        window._live_visual_mode = "fem"
+
+        window._show_live_visual()
+
+        assert calls[-1] == ("fem", "C1")
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_design_solution_report_uses_candidates_before_fem(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
