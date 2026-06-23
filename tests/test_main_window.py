@@ -10,12 +10,13 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import yaml
 from PyQt6.QtGui import QFont, QFontMetrics
-from PyQt6.QtWidgets import QApplication, QFrame, QLabel, QLineEdit, QPushButton
+from PyQt6.QtWidgets import QApplication, QComboBox, QFrame, QLabel, QLineEdit, QPushButton
 
 import gui.main_window as main_window_module
 from core.task_parser import TaskParser
 from gui.candidate_widget import CandidateWidget
 from gui.chat_widget import ChatWidget
+from gui.knowledge_widget import KnowledgeWidget
 from gui.main_window import MainWindow
 from gui.theme import application_stylesheet
 from gui.workbench_widgets import AgentStatusCard, FlowDagWidget, StatusPill
@@ -1108,6 +1109,145 @@ def test_main_window_critical_buttons_have_connected_actions(monkeypatch) -> Non
             assert isinstance(button, QPushButton), name
             assert button.text().strip() or button.toolTip().strip(), name
             assert receiver_count(button) > 0, name
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_main_window_controls_survive_page_theme_language_switches(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    calls: list[tuple[str, object | None]] = []
+
+    def record(name: str):
+        def _recorder(_self, *args, **_kwargs) -> None:
+            calls.append((name, args[0] if args else None))
+
+        return _recorder
+
+    def record_knowledge(name: str):
+        def _recorder(_self, *args, **_kwargs) -> None:
+            calls.append((name, args[0] if args else None))
+
+        return _recorder
+
+    patched_main_window_methods = {
+        "_start_conversation": "start",
+        "_respond_confirmation": "confirm",
+        "_load_example_prompt": "example",
+        "_refresh_knowledge_view": "refresh_knowledge",
+        "_open_latest_report": "open_report",
+        "_export_session_data": "export_data",
+        "_choose_report_output_dir": "report_dir",
+        "_refresh_run_selector": "refresh_runs",
+        "_restore_selected_run": "restore_run",
+        "_start_screen": "screen",
+        "_start_evaluate_selected": "evaluate_selected",
+        "_start_evaluate_all": "evaluate_all",
+        "_start_report": "report",
+        "_reset_session": "reset_session",
+        "_save_settings_from_page": "settings_save",
+        "_reload_settings_page": "settings_reload",
+    }
+    for method_name, call_name in patched_main_window_methods.items():
+        monkeypatch.setattr(MainWindow, method_name, record(call_name))
+
+    for method_name, call_name in {
+        "_search_from_input": "knowledge_search",
+        "_select_and_ingest_file": "knowledge_upload",
+        "_select_and_ingest_files": "knowledge_batch",
+        "_run_maintenance": "knowledge_maintenance",
+    }.items():
+        monkeypatch.setattr(KnowledgeWidget, method_name, record_knowledge(call_name))
+
+    window = MainWindow()
+    try:
+        window.resize(1280, 960)
+        window.show()
+        app.processEvents()
+
+        for index, button in enumerate(window.nav_buttons):
+            button.click()
+            app.processEvents()
+            assert window.stack.currentIndex() == index
+            assert button.isChecked()
+
+        for selector in [window.language_selector, window.theme_selector]:
+            assert isinstance(selector, QComboBox)
+            original_index = selector.currentIndex()
+            if selector.count() > 1:
+                selector.setCurrentIndex((original_index + 1) % selector.count())
+                app.processEvents()
+                selector.setCurrentIndex(original_index)
+                app.processEvents()
+
+        buttons_to_click = [
+            window.generate_button,
+            window.confirm_yes_button,
+            window.confirm_no_button,
+            window.example_button,
+            window.trace_button,
+            window.refresh_button,
+            window.open_report_button,
+            window.export_data_button,
+            window.report_dir_button,
+            window.live_visual_toggle_button,
+            window.reset_view_button,
+            window.fit_view_button,
+            window.refresh_runs_button,
+            window.restore_run_button,
+            window.screen_button,
+            window.evaluate_selected_button,
+            window.evaluate_all_button,
+            window.report_button,
+            window.reset_button,
+            window.settings_save_button,
+            window.settings_reload_button,
+            window.knowledge_widget.search_button,
+            window.knowledge_widget.upload_button,
+            window.knowledge_widget.batch_button,
+            window.knowledge_widget.rebuild_button,
+            window.knowledge_widget.export_snapshot_button,
+            window.knowledge_widget.refresh_button,
+            window.knowledge_widget.graph_reset_button,
+            window.knowledge_widget.graph_zoom_in_button,
+            window.knowledge_widget.graph_zoom_out_button,
+            window.knowledge_widget.graph_label_button,
+            window.knowledge_widget.graph_relation_button,
+            window.knowledge_right_rebuild_button,
+            window.knowledge_right_snapshot_button,
+        ]
+        for button in buttons_to_click:
+            button.setEnabled(True)
+            button.click()
+            app.processEvents()
+
+        expected_calls = {
+            "start",
+            "confirm",
+            "example",
+            "refresh_knowledge",
+            "open_report",
+            "export_data",
+            "report_dir",
+            "refresh_runs",
+            "restore_run",
+            "screen",
+            "evaluate_selected",
+            "evaluate_all",
+            "report",
+            "reset_session",
+            "settings_save",
+            "settings_reload",
+            "knowledge_search",
+            "knowledge_upload",
+            "knowledge_batch",
+            "knowledge_maintenance",
+        }
+        assert expected_calls.issubset({name for name, _arg in calls})
+        assert ("knowledge_maintenance", "rebuild") in calls
+        assert ("knowledge_maintenance", "export") in calls
+        assert window.stack.currentIndex() == 2
     finally:
         window.close()
         app.processEvents()
