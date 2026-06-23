@@ -2614,6 +2614,13 @@ class MainWindow(QMainWindow):
             ) if runtime_stage else runtime_type
         self._update_runtime_panel()
 
+    def _runtime_event_visible_in_chat(self, runtime_type: str) -> bool:
+        return (
+            runtime_type.startswith("simulation_job_")
+            or runtime_type.startswith("tool_")
+            or runtime_type in {"workflow_started", "human_confirmation", "node_failed"}
+        )
+
     def _failed_agent_for_stage(self, stage: str) -> str | None:
         if stage == "failed":
             return "ORCHESTRATOR"
@@ -3367,6 +3374,8 @@ class MainWindow(QMainWindow):
             ui_agent = self._ui_agent_for_runtime_stage(runtime_stage, runtime_agent)
             self.log_widget.append_log(ui_agent, f"[{runtime_type}{suffix}] {message}")
             self.monitor_log_widget.append_log(ui_agent, f"[{runtime_type}{suffix}] {message}")
+            if self._runtime_event_visible_in_chat(runtime_type):
+                self.chat_widget.add_message(ui_agent, message)
             self._queue_refresh_run_selector()
             if run_id:
                 self.workflow_widget.refresh(run_id, runtime_stage, self.session.pending_confirmation)

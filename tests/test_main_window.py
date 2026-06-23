@@ -840,7 +840,7 @@ def test_main_window_restores_workflow_snapshot(monkeypatch, tmp_path) -> None:
         app.processEvents()
 
 
-def test_main_window_routes_runtime_events_to_logs_without_chat_noise(monkeypatch) -> None:
+def test_main_window_routes_runtime_events_to_logs_and_actionable_chat(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
     window = MainWindow()
@@ -868,6 +868,20 @@ def test_main_window_routes_runtime_events_to_logs_without_chat_noise(monkeypatc
 
         assert window.runtime_agent_states["ORCHESTRATOR"] == "done"
         assert window.flow_dag_widget.agent_states["ORCHESTRATOR"] == "done"
+
+        simulation_event = {
+            "event_type": "workflow_runtime_event",
+            "payload": {
+                "runtime_event_type": "simulation_job_started",
+                "runtime_agent": "FEM_AGENT",
+                "runtime_stage": "evaluate_candidates",
+                "record": {"run_id": "RUN_CHAT"},
+            },
+        }
+        window._handle_message("FLOW", "有限元作业开始：RUN_CHAT:TMP_1", simulation_event)
+
+        assert "simulation_job_started @ evaluate_candidates" in window.log_widget.toPlainText()
+        assert "FEM_AGENT: 有限元作业开始：RUN_CHAT:TMP_1" in window.chat_widget.toPlainText()
     finally:
         window.close()
         app.processEvents()
