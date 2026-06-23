@@ -200,18 +200,26 @@ class OrchestratorAgent(BaseAgent):
     def persist_knowledge_records(self, task: Dict, designs: List[Dict], results: List[Dict]) -> List[Dict]:
         """把有限元结果回流到案例库和案例记忆。"""
 
-        results_by_key: Dict[str, Dict] = {}
+        results_by_candidate_id: Dict[str, Dict] = {}
+        results_by_session_id: Dict[str, Dict] = {}
         for result in results:
-            for key in [result.get("candidate_id"), result.get("session_candidate_id")]:
-                if key:
-                    results_by_key[str(key)] = result
+            candidate_id = str(result.get("candidate_id") or "").strip()
+            session_candidate_id = str(result.get("session_candidate_id") or "").strip()
+            if candidate_id:
+                results_by_candidate_id[candidate_id] = result
+            if session_candidate_id:
+                results_by_session_id[session_candidate_id] = result
 
         updates: List[Dict] = []
         for design in designs:
-            result = (
-                results_by_key.get(str(design.get("candidate_id") or ""))
-                or results_by_key.get(str(design.get("session_candidate_id") or ""))
-            )
+            design_candidate_id = str(design.get("candidate_id") or "").strip()
+            design_session_id = str(design.get("session_candidate_id") or "").strip()
+            result = results_by_session_id.get(design_session_id) if design_session_id else None
+            if result is None and design_candidate_id:
+                candidate_result = results_by_candidate_id.get(design_candidate_id)
+                result_session_id = str(candidate_result.get("session_candidate_id") or "").strip() if candidate_result else ""
+                if candidate_result and (not design_session_id or not result_session_id or result_session_id == design_session_id):
+                    result = candidate_result
             if not result:
                 update = {
                     "status": "missing_result",

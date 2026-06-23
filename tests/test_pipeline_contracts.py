@@ -677,6 +677,45 @@ def test_orchestrator_reserves_unique_formal_ids_for_fem_batch(monkeypatch):
         validate_or_raise("candidate.schema.json", item)
 
 
+def test_knowledge_persistence_rejects_cross_session_result_with_same_formal_id(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
+    orchestrator = OrchestratorAgent.__new__(OrchestratorAgent)
+    events = []
+    calls = []
+
+    class FakeKnowledgeAgent:
+        def run(self, payload):
+            calls.append(payload)
+            return {
+                "status": "stored",
+                "case_id": payload["design"]["candidate_id"].replace("C", "CASE_"),
+            }
+
+    orchestrator.knowledge_agent = FakeKnowledgeAgent()
+    orchestrator.emit_event = lambda event, message, payload=None: events.append((event, message, payload))
+    designs = [
+        {"candidate_id": "C16", "display_name": "C16", "session_candidate_id": "TMP_10"},
+        {"candidate_id": "C16", "display_name": "C16", "session_candidate_id": "TMP_4"},
+    ]
+    results = [
+        {
+            "candidate_id": "C16",
+            "session_candidate_id": "TMP_4",
+            "status": "success",
+            "verdict": "通过",
+        }
+    ]
+
+    updates = orchestrator.persist_knowledge_records(task, designs, results)
+
+    assert [item["status"] for item in updates] == ["missing_result", "stored"]
+    assert updates[0]["session_candidate_id"] == "TMP_10"
+    assert calls[0]["design"]["session_candidate_id"] == "TMP_4"
+    assert calls[0]["abaqus_results"]["session_candidate_id"] == "TMP_4"
+    assert [item[0] for item in events] == ["knowledge_update_failed", "knowledge_update_completed"]
+
+
 def test_knowledge_case_record_keeps_only_real_task_trace(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task_record = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
@@ -748,6 +787,30 @@ def test_knowledge_record_survives_case_memory_vector_failure(monkeypatch, tmp_p
     assert (tmp_path / "case_library" / "CASE_VECTOR_FAILURE.json").is_file()
     assert agent.case_memory is None
     assert emitted and "案例向量记忆写入失败" in emitted[0]
+
+
+def test_knowledge_agent_does_not_initialize_case_memory_during_construction(monkeypatch):
+    import agents.knowledge_agent as knowledge_module
+
+    class ExplodingCaseMemory:
+        def __init__(self):
+            raise AssertionError("CaseMemoryIndex should be loaded lazily")
+
+    class FakeSurrogateModelManager:
+        pass
+
+    monkeypatch.setattr(knowledge_module, "CaseMemoryIndex", ExplodingCaseMemory)
+    monkeypatch.setattr(knowledge_module, "SurrogateModelManager", FakeSurrogateModelManager)
+    monkeypatch.setattr(
+        knowledge_module,
+        "load_app_config",
+        lambda: {"pipeline": {"min_case_records_for_retrain": 999}},
+    )
+
+    agent = KnowledgeAgent()
+
+    assert agent.case_memory is None
+    assert agent._case_memory_unavailable is False
 
 
 def _report_sample():

@@ -248,7 +248,7 @@ class ChatWidget(QWidget):
         border: str,
         fg: str,
         max_width: int = 760,
-        min_width: int = 320,
+        min_width: int = 44,
         fit_content: bool = False,
     ) -> QFrame:
         frame = QFrame()
@@ -294,7 +294,7 @@ class ChatWidget(QWidget):
 
         if role == "user":
             row_layout.addStretch(1)
-            bubble = self._bubble(message, palette["user_bg"], palette["user_bg"], palette["user_text"], 1120, 54, fit_content=True)
+            bubble = self._bubble(message, palette["user_bg"], palette["user_bg"], palette["user_text"], 1120, 44, fit_content=True)
             row_layout.addWidget(bubble)
             row_layout.addWidget(self._avatar_label("U", palette["user_bg"], palette["user_text"]), 0, Qt.AlignmentFlag.AlignTop)
             row.setMinimumHeight(bubble.height() + 4)
@@ -315,7 +315,7 @@ class ChatWidget(QWidget):
         column_layout.setContentsMargins(0, 0, 0, 0)
         column_layout.setSpacing(4)
         sender_label = self._label(sender, fg, 12, True)
-        bubble = self._bubble(message, bg, border, fg, 1120, 54, fit_content=True)
+        bubble = self._bubble(message, bg, border, fg, 1120, 44, fit_content=True)
         column_layout.addWidget(sender_label)
         column_layout.addWidget(bubble)
         row_layout.addWidget(column, 1)
@@ -348,7 +348,7 @@ class ChatWidget(QWidget):
                 palette["user_bg"],
                 palette["user_text"],
                 1120,
-                54,
+                44,
                 fit_content=True,
             )
         )
@@ -374,7 +374,7 @@ class ChatWidget(QWidget):
                 palette["agent_border"],
                 palette["agent_text"],
                 1120,
-                54,
+                44,
                 fit_content=True,
             )
         )

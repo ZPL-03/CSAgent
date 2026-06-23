@@ -25,11 +25,8 @@ class KnowledgeAgent(BaseAgent):
 
     def __init__(self, progress_callback=None) -> None:
         super().__init__(progress_callback=progress_callback)
-        try:
-            self.case_memory = CaseMemoryIndex()
-        except Exception as exc:
-            self.case_memory = None
-            self.emit(f"案例向量记忆初始化失败，仅写入 JSON 案例：{exc}")
+        self.case_memory = None
+        self._case_memory_unavailable = False
         self.model_manager = SurrogateModelManager()
         self.config = load_app_config()
         self.min_case_records_for_retrain = int(self.config["pipeline"]["min_case_records_for_retrain"])
@@ -161,21 +158,37 @@ class KnowledgeAgent(BaseAgent):
     def _should_store_record(self, abaqus_results: Dict) -> bool:
         return abaqus_results.get("status") == "success" and abaqus_results.get("verdict") == "通过"
 
+    def _case_memory_index(self) -> CaseMemoryIndex | None:
+        if getattr(self, "_case_memory_unavailable", False):
+            return None
+        if getattr(self, "case_memory", None) is not None:
+            return self.case_memory
+        try:
+            self.case_memory = CaseMemoryIndex()
+        except Exception as exc:
+            self.case_memory = None
+            self._case_memory_unavailable = True
+            self.emit(f"案例向量记忆初始化失败，仅写入 JSON 案例：{exc}")
+        return self.case_memory
+
     def _store_record(self, record: Dict) -> None:
         write_json(CASES_DIR / f"{record['case_id']}.json", record)
+        case_memory = self._case_memory_index()
         if self._should_store_record(record.get("abaqus_results", {})):
             write_json(CASE_LIBRARY_DIR / f"{record['case_id']}.json", record)
-            if self.case_memory is not None:
+            if case_memory is not None:
                 try:
-                    self.case_memory.upsert_cases([record], scope="formal")
+                    case_memory.upsert_cases([record], scope="formal")
                 except Exception as exc:
                     self.case_memory = None
+                    self._case_memory_unavailable = True
                     self.emit(f"案例向量记忆写入失败，JSON 案例已保存：{exc}")
-        elif self.case_memory is not None:
+        elif case_memory is not None:
             try:
-                self.case_memory.upsert_cases([record], scope="archive")
+                case_memory.upsert_cases([record], scope="archive")
             except Exception as exc:
                 self.case_memory = None
+                self._case_memory_unavailable = True
                 self.emit(f"案例向量记忆写入失败，JSON 案例已保存：{exc}")
 
     def _maybe_retrain_surrogate(self) -> Dict | None:

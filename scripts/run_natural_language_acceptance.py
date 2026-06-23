@@ -106,6 +106,13 @@ def _attach_deterministic_downstream(orchestrator: OrchestratorAgent, output_dir
         prepared["session_candidate_id"] = candidate["candidate_id"]
         return prepared
 
+    def prepare_candidates_for_fem(task: dict[str, Any], candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        prepared: list[dict[str, Any]] = []
+        setattr(prepare_candidate_for_fem, "_seen", [])
+        for candidate in candidates:
+            prepared.append(prepare_candidate_for_fem(task, candidate))
+        return prepared
+
     def evaluate_prepared_candidate(task: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
         predicted = float(candidate.get("surrogate_ultimate_pressure_MPa") or 45.0)
         result = {
@@ -144,6 +151,7 @@ def _attach_deterministic_downstream(orchestrator: OrchestratorAgent, output_dir
         return updates
 
     orchestrator.prepare_candidate_for_fem = prepare_candidate_for_fem  # type: ignore[method-assign]
+    orchestrator.prepare_candidates_for_fem = prepare_candidates_for_fem  # type: ignore[method-assign]
     orchestrator.evaluate_prepared_candidate = evaluate_prepared_candidate  # type: ignore[method-assign]
     orchestrator.persist_knowledge_records = persist_knowledge_records  # type: ignore[method-assign]
 

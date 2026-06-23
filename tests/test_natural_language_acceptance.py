@@ -175,6 +175,30 @@ def _patch_deterministic_downstream(monkeypatch, orchestrator: OrchestratorAgent
             },
         ),
         (
+            "设计一个外压圆柱耐压壳，外压 24 MPa，半径约 120 mm，长度约 600 mm，生成 8 个候选，预筛 4 个进入校核",
+            {
+                "pressure": 24.0,
+                "target": 30.0,
+                "total": 8,
+                "top_k": 4,
+                "boundary_type": "END_CLAMPED",
+                "has_geometry_reference": True,
+                "has_fixed_geometry": False,
+            },
+        ),
+        (
+            "面向深海外压工况给出复合材料耐压壳方案，外压 18 MPa，极限压力至少 28 MPa，生成 6 个候选，初筛 3 个",
+            {
+                "pressure": 18.0,
+                "target": 28.0,
+                "total": 6,
+                "top_k": 3,
+                "boundary_type": "END_CLAMPED",
+                "has_geometry_reference": False,
+                "has_fixed_geometry": False,
+            },
+        ),
+        (
             "外压 32 MPa，长度 520 mm，半径 105 mm，厚度 11 mm，极限压力不低于 42 MPa，候选池 8 个，初筛 Top-3",
             {
                 "pressure": 32.0,

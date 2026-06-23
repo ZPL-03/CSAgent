@@ -59,6 +59,42 @@ class FakeKnowledge:
         return {"query": query, "chunks": [], "relations": []}
 
 
+class FakeBatchEvaluateOrchestrator:
+    def __init__(self, progress_callback=None) -> None:
+        self.progress_callback = progress_callback
+
+    def prepare_candidates_for_fem(self, task, candidates):
+        return [
+            {
+                **candidate,
+                "candidate_id": f"C{16 + index}",
+                "display_name": f"C{16 + index}",
+                "session_candidate_id": candidate["candidate_id"],
+            }
+            for index, candidate in enumerate(candidates)
+        ]
+
+    def evaluate_prepared_candidate(self, task, candidate):
+        return {
+            "candidate_id": candidate["candidate_id"],
+            "session_candidate_id": candidate["session_candidate_id"],
+            "status": "success",
+            "ultimate_pressure_MPa": 45.0,
+            "verdict": "通过",
+        }
+
+    def persist_knowledge_records(self, task, designs, results):
+        return [
+            {
+                "status": "stored",
+                "case_id": f"CASE_{16 + index}",
+                "candidate_id": design["candidate_id"],
+                "session_candidate_id": design["session_candidate_id"],
+            }
+            for index, design in enumerate(designs)
+        ]
+
+
 def test_confirmation_controls_share_input_action_row(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
@@ -368,6 +404,35 @@ def test_workbench_non_destructive_buttons_execute_connected_actions(monkeypatch
     finally:
         window.close()
         app.processEvents()
+
+
+def test_pipeline_worker_evaluate_action_keeps_batch_candidate_identity(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    monkeypatch.setattr(main_window_module, "OrchestratorAgent", FakeBatchEvaluateOrchestrator)
+    app = _app()
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
+    worker = main_window_module.PipelineWorker(
+        "evaluate",
+        {
+            "task": task,
+            "candidates": [_candidate("TMP_10"), _candidate("TMP_4"), _candidate("TMP_9")],
+        },
+    )
+    captured: dict = {}
+    errors: list[str] = []
+    worker.finished.connect(lambda action, payload: captured.update({"action": action, "payload": payload}))
+    worker.failed.connect(errors.append)
+
+    worker.run()
+    app.processEvents()
+
+    assert errors == []
+    assert captured["action"] == "evaluate"
+    payload = captured["payload"]
+    assert [item["candidate_id"] for item in payload["fem_designs"]] == ["C16", "C17", "C18"]
+    assert [item["session_candidate_id"] for item in payload["fem_designs"]] == ["TMP_10", "TMP_4", "TMP_9"]
+    assert [item["candidate_id"] for item in payload["results"]] == ["C16", "C17", "C18"]
+    assert [item["session_candidate_id"] for item in payload["knowledge_updates"]] == ["TMP_10", "TMP_4", "TMP_9"]
 
 
 def test_loaded_example_keeps_geometry_as_candidate_variables(monkeypatch) -> None:
@@ -701,6 +766,80 @@ def test_visible_workbench_buttons_keep_text_inside_layout(monkeypatch) -> None:
         app.processEvents()
 
 
+def test_main_window_critical_buttons_have_connected_actions(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+
+    def receiver_count(button: QPushButton) -> int:
+        total = 0
+        for signal_name in ("clicked", "toggled"):
+            signal = getattr(button, signal_name, None)
+            if signal is None:
+                continue
+            try:
+                total += button.receivers(signal)
+            except TypeError:
+                continue
+        return total
+
+    try:
+        window.show()
+        app.processEvents()
+        assert window.nav_group.receivers(window.nav_group.idClicked) > 0
+        for name, button in zip(
+            ["nav_workbench", "nav_knowledge", "nav_monitor", "nav_settings"],
+            window.nav_buttons,
+        ):
+            assert isinstance(button, QPushButton), name
+            assert button.text().strip(), name
+
+        button_specs = [
+            ("generate", window.generate_button),
+            ("confirm_yes", window.confirm_yes_button),
+            ("confirm_no", window.confirm_no_button),
+            ("example", window.example_button),
+            ("trace", window.trace_button),
+            ("refresh_knowledge", window.refresh_button),
+            ("report_dir", window.report_dir_button),
+            ("open_report", window.open_report_button),
+            ("export_data", window.export_data_button),
+            ("live_visual_mode", window.live_visual_toggle_button),
+            ("reset_view", window.reset_view_button),
+            ("fit_view", window.fit_view_button),
+            ("refresh_runs", window.refresh_runs_button),
+            ("restore_run", window.restore_run_button),
+            ("screen", window.screen_button),
+            ("evaluate_selected", window.evaluate_selected_button),
+            ("evaluate_all", window.evaluate_all_button),
+            ("report", window.report_button),
+            ("reset_session", window.reset_button),
+            ("settings_save", window.settings_save_button),
+            ("settings_reload", window.settings_reload_button),
+            ("knowledge_search", window.knowledge_widget.search_button),
+            ("knowledge_upload", window.knowledge_widget.upload_button),
+            ("knowledge_batch", window.knowledge_widget.batch_button),
+            ("knowledge_rebuild", window.knowledge_widget.rebuild_button),
+            ("knowledge_export_snapshot", window.knowledge_widget.export_snapshot_button),
+            ("knowledge_refresh", window.knowledge_widget.refresh_button),
+            ("knowledge_graph_reset", window.knowledge_widget.graph_reset_button),
+            ("knowledge_graph_zoom_in", window.knowledge_widget.graph_zoom_in_button),
+            ("knowledge_graph_zoom_out", window.knowledge_widget.graph_zoom_out_button),
+            ("knowledge_graph_label_toggle", window.knowledge_widget.graph_label_button),
+            ("knowledge_graph_relation_toggle", window.knowledge_widget.graph_relation_button),
+            ("knowledge_right_rebuild", window.knowledge_right_rebuild_button),
+            ("knowledge_right_snapshot", window.knowledge_right_snapshot_button),
+        ]
+
+        for name, button in button_specs:
+            assert isinstance(button, QPushButton), name
+            assert button.text().strip() or button.toolTip().strip(), name
+            assert receiver_count(button) > 0, name
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_workbench_input_actions_share_one_compact_row(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
@@ -824,6 +963,34 @@ def test_chat_bubble_width_tracks_rendered_text_width() -> None:
         expected_width = target_max if raw_width >= target_max else max(target_min, raw_width)
 
         assert widget._content_width(text, target_max, target_min) == expected_width
+    finally:
+        widget.close()
+        app.processEvents()
+
+
+def test_chat_short_runtime_bubbles_follow_text_width() -> None:
+    app = _app()
+    widget = ChatWidget()
+    try:
+        widget.resize(1120, 420)
+        widget.show()
+        app.processEvents()
+
+        messages = [
+            ("USER", "continue"),
+            ("ORCHESTRATOR", "start FEM TMP_11 -> C16"),
+            ("FEM_AGENT", "C16 first ABAQUS solve"),
+        ]
+        for sender, message in messages:
+            widget.add_message(sender, message)
+            app.processEvents()
+
+        bubbles = [item for item in widget.findChildren(QFrame) if item.objectName() == "chatBubble"]
+        assert len(bubbles) == len(messages)
+        for bubble, (_, message) in zip(bubbles, messages):
+            text_width = widget._text_metrics(13).horizontalAdvance(message)
+            assert bubble.width() - text_width <= 20
+            assert bubble.width() <= 360
     finally:
         widget.close()
         app.processEvents()

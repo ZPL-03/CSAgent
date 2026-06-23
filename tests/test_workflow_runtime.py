@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import pytest
 
+from agents.orchestrator import OrchestratorAgent
+from core.task_parser import TaskParser
 from workflow.event_store import WorkflowEventStore
 from workflow.runtime import DesignWorkflowRuntime
 
@@ -246,6 +248,55 @@ def test_workflow_runtime_completes_full_approved_path(tmp_path):
     assert evaluate_event["payload"]["output_summary"]["results"]["count"] == 1
     runs = store.list_runs(limit=5)
     assert runs[0]["status"] == "completed"
+
+
+def test_workflow_runtime_batch_fem_uses_unique_formal_candidate_ids(monkeypatch, tmp_path):
+    import agents.orchestrator as orchestrator_module
+    from agents.fem_agent import FEMAgent
+
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    monkeypatch.setattr(
+        orchestrator_module,
+        "reserve_candidate_ids",
+        lambda count: [f"C{16 + index}" for index in range(count)],
+    )
+    monkeypatch.setattr(orchestrator_module, "IO_DIR", tmp_path)
+
+    def fake_fem_run(self, candidate):
+        return {
+            "candidate_id": candidate["candidate_id"],
+            "session_candidate_id": candidate["session_candidate_id"],
+            "status": "success",
+            "ultimate_pressure_MPa": 45.0,
+            "linear_buckling_pressure_MPa": 60.0,
+            "verdict": "通过",
+        }
+
+    monkeypatch.setattr(FEMAgent, "run", fake_fem_run)
+
+    store = WorkflowEventStore(tmp_path / "workflow.sqlite3")
+    runtime = DesignWorkflowRuntime(orchestrator=OrchestratorAgent(), event_store=store)
+    runtime._active_run_id = "RUN_BATCH"
+    store.create_run("RUN_BATCH", "批量有限元编号测试")
+
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
+    candidates = [
+        {"candidate_id": "TMP_10", "display_name": "TMP_10", "source": "DOE"},
+        {"candidate_id": "TMP_4", "display_name": "TMP_4", "source": "LLM"},
+        {"candidate_id": "TMP_9", "display_name": "TMP_9", "source": "CASE_TRANSFER"},
+    ]
+
+    payload = runtime._evaluate_candidates_with_queue({"task": task, "candidates": candidates})
+
+    assert [item["candidate_id"] for item in payload["fem_designs"]] == ["C16", "C17", "C18"]
+    assert [item["session_candidate_id"] for item in payload["fem_designs"]] == ["TMP_10", "TMP_4", "TMP_9"]
+    assert [item["candidate_id"] for item in payload["results"]] == ["C16", "C17", "C18"]
+    assert [item["session_candidate_id"] for item in payload["results"]] == ["TMP_10", "TMP_4", "TMP_9"]
+
+    jobs = runtime.simulation_queue.list_jobs("RUN_BATCH")
+    assert [item["formal_candidate_id"] for item in jobs] == ["C16", "C17", "C18"]
+    assert [item["session_candidate_id"] for item in jobs] == ["TMP_10", "TMP_4", "TMP_9"]
+    assert all(item["status"] == "success" for item in jobs)
 
 
 def test_workflow_runtime_marks_failed_snapshot_and_run_status(tmp_path):
