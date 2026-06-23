@@ -545,6 +545,118 @@ def test_utility_and_sidebar_buttons_click_through(monkeypatch, tmp_path) -> Non
         app.processEvents()
 
 
+def test_remaining_workbench_and_workflow_buttons_click_through(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    monkeypatch.setattr("gui.knowledge_widget.DomainKnowledgeBase", FakeKnowledge)
+    health_calls: list[int] = []
+
+    def fake_probe(timeout_seconds=12):
+        health_calls.append(timeout_seconds)
+        return [
+            {
+                "role": "primary",
+                "name": "domain_finetuned_primary",
+                "model": "csllm",
+                "base_url_configured": True,
+                "api_key_configured": True,
+                "available_for_call": True,
+                "health_status": "success",
+                "health_message": "可用",
+                "latency_ms": 1.0,
+                "error": "",
+            }
+        ]
+
+    audit_calls: list[str] = []
+
+    def fake_write_run_audit(event_store, simulation_queue, workflow_run_id, output_dir):
+        audit_calls.append(workflow_run_id)
+        path = tmp_path / f"run_audit_{workflow_run_id}.md"
+        path.write_text("# audit", encoding="utf-8")
+        return path
+
+    monkeypatch.setattr("gui.workflow_widget.probe_llm_backends", fake_probe)
+    monkeypatch.setattr("gui.workflow_widget.write_run_audit", fake_write_run_audit)
+    app = _app()
+    store = WorkflowEventStore(tmp_path / "workflow.sqlite3")
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
+    store.create_run("RUN_CONTROLS", "button controls")
+    store.save_snapshot(
+        "RUN_CONTROLS",
+        {
+            "run_id": "RUN_CONTROLS",
+            "instruction": "button controls",
+            "task": task,
+            "stage": "awaiting_fem_confirmation",
+            "pending_confirmation": "fem_evaluation",
+            "candidates": [_candidate("TMP_1")],
+            "screened_candidates": [_candidate("TMP_1")],
+            "results": [],
+            "knowledge_updates": [],
+            "report": None,
+        },
+    )
+    window = MainWindow()
+    knowledge_refresh_calls: list[tuple[bool, bool, int]] = []
+    visual_calls: list[tuple[str, str]] = []
+    try:
+        window.workflow_event_store = store
+        window.workflow_widget.event_store = store
+        window.workflow_widget.simulation_queue = SimulationJobQueue(store.db_path)
+        window._queue_knowledge_refresh = (
+            lambda task, load_evidence=False, force=False, delay_ms=0: knowledge_refresh_calls.append(
+                (load_evidence, force, delay_ms)
+            )
+        )
+        window.live_result_view.show_mode_shape = lambda result: visual_calls.append(
+            ("fem", str(result.get("candidate_id") or ""))
+        )
+        window.live_result_view.show_candidate = lambda candidate: visual_calls.append(
+            ("geometry", str(candidate.get("candidate_id") or ""))
+        )
+
+        window.refresh_button.click()
+        assert knowledge_refresh_calls == [(True, True, 0)]
+
+        window._refresh_run_selector()
+        window.refresh_runs_button.click()
+        assert window.run_selector.currentData() == "RUN_CONTROLS"
+
+        window.workflow_widget.refresh("RUN_CONTROLS", "awaiting_fem_confirmation", "fem_evaluation")
+        assert window.workflow_widget.audit_button.isEnabled() is True
+        window.workflow_widget.health_button.click()
+        assert health_calls == [12]
+        assert window.workflow_widget.llm_health_results[0]["model"] == "csllm"
+        window.workflow_widget.audit_button.click()
+        assert audit_calls == ["RUN_CONTROLS"]
+        assert (tmp_path / "run_audit_RUN_CONTROLS.md").exists()
+
+        candidate = _candidate("TMP_1")
+        result = {
+            "candidate_id": "C1",
+            "session_candidate_id": "TMP_1",
+            "mode_shape": {"nodes": [], "elements": [], "values": []},
+        }
+        window.session.task = task
+        window.session.candidates = [candidate]
+        window.session.results_by_session_id = {"TMP_1": result}
+        window._selected_live_candidate = candidate
+        window._show_live_visual()
+        assert visual_calls[-1] == ("fem", "C1")
+        assert window.live_visual_toggle_button.text() == "3D"
+
+        window.live_visual_toggle_button.click()
+        assert visual_calls[-1] == ("geometry", "TMP_1")
+        assert window.live_visual_toggle_button.text() == "FE"
+
+        window.live_visual_toggle_button.click()
+        assert visual_calls[-1] == ("fem", "C1")
+        assert window.live_visual_toggle_button.text() == "3D"
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_pipeline_worker_evaluate_action_keeps_batch_candidate_identity(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     monkeypatch.setattr(main_window_module, "OrchestratorAgent", FakeBatchEvaluateOrchestrator)
