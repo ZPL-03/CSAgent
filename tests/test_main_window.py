@@ -687,16 +687,18 @@ def test_pipeline_worker_evaluate_action_keeps_batch_candidate_identity(monkeypa
     assert [item["session_candidate_id"] for item in payload["knowledge_updates"]] == ["TMP_10", "TMP_4", "TMP_9"]
 
 
-def test_pipeline_worker_evaluate_action_emits_realtime_fem_events(monkeypatch) -> None:
+def test_pipeline_worker_evaluate_action_emits_realtime_fem_events(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     monkeypatch.setattr(main_window_module, "OrchestratorAgent", FakeBatchEvaluateOrchestrator)
     app = _app()
     task = TaskParser().parse_instruction("外压 30 MPa，生成 3 个候选，初筛保留 2 个候选")
+    workflow_db_path = tmp_path / "workflow.sqlite3"
     worker = main_window_module.PipelineWorker(
         "evaluate",
         {
             "task": task,
             "workflow_run_id": "RUN_TEST_FEM",
+            "workflow_db_path": workflow_db_path,
             "candidates": [_candidate("TMP_10"), _candidate("TMP_4")],
         },
     )
@@ -735,6 +737,23 @@ def test_pipeline_worker_evaluate_action_emits_realtime_fem_events(monkeypatch) 
     ]
     assert [result["candidate_id"] for result in partial_results] == ["C16", "C17"]
     assert captured["action"] == "evaluate"
+
+    store = WorkflowEventStore(workflow_db_path)
+    assert store.has_run("RUN_TEST_FEM")
+    persisted_events = store.list_events("RUN_TEST_FEM")
+    assert [event["event_type"] for event in persisted_events] == [
+        "simulation_job_queued",
+        "simulation_job_started",
+        "simulation_job_completed",
+        "simulation_job_queued",
+        "simulation_job_started",
+        "simulation_job_completed",
+    ]
+    assert [
+        event["payload"]["candidate_id"]
+        for event in persisted_events
+        if event["event_type"] == "simulation_job_completed"
+    ] == ["C16", "C17"]
 
 
 def test_loaded_example_keeps_geometry_as_candidate_variables(monkeypatch) -> None:

@@ -75,6 +75,14 @@ class WorkflowEventStore:
                 (run_id, instruction, status, run_id, now, now),
             )
 
+    def has_run(self, run_id: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM workflow_runs WHERE run_id = ? LIMIT 1",
+                (run_id,),
+            ).fetchone()
+        return row is not None
+
     def update_run_status(self, run_id: str, status: str) -> None:
         with self._connect() as conn:
             conn.execute(

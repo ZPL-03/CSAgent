@@ -67,6 +67,7 @@ from gui.theme import application_stylesheet, install_application_font, resolve_
 from gui.workbench_widgets import AgentStatusCard, FlowDagWidget, StatusPill
 from gui.workflow_widget import WorkflowWidget
 from workflow.event_store import WorkflowEventStore
+from workflow.events import WorkflowEvent
 from workflow.simulation_queue import SimulationJobQueue
 
 
@@ -145,12 +146,14 @@ class PipelineWorker(QObject):
         super().__init__()
         self.action = action
         self.payload = payload
+        self._event_store: WorkflowEventStore | None = None
 
     def run(self) -> None:
         try:
             orchestrator = OrchestratorAgent(progress_callback=self._emit_agent)
             workflow_db_path = self.payload.get("workflow_db_path")
             event_store = WorkflowEventStore(Path(str(workflow_db_path))) if workflow_db_path else None
+            self._event_store = event_store
             controller = ConversationFlowController(
                 orchestrator,
                 event_callback=self._emit_flow,
@@ -197,6 +200,7 @@ class PipelineWorker(QObject):
                     fem_designs = [orchestrator.prepare_candidate_for_fem(task, candidate) for candidate in candidates]
                 results = []
                 run_id = self._manual_run_id(task)
+                self._ensure_manual_run(event_store, run_id, task)
                 simulation_queue = SimulationJobQueue(event_store.db_path) if event_store else None
                 for fem_candidate in fem_designs:
                     session_candidate_id = str(
@@ -320,6 +324,17 @@ class PipelineWorker(QObject):
             raw = task.get("task_id")
         return str(raw or "manual_fem")
 
+    def _ensure_manual_run(self, event_store: WorkflowEventStore | None, run_id: str, task: dict | None) -> None:
+        if event_store is None or not run_id or event_store.has_run(run_id):
+            return
+        instruction = str(
+            self.payload.get("instruction")
+            or (task or {}).get("raw_instruction")
+            or (task or {}).get("title")
+            or run_id
+        )
+        event_store.create_run(run_id, instruction)
+
     def _emit_runtime_event(
         self,
         runtime_event_type: str,
@@ -336,6 +351,17 @@ class PipelineWorker(QObject):
             "record": {"run_id": run_id} if run_id else {},
         }
         runtime_payload.update(payload or {})
+        if self._event_store is not None and run_id:
+            event = WorkflowEvent(
+                run_id=run_id,
+                event_type=runtime_event_type,
+                agent=runtime_agent,
+                stage=runtime_stage,
+                message=message,
+                payload=dict(runtime_payload),
+            )
+            self._event_store.append_event(event)
+            runtime_payload["record"] = event.to_record()
         self.message.emit(
             "FLOW",
             message,
