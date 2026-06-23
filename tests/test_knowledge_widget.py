@@ -604,6 +604,70 @@ def test_knowledge_widget_runs_rebuild_and_snapshot_actions(monkeypatch, tmp_pat
         app.processEvents()
 
 
+def test_knowledge_widget_toolbar_buttons_click_through(monkeypatch, tmp_path) -> None:
+    global _DOCS_PATH
+    _DOCS_PATH = tmp_path / "documents.jsonl"
+    _DOCS_PATH.write_text("", encoding="utf-8")
+    upload_file = tmp_path / "upload.md"
+    upload_file.write_text("复合材料耐压壳外压屈曲证据。", encoding="utf-8")
+    batch_file = tmp_path / "batch.md"
+    batch_file.write_text("PBIPF 与 ASME RD-1172 校核证据。", encoding="utf-8")
+
+    monkeypatch.setattr("gui.knowledge_widget.DomainKnowledgeBase", FakeKnowledge)
+    monkeypatch.setattr("gui.knowledge_widget.KnowledgeIngestionService", FakeIngestionService)
+    monkeypatch.setattr(
+        "gui.knowledge_widget.QFileDialog.getOpenFileName",
+        lambda *args, **kwargs: (str(upload_file), "Markdown (*.md)"),
+    )
+    monkeypatch.setattr(
+        "gui.knowledge_widget.QFileDialog.getOpenFileNames",
+        lambda *args, **kwargs: ([str(upload_file), str(batch_file)], "Markdown (*.md)"),
+    )
+
+    app = _app()
+    widget = KnowledgeWidget()
+    operations: list[tuple[str, object]] = []
+
+    def record_ingest_path(path) -> None:
+        operations.append(("ingest_path", str(path)))
+
+    def record_ingest_paths(paths) -> None:
+        operations.append(("ingest_paths", [str(path) for path in paths]))
+
+    def record_maintenance(operation: str) -> None:
+        operations.append(("maintenance", operation))
+
+    try:
+        widget.ingest_path = record_ingest_path
+        widget.ingest_paths = record_ingest_paths
+        widget._run_maintenance = record_maintenance
+
+        widget.upload_button.click()
+        widget.batch_button.click()
+        widget.rebuild_button.click()
+        widget.export_snapshot_button.click()
+        widget.refresh_button.click()
+        widget.graph_search_input.setText("Damage")
+        widget.search_input.setText("屈曲 失效")
+        widget.search_button.click()
+        widget.graph_zoom_in_button.click()
+        widget.graph_zoom_out_button.click()
+        widget.graph_reset_button.click()
+        widget.graph_label_button.click()
+        widget.graph_relation_button.click()
+
+        assert ("ingest_path", str(upload_file)) in operations
+        assert ("ingest_paths", [str(upload_file), str(batch_file)]) in operations
+        assert ("maintenance", "rebuild") in operations
+        assert ("maintenance", "export") in operations
+        assert widget.graph_view.show_labels is False
+        assert widget.graph_view.show_relation_labels is False
+        assert "屈曲" in widget.evidence_browser.toPlainText()
+    finally:
+        widget.close()
+        app.processEvents()
+
+
 def test_knowledge_widget_runs_real_ingestion_pipeline(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CSDM_cph_USE_HASH_EMBEDDING", "1")
 

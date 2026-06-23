@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-UI_LAYOUT_VERSION = 11
+UI_LAYOUT_VERSION = 12
 
 from PyQt6 import sip
 from PyQt6.QtCore import QObject, QRectF, QSettings, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
@@ -763,9 +763,27 @@ class MainWindow(QMainWindow):
         total_width = max(0, self.main_splitter.width())
         if total_width <= 0:
             total_width = max(0, self.width())
-        right_width = 370 if total_width >= 1180 else 340
-        left_width = min(286, max(248, int(total_width * 0.18)))
-        center_width = max(520, total_width - left_width - right_width)
+        if total_width <= 0:
+            return
+
+        target_left = min(286, max(248, int(total_width * 0.18)))
+        target_right = 370 if total_width >= 1180 else 340
+        minimum_center = 520
+        minimum_left = 232
+        minimum_right = 318
+
+        available_for_sidebars = max(0, total_width - minimum_center)
+        if target_left + target_right > available_for_sidebars:
+            scale = available_for_sidebars / max(1, target_left + target_right)
+            left_width = max(minimum_left, int(target_left * scale))
+            right_width = max(minimum_right, available_for_sidebars - left_width)
+            if left_width + right_width > available_for_sidebars:
+                right_width = max(0, available_for_sidebars - left_width)
+        else:
+            left_width = target_left
+            right_width = target_right
+
+        center_width = max(0, total_width - left_width - right_width)
         self.right_stack.setMinimumWidth(right_width)
         self.right_stack.setMaximumWidth(right_width)
         self.main_splitter.setSizes([left_width, center_width, right_width])

@@ -406,6 +406,71 @@ def test_workbench_non_destructive_buttons_execute_connected_actions(monkeypatch
         app.processEvents()
 
 
+def test_primary_workflow_buttons_click_through_to_pipeline(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    calls: list[tuple[str, dict, str]] = []
+
+    def fake_run_action(action: str, payload: dict, status_text: str) -> None:
+        calls.append((action, payload, status_text))
+
+    try:
+        window._run_action = fake_run_action
+        instruction = "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
+        window.input_line.setText(instruction)
+        window.generate_button.click()
+        assert calls[-1][0] == "conversation_start"
+        assert calls[-1][1]["instruction"] == instruction
+        assert window.input_line.text() == ""
+
+        task = TaskParser().parse_instruction(instruction)
+        candidates = [_candidate("TMP_1"), _candidate("TMP_2")]
+        window.session.task = task
+        window.session.candidates = candidates
+        window.session.stage = "candidate_pool"
+        window.session.pending_confirmation = None
+        window.workbench_candidate_widget.update_candidates(candidates)
+        window._update_button_states()
+
+        window.screen_button.click()
+        assert calls[-1][0] == "screen"
+        assert calls[-1][1]["candidates"] == candidates
+
+        monkeypatch.setattr(window, "_selected_candidates_for_evaluation", lambda: [candidates[0]])
+        window._update_button_states()
+        window.evaluate_selected_button.click()
+        assert calls[-1][0] == "evaluate"
+        assert [item["candidate_id"] for item in calls[-1][1]["candidates"]] == ["TMP_1"]
+
+        window.evaluate_all_button.click()
+        assert calls[-1][0] == "evaluate"
+        assert [item["candidate_id"] for item in calls[-1][1]["candidates"]] == ["TMP_1", "TMP_2"]
+
+        window.session.results_by_session_id = {
+            "TMP_1": {
+                "candidate_id": "C1",
+                "session_candidate_id": "TMP_1",
+                "ultimate_pressure_MPa": 41.2,
+                "status": "success",
+                "verdict": "通过",
+            }
+        }
+        window.report_output_dir = tmp_path
+        report_index = window.report_type_selector.findData("fem")
+        if report_index >= 0:
+            window.report_type_selector.setCurrentIndex(report_index)
+        window._update_button_states()
+        window.report_button.click()
+        assert calls[-1][0] == "report"
+        assert calls[-1][1]["report_kind"] == "fem"
+        assert calls[-1][1]["output_dir"] == str(tmp_path)
+        assert calls[-1][1]["results"][0]["candidate_id"] == "C1"
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_pipeline_worker_evaluate_action_keeps_batch_candidate_identity(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     monkeypatch.setattr(main_window_module, "OrchestratorAgent", FakeBatchEvaluateOrchestrator)
@@ -761,6 +826,28 @@ def test_visible_workbench_buttons_keep_text_inside_layout(monkeypatch) -> None:
         assert id(window.knowledge_widget.batch_button) in checked_buttons
         assert id(window.knowledge_widget.rebuild_button) in checked_buttons
         assert id(window.knowledge_widget.export_snapshot_button) in checked_buttons
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_main_splitter_widths_do_not_expand_past_window(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        for width, height in [(1180, 860), (1280, 900), (1360, 960), (1680, 1050)]:
+            window.resize(width, height)
+            window.show()
+            app.processEvents()
+            window._sync_main_splitter_sizes()
+            app.processEvents()
+            sizes = window.main_splitter.sizes()
+            assert sum(sizes) <= window.main_splitter.width() + 4
+            assert window.left_stack.width() <= 286
+            assert 318 <= window.right_stack.width() <= 370
+            right_edge = window.right_stack.mapTo(window, window.right_stack.rect().bottomRight()).x()
+            assert right_edge <= window.rect().right() + 2
     finally:
         window.close()
         app.processEvents()
