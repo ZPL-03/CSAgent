@@ -4,6 +4,7 @@ import copy
 import csv
 import json
 import os
+from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -466,6 +467,79 @@ def test_primary_workflow_buttons_click_through_to_pipeline(monkeypatch, tmp_pat
         assert calls[-1][1]["report_kind"] == "fem"
         assert calls[-1][1]["output_dir"] == str(tmp_path)
         assert calls[-1][1]["results"][0]["candidate_id"] == "C1"
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_utility_and_sidebar_buttons_click_through(monkeypatch, tmp_path) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    monkeypatch.setattr("gui.knowledge_widget.DomainKnowledgeBase", FakeKnowledge)
+    monkeypatch.setattr(
+        main_window_module.QFileDialog,
+        "getExistingDirectory",
+        lambda *args, **kwargs: str(tmp_path),
+    )
+    opened_paths: list[str] = []
+    monkeypatch.setattr(
+        main_window_module.QDesktopServices,
+        "openUrl",
+        lambda url: opened_paths.append(url.toLocalFile()) or True,
+    )
+    app = _app()
+    store = WorkflowEventStore(tmp_path / "workflow.sqlite3")
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
+    snapshot = {
+        "run_id": "RUN_BUTTONS",
+        "instruction": "restore button coverage",
+        "task": task,
+        "candidates": [_candidate("TMP_1")],
+        "screened_candidates": [_candidate("TMP_1")],
+        "evaluated_candidates": [],
+        "results": [],
+        "knowledge_updates": [],
+        "report": None,
+        "stage": "awaiting_fem_confirmation",
+        "pending_confirmation": "fem_evaluation",
+        "screen_skipped": False,
+    }
+    store.create_run("RUN_BUTTONS", snapshot["instruction"])
+    store.save_snapshot("RUN_BUTTONS", snapshot)
+    report_path = tmp_path / "latest_report.md"
+    report_path.write_text("# report", encoding="utf-8")
+
+    window = MainWindow()
+    maintenance_calls: list[str] = []
+    try:
+        window.workflow_event_store = store
+        window.workflow_widget.event_store = store
+        window.workflow_widget.simulation_queue = SimulationJobQueue(store.db_path)
+        window.knowledge_widget._run_maintenance = lambda action: maintenance_calls.append(action)
+
+        window.report_dir_button.click()
+        assert window.report_output_dir == tmp_path
+
+        window.session.report = {"markdown_path": str(report_path)}
+        window._update_button_states()
+        assert window.open_report_button.isEnabled() is True
+        window.open_report_button.click()
+        assert len(opened_paths) == 1
+        assert Path(opened_paths[0]) == report_path
+
+        window.knowledge_right_rebuild_button.click()
+        window.knowledge_right_snapshot_button.click()
+        assert maintenance_calls == ["rebuild", "export"]
+
+        window._refresh_run_selector()
+        assert window.run_selector.currentData() == "RUN_BUTTONS"
+        window.restore_run_button.click()
+        assert window.session.workflow_run_id == "RUN_BUTTONS"
+        assert window.session.pending_confirmation == "fem_evaluation"
+
+        window.reset_button.click()
+        assert window.session.task is None
+        assert window.session.candidates == []
+        assert window.input_line.text() == ""
     finally:
         window.close()
         app.processEvents()
@@ -1225,7 +1299,7 @@ def test_settings_page_persists_editable_runtime_configuration(monkeypatch, tmp_
         window.settings_fields["knowledge.chunk_overlap_tokens"].setText("32")
         window.settings_fields["knowledge.min_chunk_tokens"].setText("64")
 
-        window._save_settings_from_page()
+        window.settings_save_button.click()
 
         saved_app = yaml.safe_load((tmp_path / "app_config.yaml").read_text(encoding="utf-8"))
         saved_llm = yaml.safe_load((tmp_path / "llm_config.yaml").read_text(encoding="utf-8"))
@@ -1236,6 +1310,10 @@ def test_settings_page_persists_editable_runtime_configuration(monkeypatch, tmp_
         assert saved_app["project_knowledge"]["min_chunk_tokens"] == 64
         assert saved_llm["backends"][0]["model"] == "csllm-check"
         assert window.settings_status_label.text()
+
+        window.settings_fields["llm.primary.model"].setText("temporary")
+        window.settings_reload_button.click()
+        assert window.settings_fields["llm.primary.model"].text() == "csllm"
     finally:
         window.close()
         app.processEvents()
