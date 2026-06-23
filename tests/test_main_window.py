@@ -687,6 +687,56 @@ def test_pipeline_worker_evaluate_action_keeps_batch_candidate_identity(monkeypa
     assert [item["session_candidate_id"] for item in payload["knowledge_updates"]] == ["TMP_10", "TMP_4", "TMP_9"]
 
 
+def test_pipeline_worker_evaluate_action_emits_realtime_fem_events(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    monkeypatch.setattr(main_window_module, "OrchestratorAgent", FakeBatchEvaluateOrchestrator)
+    app = _app()
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 3 个候选，初筛保留 2 个候选")
+    worker = main_window_module.PipelineWorker(
+        "evaluate",
+        {
+            "task": task,
+            "workflow_run_id": "RUN_TEST_FEM",
+            "candidates": [_candidate("TMP_10"), _candidate("TMP_4")],
+        },
+    )
+    messages: list[tuple[str, str, object]] = []
+    captured: dict = {}
+    errors: list[str] = []
+    worker.message.connect(lambda sender, message, event: messages.append((sender, message, event)))
+    worker.finished.connect(lambda action, payload: captured.update({"action": action, "payload": payload}))
+    worker.failed.connect(errors.append)
+
+    worker.run()
+    app.processEvents()
+
+    assert errors == []
+    runtime_events = [
+        event
+        for _, _, event in messages
+        if isinstance(event, dict) and event.get("event_type") == "workflow_runtime_event"
+    ]
+    assert [event["payload"]["runtime_event_type"] for event in runtime_events] == [
+        "simulation_job_queued",
+        "simulation_job_started",
+        "simulation_job_completed",
+        "simulation_job_queued",
+        "simulation_job_started",
+        "simulation_job_completed",
+    ]
+    assert [event["payload"]["candidate_id"] for event in runtime_events if event["payload"]["runtime_event_type"] == "simulation_job_completed"] == [
+        "C16",
+        "C17",
+    ]
+    partial_results = [
+        event["payload"]["result"]
+        for _, _, event in messages
+        if isinstance(event, dict) and event.get("event_type") == "fem_partial_result"
+    ]
+    assert [result["candidate_id"] for result in partial_results] == ["C16", "C17"]
+    assert captured["action"] == "evaluate"
+
+
 def test_loaded_example_keeps_geometry_as_candidate_variables(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
@@ -1390,7 +1440,8 @@ def test_chat_short_runtime_bubbles_follow_text_width() -> None:
         app.processEvents()
 
         messages = [
-            ("USER", "continue"),
+            ("USER", "继续"),
+            ("USER", "跳过/暂停"),
             ("ORCHESTRATOR", "start FEM TMP_11 -> C16"),
             ("FEM_AGENT", "C16 first ABAQUS solve"),
         ]

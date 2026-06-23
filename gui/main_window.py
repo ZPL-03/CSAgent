@@ -67,6 +67,7 @@ from gui.theme import application_stylesheet, install_application_font, resolve_
 from gui.workbench_widgets import AgentStatusCard, FlowDagWidget, StatusPill
 from gui.workflow_widget import WorkflowWidget
 from workflow.event_store import WorkflowEventStore
+from workflow.simulation_queue import SimulationJobQueue
 
 
 @dataclass
@@ -195,8 +196,78 @@ class PipelineWorker(QObject):
                 else:
                     fem_designs = [orchestrator.prepare_candidate_for_fem(task, candidate) for candidate in candidates]
                 results = []
+                run_id = self._manual_run_id(task)
+                simulation_queue = SimulationJobQueue(event_store.db_path) if event_store else None
                 for fem_candidate in fem_designs:
-                    results.append(orchestrator.evaluate_prepared_candidate(task, fem_candidate))
+                    session_candidate_id = str(
+                        fem_candidate.get("session_candidate_id")
+                        or fem_candidate.get("candidate_id")
+                        or ""
+                    )
+                    job_id = ""
+                    if simulation_queue is not None and run_id and session_candidate_id:
+                        job_id = simulation_queue.enqueue(run_id, fem_candidate)
+                    else:
+                        job_id = f"{run_id}:{session_candidate_id}" if run_id and session_candidate_id else session_candidate_id
+                    self._emit_runtime_event(
+                        "simulation_job_queued",
+                        "FEM_AGENT",
+                        "fem_evaluation",
+                        f"有限元作业入队：{job_id}",
+                        {
+                            "job_id": job_id,
+                            "candidate_id": fem_candidate.get("candidate_id"),
+                            "session_candidate_id": fem_candidate.get("session_candidate_id"),
+                        },
+                        run_id,
+                    )
+                    if simulation_queue is not None and job_id:
+                        simulation_queue.mark_running(job_id)
+                    self._emit_runtime_event(
+                        "simulation_job_started",
+                        "FEM_AGENT",
+                        "fem_evaluation",
+                        f"有限元作业开始：{job_id}",
+                        {
+                            "job_id": job_id,
+                            "candidate_id": fem_candidate.get("candidate_id"),
+                            "session_candidate_id": fem_candidate.get("session_candidate_id"),
+                        },
+                        run_id,
+                    )
+                    try:
+                        result = orchestrator.evaluate_prepared_candidate(task, fem_candidate)
+                    except Exception as exc:
+                        if simulation_queue is not None and job_id:
+                            simulation_queue.mark_failed(job_id, str(exc))
+                        self._emit_runtime_event(
+                            "simulation_job_failed",
+                            "FEM_AGENT",
+                            "fem_evaluation",
+                            f"有限元作业失败：{job_id}，{exc}",
+                            {"job_id": job_id, "error": str(exc)},
+                            run_id,
+                        )
+                        raise
+                    if simulation_queue is not None and job_id:
+                        simulation_queue.mark_success(job_id, result)
+                    self._emit_runtime_event(
+                        "simulation_job_completed",
+                        "FEM_AGENT",
+                        "fem_evaluation",
+                        f"有限元作业完成：{job_id}",
+                        {
+                            "job_id": job_id,
+                            "candidate_id": result.get("candidate_id"),
+                            "session_candidate_id": result.get("session_candidate_id"),
+                            "status": result.get("status"),
+                            "verdict": result.get("verdict"),
+                            "ultimate_pressure_MPa": result.get("ultimate_pressure_MPa"),
+                        },
+                        run_id,
+                    )
+                    self._emit_fem_partial_result(result, fem_candidate)
+                    results.append(result)
                 knowledge_updates = orchestrator.persist_knowledge_records(task, fem_designs, results)
                 self.finished.emit(
                     self.action,
@@ -240,6 +311,58 @@ class PipelineWorker(QObject):
                 "event_type": event_type,
                 "message": message,
                 "payload": payload or {},
+            },
+        )
+
+    def _manual_run_id(self, task: dict | None) -> str:
+        raw = self.payload.get("workflow_run_id") or self.payload.get("run_id")
+        if not raw and isinstance(task, dict):
+            raw = task.get("task_id")
+        return str(raw or "manual_fem")
+
+    def _emit_runtime_event(
+        self,
+        runtime_event_type: str,
+        runtime_agent: str,
+        runtime_stage: str,
+        message: str,
+        payload: dict | None = None,
+        run_id: str = "",
+    ) -> None:
+        runtime_payload = {
+            "runtime_event_type": runtime_event_type,
+            "runtime_agent": runtime_agent,
+            "runtime_stage": runtime_stage,
+            "record": {"run_id": run_id} if run_id else {},
+        }
+        runtime_payload.update(payload or {})
+        self.message.emit(
+            "FLOW",
+            message,
+            {
+                "agent": "FLOW",
+                "event_type": "workflow_runtime_event",
+                "message": message,
+                "payload": runtime_payload,
+            },
+        )
+
+    def _emit_fem_partial_result(self, result: dict, fem_candidate: dict) -> None:
+        candidate_id = result.get("candidate_id") or fem_candidate.get("candidate_id") or ""
+        session_candidate_id = result.get("session_candidate_id") or fem_candidate.get("session_candidate_id") or ""
+        self.message.emit(
+            "FEM_AGENT",
+            f"有限元校核完成：{candidate_id}",
+            {
+                "agent": "FEM_AGENT",
+                "event_type": "fem_partial_result",
+                "message": f"有限元校核完成：{candidate_id}",
+                "payload": {
+                    "result": result,
+                    "fem_candidate": fem_candidate,
+                    "candidate_id": candidate_id,
+                    "session_candidate_id": session_candidate_id,
+                },
             },
         )
 
@@ -3085,7 +3208,7 @@ class MainWindow(QMainWindow):
             return
         self._run_action(
             "evaluate",
-            {"task": self.session.task, "candidates": selected},
+            {"task": self.session.task, "candidates": selected, "workflow_run_id": self.session.workflow_run_id},
             f"正在校核所选 {len(selected)} 个样本",
         )
 
@@ -3098,7 +3221,7 @@ class MainWindow(QMainWindow):
             return
         self._run_action(
             "evaluate",
-            {"task": self.session.task, "candidates": pending},
+            {"task": self.session.task, "candidates": pending, "workflow_run_id": self.session.workflow_run_id},
             f"正在校核全部 {len(pending)} 个当前候选",
         )
 
@@ -3236,6 +3359,14 @@ class MainWindow(QMainWindow):
         if event_type == "llm_call_trace":
             self.last_llm_trace_payload = dict(payload)
             self._update_model_status_from_llm_trace(payload)
+
+        if event_type == "fem_partial_result":
+            result = payload.get("result")
+            if isinstance(result, dict):
+                session_candidate_id = result.get("session_candidate_id") or result.get("candidate_id")
+                if session_candidate_id:
+                    self.session.results_by_session_id[str(session_candidate_id)] = result
+                    self._refresh_design_views()
 
         if sender == "FLOW" and event_type == "task_summary":
             task = payload.get("task")

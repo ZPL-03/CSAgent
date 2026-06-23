@@ -211,7 +211,7 @@ class ChatWidget(QWidget):
         conversational_cap = max(420, int(viewport_width * 0.76))
         available = min(available, conversational_cap)
         target_max = min(max_width, available)
-        target_min = min(max(min_width, 48), target_max)
+        target_min = min(max(min_width, 36), target_max)
         return target_max, target_min
 
     def _wrapped_line_count(self, text: str, content_width: int) -> int:
