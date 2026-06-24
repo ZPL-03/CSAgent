@@ -2805,6 +2805,33 @@ class MainWindow(QMainWindow):
             screen_skipped=bool(state.get("screen_skipped")),
         )
 
+    def _restored_event_visible_in_chat(self, event_type: str) -> bool:
+        return event_type not in {"node_started", "node_completed"}
+
+    def _restore_run_conversation(self, run_id: str) -> None:
+        self.chat_widget.clear()
+        if self.session.instruction:
+            self.chat_widget.add_message("USER", self.session.instruction)
+        try:
+            events = self.workflow_event_store.list_events(run_id)
+        except Exception as exc:
+            self.log_widget.append_log("SYSTEM", f"运行轨迹读取失败：{run_id} | {exc}")
+            self.monitor_log_widget.append_log("SYSTEM", f"运行轨迹读取失败：{run_id} | {exc}")
+            return
+        for record in events:
+            event_type = str(record.get("event_type") or "info")
+            message = str(record.get("message") or "").strip()
+            if not message:
+                continue
+            agent = str(record.get("agent") or "ORCHESTRATOR")
+            stage = str(record.get("stage") or "")
+            sender = "USER" if agent == "HumanOperator" else self._ui_agent_for_runtime_stage(stage, agent)
+            suffix = f" @ {stage}" if stage else ""
+            self.log_widget.append_log(sender, f"[{event_type}{suffix}] {message}")
+            self.monitor_log_widget.append_log(sender, f"[{event_type}{suffix}] {message}")
+            if self._restored_event_visible_in_chat(event_type):
+                self.chat_widget.add_message(sender, message)
+
     def _restore_selected_run(self) -> None:
         run_id = str(self.run_selector.currentData() or "").strip()
         if not run_id:
@@ -2824,10 +2851,8 @@ class MainWindow(QMainWindow):
         self.session = self._session_from_workflow_state(snapshot)
         self.input_line.setText(self.session.instruction)
         self._apply_session(self.session)
-        self.chat_widget.add_message(
-            "SYSTEM",
-            f"已恢复运行状态：{run_id}，当前阶段：{self.session.stage}",
-        )
+        self._restore_run_conversation(run_id)
+        self.chat_widget.add_message("SYSTEM", f"已恢复运行状态：{run_id}，当前阶段：{self.session.stage}")
         self.log_widget.append_log("SYSTEM", f"已恢复运行状态：{run_id}")
         self.monitor_log_widget.append_log("SYSTEM", f"已恢复运行状态：{run_id}")
         self.status_label.setText(self.locale.text("status.snapshot_loaded", run_id=run_id))

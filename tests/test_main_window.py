@@ -21,6 +21,7 @@ from gui.main_window import MainWindow
 from gui.theme import application_stylesheet
 from gui.workbench_widgets import AgentStatusCard, FlowDagWidget, StatusPill
 from workflow.event_store import WorkflowEventStore
+from workflow.events import WorkflowEvent
 from workflow.simulation_queue import SimulationJobQueue
 
 
@@ -817,6 +818,42 @@ def test_main_window_restores_workflow_snapshot(monkeypatch, tmp_path) -> None:
     }
     store.create_run("RUN_RESTORE", snapshot["instruction"])
     store.save_snapshot("RUN_RESTORE", snapshot)
+    store.append_event(
+        WorkflowEvent(
+            run_id="RUN_RESTORE",
+            event_type="node_started",
+            agent="parse_task",
+            stage="parse_task",
+            message="节点开始：parse_task",
+        )
+    )
+    store.append_event(
+        WorkflowEvent(
+            run_id="RUN_RESTORE",
+            event_type="workflow_started",
+            agent="ORCHESTRATOR",
+            stage="parse_task",
+            message="工作流已启动，开始解析设计需求。",
+        )
+    )
+    store.append_event(
+        WorkflowEvent(
+            run_id="RUN_RESTORE",
+            event_type="tool_started",
+            agent="FEM_AGENT",
+            stage="evaluate_candidates",
+            message="开始调用 ABAQUS 求解器。",
+        )
+    )
+    store.append_event(
+        WorkflowEvent(
+            run_id="RUN_RESTORE",
+            event_type="simulation_job_completed",
+            agent="FEM_AGENT",
+            stage="evaluate_candidates",
+            message="C1 ABAQUS 作业完成。",
+        )
+    )
 
     window = MainWindow()
     try:
@@ -835,6 +872,16 @@ def test_main_window_restores_workflow_snapshot(monkeypatch, tmp_path) -> None:
         assert window.session.knowledge_updates[0]["case_id"] == "CASE_1"
         assert "RUN_RESTORE" in window.status_label.text()
         assert window.confirm_yes_button.isEnabled() is True
+        restored_chat = window.chat_widget.toPlainText()
+        assert "USER: 恢复测试需求" in restored_chat
+        assert "ORCHESTRATOR: 工作流已启动，开始解析设计需求。" in restored_chat
+        assert "FEM_AGENT: 开始调用 ABAQUS 求解器。" in restored_chat
+        assert "FEM_AGENT: C1 ABAQUS 作业完成。" in restored_chat
+        assert "节点开始：parse_task" not in restored_chat
+        restored_log = window.log_widget.toPlainText()
+        assert "工作流已启动，开始解析设计需求。" in restored_log
+        assert "开始调用 ABAQUS 求解器。" in restored_log
+        assert "C1 ABAQUS 作业完成。" in restored_log
     finally:
         window.close()
         app.processEvents()
