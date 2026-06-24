@@ -1,4 +1,4 @@
-"""CSAgent 环境自检脚本。"""
+"""CSAgent 运行环境自检脚本。"""
 
 from __future__ import annotations
 
@@ -22,14 +22,21 @@ from core.paths import ensure_project_dirs
 load_dotenv(ROOT / ".env")
 
 
-def check_module(name: str) -> tuple[bool, str]:
+def check_python_version() -> tuple[bool, str]:
+    version = sys.version_info
+    ok = version >= (3, 10)
+    return ok, f"{version.major}.{version.minor}.{version.micro}"
+
+
+def check_module(name: str, package_name: str | None = None) -> tuple[bool, str]:
     try:
         module = importlib.import_module(name)
+        distribution_name = package_name or name
         try:
-            version = importlib.metadata.version(name)
+            version = importlib.metadata.version(distribution_name)
         except importlib.metadata.PackageNotFoundError:
             version = getattr(module, "__version__", "unknown")
-        return True, f"{name} {version}"
+        return True, f"{distribution_name} {version}"
     except Exception as exc:
         return False, f"{name} 导入失败: {exc}"
 
@@ -53,7 +60,18 @@ def check_pymupdf_runtime() -> tuple[bool, str]:
         return False, f"PyMuPDF 导入失败: {exc}"
 
 
-def torch_runtime_detail() -> tuple[bool, str]:
+def check_pyvistaqt_runtime() -> tuple[bool, str]:
+    try:
+        import pyvistaqt
+        from pyvistaqt import QtInteractor
+
+        version = getattr(pyvistaqt, "__version__", "unknown")
+        return True, f"pyvistaqt {version}, QtInteractor={QtInteractor.__name__}"
+    except Exception as exc:
+        return False, f"pyvistaqt 导入失败: {exc}"
+
+
+def check_torch_runtime() -> tuple[bool, str]:
     try:
         import torch
 
@@ -70,9 +88,14 @@ def torch_runtime_detail() -> tuple[bool, str]:
 
 def main() -> int:
     ensure_project_dirs()
-    checks = []
-    checks.append(("Python", True, sys.version.split()[0]))
-    checks.append(("ABAQUS", shutil.which("abaqus") is not None, shutil.which("abaqus") or "未找到"))
+    checks: list[tuple[str, bool, str]] = []
+
+    python_ok, python_detail = check_python_version()
+    checks.append(("Python", python_ok, python_detail))
+
+    abaqus_path = shutil.which("abaqus")
+    checks.append(("ABAQUS", abaqus_path is not None, abaqus_path or "未找到"))
+
     checks.append(
         (
             "LLM主模型配置",
@@ -98,28 +121,31 @@ def main() -> int:
 
     pyqt_ok, pyqt_detail = check_pyqt6_runtime()
     checks.append(("PyQt6.QtCore", pyqt_ok, pyqt_detail))
+
     pymupdf_ok, pymupdf_detail = check_pymupdf_runtime()
     checks.append(("PyMuPDF", pymupdf_ok, pymupdf_detail))
 
-    for module_name in [
-        "jinja2",
-        "yaml",
-        "jsonschema",
-        "openai",
-        "langgraph",
-        "chromadb",
-        "sentence_transformers",
-        "torch",
-        "sklearn",
-        "matplotlib",
-        "pyvista",
-        "pyvistaqt",
-        "reportlab",
+    pyvistaqt_ok, pyvistaqt_detail = check_pyvistaqt_runtime()
+    checks.append(("pyvistaqt", pyvistaqt_ok, pyvistaqt_detail))
+
+    for module_name, package_name in [
+        ("jinja2", None),
+        ("yaml", "PyYAML"),
+        ("jsonschema", None),
+        ("openai", None),
+        ("langgraph", None),
+        ("chromadb", None),
+        ("sentence_transformers", "sentence-transformers"),
+        ("torch", None),
+        ("sklearn", "scikit-learn"),
+        ("matplotlib", None),
+        ("pyvista", None),
+        ("reportlab", None),
     ]:
-        ok, detail = check_module(module_name)
+        ok, detail = check_module(module_name, package_name)
         checks.append((module_name, ok, detail))
 
-    torch_ok, torch_detail = torch_runtime_detail()
+    torch_ok, torch_detail = check_torch_runtime()
     checks.append(("TorchCUDA", torch_ok, torch_detail))
 
     exit_code = 0

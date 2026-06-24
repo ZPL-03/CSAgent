@@ -104,19 +104,19 @@ GUI 的“监控”页提供最近运行记录下拉框、刷新运行记录和�
 ## 启动
 
 ```powershell
-D:\anaconda3\envs\GPT\python.exe main.py
+D:\anaconda3\envs\AGENT\python.exe main.py
 ```
 
 环境自检：
 
 ```powershell
-D:\anaconda3\envs\GPT\python.exe scripts\check_env.py
+D:\anaconda3\envs\AGENT\python.exe scripts\check_env.py
 ```
 
 多条自然语言输入端到端验收：
 
 ```powershell
-D:\anaconda3\envs\GPT\python.exe scripts\run_natural_language_acceptance.py --disable-llm
+D:\anaconda3\envs\AGENT\python.exe scripts\run_natural_language_acceptance.py --disable-llm
 ```
 
 该入口使用完整工作流运行时推进任务解析、候选生成、代理初筛、有限元阶段、知识回流和报告导出，并检查候选数量、初筛数量、结构去重、运行事件、快照状态和报告路径。默认有限元阶段使用快速验收适配器，不消耗 Abaqus 求解资源；需要调用当前配置的 LLM 时去掉 `--disable-llm`，需要真实 Abaqus 链路时增加 `--real-fem`。
@@ -124,7 +124,7 @@ D:\anaconda3\envs\GPT\python.exe scripts\run_natural_language_acceptance.py --di
 批量生成初始案例：
 
 ```powershell
-D:\anaconda3\envs\GPT\python.exe scripts\build_initial_cases.py --reset --count 10 --task-count 1 --pressures 30 --target-pressure 35
+D:\anaconda3\envs\AGENT\python.exe scripts\build_initial_cases.py --reset --count 10 --task-count 1 --pressures 30 --target-pressure 35
 ```
 
 `--reset` 会清理现有案例、任务、求解输入输出、Abaqus 工件、案例记忆索引和代理公式校准文件，再从 `CASE_1` 和 `C1` 重新计数。初始案例生成使用参数范围内的拉丁超立方采样；批量建库默认不写入会话任务编号，只有显式使用 `--record-task` 时才记录 `TASK_N` 追溯文件。

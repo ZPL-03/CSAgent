@@ -1,31 +1,72 @@
-name: GPT
+name: AGENT
 channels:
-  - pytorch
-  - nvidia
   - conda-forge
   - defaults
 dependencies:
-  - python=3.9
+  - python=3.10
   - pip
   - numpy
-  - pytorch=2.5.*
-  - pytorch-cuda=11.8
+  - scipy
+  - pandas
+  - pandas-stubs
+  - scikit-learn=1.6.1
+  - matplotlib
+  - h5py
+  - seaborn
+  - openpyxl
+  - pydot
+  - graphviz
+  - python-graphviz
+  - tesseract
   - pip:
+      - --extra-index-url https://download.pytorch.org/whl/cu126
+      - torch==2.7.0+cu126
       - PyQt6==6.4.2
-      - PyQt6-Qt6==6.4.2
+      - PyQt6-Qt6==6.4.3
+      - PyQt6_sip==13.10.2
+      - pyqt6-tools==6.4.2.3.3
+      - qtpy==2.4.3
       - jinja2==3.1.6
       - PyYAML==6.0.3
-      - python-dotenv
+      - python-dotenv==1.2.1
       - jsonschema==4.25.1
       - openai==2.30.0
-      - langgraph
+      - langgraph==0.6.11
       - chromadb==1.5.5
       - sentence-transformers==2.6.1
-      - scikit-learn==1.6.1
-      - matplotlib==3.9.2
+      - transformers==4.41.2
+      - tokenizers==0.19.1
+      - safetensors==0.7.0
       - pyvista==0.46.5
-      - pyvistaqt
+      - pyvistaqt==0.11.3
       - PyMuPDF==1.24.14
       - reportlab==4.4.10
-      - joblib
-      - pytest
+      - joblib==1.5.3
+      - pytest==8.4.2
+      - fastapi
+      - gmsh
+      - httpx==0.27.2
+      - pydantic
+      - rich
+      - ruff
+      - mypy
+      - typer
+      - uvicorn
+      - langchain==0.3.30
+      - langchain-community==0.3.31
+      - langchain-core==0.3.86
+      - langchain-text-splitters==0.3.11
+      - neo4j
+      - networkx
+      - tiktoken
+      - litellm==1.83.0
+      - opencv-python
+      - pytesseract
+      - python-docx
+      - python-pptx
+      - pdfplumber
+      - pypdfium2
+      - shapely
+      - xlsxwriter
+      - watchdog
+      - watchfiles
