@@ -14,6 +14,7 @@ from core.task_contract import (
     task_payload_from_request,
 )
 from workflow.event_store import WorkflowEventStore
+from scripts.run_natural_language_acceptance import _select_instruction_cases
 
 
 def _signature(candidate: dict) -> tuple:
@@ -97,6 +98,17 @@ def _patch_deterministic_downstream(monkeypatch, orchestrator: OrchestratorAgent
     monkeypatch.setattr(orchestrator, "evaluate_prepared_candidate", evaluate_prepared_candidate)
     monkeypatch.setattr(orchestrator, "persist_knowledge_records", persist_knowledge_records)
     monkeypatch.setattr(orchestrator, "generate_report", generate_report)
+
+
+def test_acceptance_runner_can_limit_default_case_count() -> None:
+    cases = [{"instruction": f"case {index}"} for index in range(5)]
+
+    assert _select_instruction_cases(cases, 0) == cases
+    assert _select_instruction_cases(cases, None) == cases
+    assert _select_instruction_cases(cases, 2) == cases[:2]
+
+    with pytest.raises(ValueError, match="max-cases"):
+        _select_instruction_cases(cases, -1)
 
 
 @pytest.mark.parametrize(

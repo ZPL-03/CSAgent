@@ -326,9 +326,18 @@ def _load_instruction_cases(path: Path | None) -> list[dict[str, Any]]:
     return cases
 
 
+def _select_instruction_cases(cases: list[dict[str, Any]], max_cases: int | None) -> list[dict[str, Any]]:
+    if max_cases is None or max_cases == 0:
+        return cases
+    if max_cases < 0:
+        raise ValueError("max-cases 必须大于等于 0")
+    return cases[:max_cases]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="运行多条自然语言输入的 CSAgent 端到端验收。")
     parser.add_argument("--instructions", type=Path, help="JSON 输入文件，内容为字符串数组或 instructions 字段。")
+    parser.add_argument("--max-cases", type=int, default=0, help="最多运行前 N 条验收输入；0 表示运行全部输入。")
     parser.add_argument("--disable-llm", action="store_true", help="关闭 LLM 自动调用，仅验证确定性候选闭合和工作流。")
     parser.add_argument("--real-fem", action="store_true", help="使用真实 Abaqus FEM 链路；默认使用快速验收适配器。")
     parser.add_argument("--verbose", action="store_true", help="在控制台输出智能体内部日志。")
@@ -346,7 +355,7 @@ def main() -> int:
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     summaries = []
-    for case in _load_instruction_cases(args.instructions):
+    for case in _select_instruction_cases(_load_instruction_cases(args.instructions), args.max_cases):
         summaries.append(_run_case(case, output_dir, use_real_fem=args.real_fem))
 
     report = {
