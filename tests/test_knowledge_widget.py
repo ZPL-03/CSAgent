@@ -21,6 +21,17 @@ def _app() -> QApplication:
     return app
 
 
+def _wait_until(app: QApplication, predicate, timeout: float = 3.0) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        app.processEvents()
+        if predicate():
+            return True
+        time.sleep(0.02)
+    app.processEvents()
+    return predicate()
+
+
 class FakeKnowledge:
     def status(self) -> dict:
         return {
@@ -582,6 +593,7 @@ def test_knowledge_widget_runs_rebuild_and_snapshot_actions(monkeypatch, tmp_pat
             app.processEvents()
             time.sleep(0.02)
         app.processEvents()
+        assert _wait_until(app, lambda: widget.parser_pill.text == "索引重建完成")
 
         assert widget._maintenance_thread is None
         assert widget.parser_pill.status == "success"
@@ -655,6 +667,7 @@ def test_knowledge_widget_toolbar_buttons_click_through(monkeypatch, tmp_path) -
         widget.graph_reset_button.click()
         widget.graph_label_button.click()
         widget.graph_relation_button.click()
+        assert _wait_until(app, lambda: "屈曲" in widget.evidence_browser.toPlainText())
 
         assert ("ingest_path", str(upload_file)) in operations
         assert ("ingest_paths", [str(upload_file), str(batch_file)]) in operations
@@ -744,6 +757,11 @@ def test_knowledge_widget_runs_real_ingestion_pipeline(monkeypatch, tmp_path) ->
         assert widget.case_pill.text.startswith("案例库 ")
         assert widget.parser_pill.status == "success"
         assert widget.document_table.rowCount() == 1
+        assert _wait_until(
+            app,
+            lambda: widget._refresh_thread is None and len(widget.graph_view.entities) >= 1 and len(widget.graph_view.relations) >= 1,
+            timeout=10.0,
+        )
         assert widget.pipeline_widget.steps[0].status == "success"
         assert widget.pipeline_widget.steps[1].status == "success"
         assert widget.pipeline_widget.steps[2].status in {"success", "warning"}

@@ -458,6 +458,7 @@ class MainWindow(QMainWindow):
         self._pending_knowledge_load_evidence = False
         self._pending_knowledge_force = False
         self._last_knowledge_refresh_key = ""
+        self._is_closing = False
 
         self.app_title_label = QLabel(self.locale.text("app.title"))
         self.app_title_label.setObjectName("appTitle")
@@ -612,6 +613,7 @@ class MainWindow(QMainWindow):
         self.workbench_candidate_widget = CandidateWidget(language=self.locale.language)
         self.workbench_candidate_widget.setMinimumHeight(270)
         self.knowledge_widget = KnowledgeWidget()
+        self.knowledge_widget.refreshed.connect(self._refresh_knowledge_sidebar)
         self.result_trace_widget = ResultTraceWidget()
         self.log_widget = LogWidget()
         self.monitor_log_widget = LogWidget()
@@ -1093,12 +1095,14 @@ class MainWindow(QMainWindow):
         labels = getattr(self, "knowledge_sidebar_labels", None)
         if not labels:
             return
-        try:
-            status = self.knowledge_widget.knowledge_base.status()
-            ingest_status = self.knowledge_widget.ingestion_service.status()
-        except Exception:
-            return
-        merged_status = {**status, **ingest_status}
+        merged_status = self.knowledge_widget.current_status()
+        if not merged_status:
+            try:
+                status = self.knowledge_widget.knowledge_base.status()
+                ingest_status = self.knowledge_widget.ingestion_service.status()
+            except Exception:
+                return
+            merged_status = {**status, **ingest_status}
         builtin_chunks = int(merged_status.get("builtin_rag_chunk_count", 0) or 0)
         builtin_entities = int(merged_status.get("builtin_kg_entity_count", 0) or 0)
         builtin_relations = int(merged_status.get("builtin_kg_relation_count", 0) or 0)
@@ -3047,6 +3051,8 @@ class MainWindow(QMainWindow):
         force: bool = False,
         delay_ms: int = 160,
     ) -> None:
+        if self._is_closing:
+            return
         if task is not None:
             self._pending_knowledge_task = task
         elif self._pending_knowledge_task is None:
@@ -3059,6 +3065,12 @@ class MainWindow(QMainWindow):
         QTimer.singleShot(max(0, delay_ms), self._flush_knowledge_refresh)
 
     def _flush_knowledge_refresh(self) -> None:
+        if self._is_closing:
+            self._knowledge_refresh_pending = False
+            self._pending_knowledge_task = None
+            self._pending_knowledge_load_evidence = False
+            self._pending_knowledge_force = False
+            return
         self._knowledge_refresh_pending = False
         task = self._pending_knowledge_task
         load_evidence = self._pending_knowledge_load_evidence
@@ -3072,9 +3084,8 @@ class MainWindow(QMainWindow):
             self._refresh_knowledge_sidebar()
             return
 
-        self.knowledge_widget.refresh(task, load_evidence=bool(load_evidence))
+        self.knowledge_widget.refresh_async(task, load_evidence=bool(load_evidence))
         self._last_knowledge_refresh_key = task_key
-        self._refresh_knowledge_sidebar()
 
     def _choose_report_output_dir(self) -> None:
         initial_dir = str(self.report_output_dir or RESULTS_DIR)
@@ -3584,10 +3595,12 @@ class MainWindow(QMainWindow):
         )
 
     def closeEvent(self, event: QCloseEvent) -> None:
+        self._is_closing = True
         try:
             self._save_window_layout()
             self.workbench_candidate_widget.reset_view()
             self.live_result_view.reset_plotter()
+            self.knowledge_widget.shutdown_workers()
         finally:
             thread = self.worker_thread
             if thread is not None and not sip.isdeleted(thread):

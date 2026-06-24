@@ -44,6 +44,26 @@ from gui.workbench_widgets import PipelineStatusWidget, StatusPill
 DEFAULT_EVIDENCE_QUERY = "复合材料外压圆柱耐压壳 外部静水压力 线性屈曲 极限压力 初始缺陷 制造质量控制"
 
 
+def _read_document_rows(documents_path: Path | str | None) -> list[dict[str, Any]]:
+    if documents_path is None:
+        return []
+    target = Path(documents_path)
+    if not target.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    with target.open("r", encoding="utf-8") as handle:
+        for line in handle:
+            if not line.strip():
+                continue
+            try:
+                payload = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(payload, dict):
+                rows.append(payload)
+    return rows
+
+
 class GraphChipButton(QPushButton):
     """知识图谱筛选 chip，自绘以避免平台原生按钮样式干扰。"""
 
@@ -1212,10 +1232,55 @@ class KnowledgeMaintenanceWorker(QObject):
             self.failed.emit(str(exc))
 
 
+class KnowledgeRefreshWorker(QObject):
+    """在后台线程收集知识库状态和检索证据。"""
+
+    finished = pyqtSignal(dict)
+    failed = pyqtSignal(str)
+
+    def __init__(self, task: dict[str, Any] | None, query_text: str | None, load_evidence: bool) -> None:
+        super().__init__()
+        self.task = task
+        self.query_text = query_text
+        self.load_evidence = load_evidence
+
+    def run(self) -> None:
+        try:
+            knowledge_base = DomainKnowledgeBase()
+            ingestion_service = KnowledgeIngestionService()
+            status = knowledge_base.status()
+            ingest_status = ingestion_service.status()
+            merged_status = {**status, **ingest_status}
+            if self.load_evidence:
+                evidence_payload = self._retrieve_evidence(knowledge_base)
+            else:
+                evidence_payload = {"query": "", "chunks": [], "relations": []}
+            self.finished.emit(
+                {
+                    "status": merged_status,
+                    "evidence": evidence_payload,
+                    "documents": _read_document_rows(getattr(ingestion_service, "documents_path", None)),
+                    "query_text": self.query_text,
+                    "task": self.task,
+                }
+            )
+        except Exception as exc:
+            self.failed.emit(str(exc))
+
+    def _retrieve_evidence(self, knowledge_base: DomainKnowledgeBase) -> dict[str, Any]:
+        if self.query_text is not None:
+            query = self.query_text.strip() or DEFAULT_EVIDENCE_QUERY
+            return knowledge_base.retrieve_by_query(query, top_k=5, kg_top_k=8)
+        if self.task:
+            return knowledge_base.retrieve(self.task, top_k=5, kg_top_k=8)
+        return knowledge_base.retrieve_by_query(DEFAULT_EVIDENCE_QUERY, top_k=5, kg_top_k=8)
+
+
 class KnowledgeWidget(QWidget):
     """管理项目内可更新 RAG/KG 知识库并展示检索证据。"""
 
     pipelineChanged = pyqtSignal(list)
+    refreshed = pyqtSignal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -1223,10 +1288,15 @@ class KnowledgeWidget(QWidget):
         self.ingestion_service = KnowledgeIngestionService()
         self.theme = "dark"
         self._last_task: dict[str, Any] | None = None
+        self._last_merged_status: dict[str, Any] = {}
         self._ingest_thread: QThread | None = None
         self._ingest_worker: KnowledgeIngestWorker | None = None
         self._maintenance_thread: QThread | None = None
         self._maintenance_worker: KnowledgeMaintenanceWorker | None = None
+        self._refresh_thread: QThread | None = None
+        self._refresh_worker: KnowledgeRefreshWorker | None = None
+        self._pending_refresh_request: tuple[dict[str, Any] | None, str | None, bool] | None = None
+        self._pending_parser_notice: tuple[str, str] | None = None
 
         self.store_pill = StatusPill("知识库待入库", "pending")
         self.rag_pill = StatusPill("RAG 0 文本块", "pending")
@@ -1330,7 +1400,6 @@ class KnowledgeWidget(QWidget):
 
         self._build_layout()
         self._connect_signals()
-        self.refresh(load_evidence=False)
 
     def _set_pipeline_steps(self, steps: list) -> None:
         self.pipeline_widget.set_steps(steps)
@@ -1422,12 +1491,10 @@ class KnowledgeWidget(QWidget):
 
     def set_theme(self, theme: str) -> None:
         self.theme = resolve_theme(theme)
-        self._set_document_empty_html()
         for pill in [self.store_pill, self.rag_pill, self.vector_pill, self.kg_pill, self.parser_pill, self.case_pill]:
             pill.set_theme(self.theme)
         self.pipeline_widget.set_theme(self.theme)
         self.graph_view.set_theme(self.theme)
-        self.refresh(query_text=self.search_input.text().strip(), load_evidence=bool(self.search_input.text().strip()))
 
     def _build_layout(self) -> None:
         top_layout = QHBoxLayout()
@@ -1589,7 +1656,7 @@ class KnowledgeWidget(QWidget):
         self.batch_button.clicked.connect(self._select_and_ingest_files)
         self.rebuild_button.clicked.connect(lambda: self._run_maintenance("rebuild"))
         self.export_snapshot_button.clicked.connect(lambda: self._run_maintenance("export"))
-        self.refresh_button.clicked.connect(lambda: self.refresh(load_evidence=False))
+        self.refresh_button.clicked.connect(lambda: self.refresh_async(load_evidence=False))
         self.graph_search_input.returnPressed.connect(self._filter_graph_from_input)
         self.graph_search_input.textChanged.connect(self._on_graph_filter_text_changed)
         self.graph_type_filter.currentIndexChanged.connect(self._apply_graph_filters_from_controls)
@@ -1613,14 +1680,104 @@ class KnowledgeWidget(QWidget):
         status = self.knowledge_base.status()
         ingest_status = self.ingestion_service.status()
         merged_status = {**status, **ingest_status}
+        self._last_merged_status = dict(merged_status)
         self._update_status_pills(merged_status)
         self._update_summary(merged_status)
         self._update_source_overview(merged_status)
-        self._update_document_table()
+        self._update_document_table(_read_document_rows(getattr(self.ingestion_service, "documents_path", None)))
         self._update_pipeline(merged_status)
         evidence_payload = self._retrieve_evidence(task, query_text) if load_evidence else {"query": "", "chunks": [], "relations": []}
         self._update_graph_view(evidence_payload)
         self._set_evidence_payload(evidence_payload)
+        self.refreshed.emit()
+
+    def refresh_async(
+        self,
+        task: dict[str, Any] | None = None,
+        query_text: str | None = None,
+        load_evidence: bool = True,
+    ) -> None:
+        if task is not None:
+            self._last_task = task
+        if query_text is not None:
+            query = query_text.strip() or DEFAULT_EVIDENCE_QUERY
+            self.search_input.setText(query)
+            query_text = query
+        if self._refresh_thread is not None:
+            self._pending_refresh_request = (task, query_text, load_evidence)
+            return
+        self._refresh_thread = QThread(self)
+        self._refresh_worker = KnowledgeRefreshWorker(task, query_text, load_evidence)
+        self._refresh_worker.moveToThread(self._refresh_thread)
+        self._refresh_thread.started.connect(self._refresh_worker.run)
+        self._refresh_worker.finished.connect(self._on_refresh_finished)
+        self._refresh_worker.failed.connect(self._on_refresh_failed)
+        self._refresh_worker.finished.connect(self._cleanup_refresh_worker)
+        self._refresh_worker.failed.connect(self._cleanup_refresh_worker)
+        self._refresh_thread.start()
+
+    def current_status(self) -> dict[str, Any]:
+        return dict(self._last_merged_status)
+
+    def _stop_worker_thread(self, thread_attr: str, worker_attr: str) -> None:
+        thread = getattr(self, thread_attr, None)
+        if thread is None:
+            setattr(self, worker_attr, None)
+            return
+        if thread is QThread.currentThread():
+            return
+        if thread.isRunning():
+            thread.quit()
+            if not thread.wait(3000):
+                thread.terminate()
+                thread.wait(1000)
+        setattr(self, thread_attr, None)
+        setattr(self, worker_attr, None)
+
+    def shutdown_workers(self) -> None:
+        self._pending_refresh_request = None
+        self._stop_worker_thread("_refresh_thread", "_refresh_worker")
+        self._stop_worker_thread("_ingest_thread", "_ingest_worker")
+        self._stop_worker_thread("_maintenance_thread", "_maintenance_worker")
+        self._set_operation_buttons_enabled(True)
+
+    def closeEvent(self, event) -> None:
+        self.shutdown_workers()
+        super().closeEvent(event)
+
+    def _on_refresh_finished(self, payload: dict) -> None:
+        status = payload.get("status") if isinstance(payload.get("status"), dict) else {}
+        documents = payload.get("documents") if isinstance(payload.get("documents"), list) else []
+        evidence_payload = payload.get("evidence") if isinstance(payload.get("evidence"), dict) else {"query": "", "chunks": [], "relations": []}
+        self._last_merged_status = dict(status)
+        self._update_status_pills(status)
+        if self._pending_parser_notice is not None:
+            label, notice_status = self._pending_parser_notice
+            self.parser_pill.set_state(label, notice_status)
+            self._pending_parser_notice = None
+        self._update_summary(status)
+        self._update_source_overview(status)
+        self._update_document_table(documents)
+        self._update_pipeline(status)
+        self._update_graph_view(evidence_payload)
+        self._set_evidence_payload(evidence_payload)
+        self.refreshed.emit()
+
+    def _on_refresh_failed(self, message: str) -> None:
+        self._set_evidence_html(f"<h3>知识库刷新失败</h3><p>{escape(message)}</p>", scrollable=True)
+        self.refreshed.emit()
+
+    def _cleanup_refresh_worker(self) -> None:
+        if self._refresh_thread is not None:
+            self._refresh_thread.quit()
+            self._refresh_thread.wait()
+        self._refresh_thread = None
+        self._refresh_worker = None
+        pending = self._pending_refresh_request
+        self._pending_refresh_request = None
+        if pending is not None:
+            task, query_text, load_evidence = pending
+            self.refresh_async(task, query_text=query_text, load_evidence=load_evidence)
 
     def toHtml(self) -> str:
         """兼容测试和外部读取当前 HTML 摘要。"""
@@ -1852,12 +2009,30 @@ class KnowledgeWidget(QWidget):
         status = "warning" if failed_count else "success"
         label = f"入库完成 {success_count} / 失败 {failed_count}" if payload.get("batch_total") else f"{payload.get('parser_backend') or '解析'} 完成"
         self.parser_pill.set_state(label, status)
+        try:
+            ingest_status = dict(self.ingestion_service.status())
+            immediate_status = {
+                **ingest_status,
+                "ready": True,
+                "last_ingestion": last_result,
+            }
+            immediate_status.setdefault("rag_chunk_count", sum(int(item.get("chunk_count") or 0) for item in results))
+            immediate_status.setdefault("kg_entity_count", sum(int(item.get("entity_count") or 0) for item in results))
+            immediate_status.setdefault("kg_relation_count", sum(int(item.get("relation_count") or 0) for item in results))
+            self._last_merged_status = {**self._last_merged_status, **immediate_status}
+            self._update_status_pills(self._last_merged_status)
+            self.parser_pill.set_state(label, status)
+            self._update_document_table(_read_document_rows(getattr(self.ingestion_service, "documents_path", None)))
+            self._update_pipeline(self._last_merged_status)
+            self.refreshed.emit()
+        except Exception:
+            pass
         failure_html = ""
         if failed_count:
             failures = payload.get("failures") if isinstance(payload.get("failures"), list) else []
             detail = "<br>".join(escape(f"{Path(str(item.get('path') or '')).name}: {item.get('error') or ''}") for item in failures)
             failure_html = f"<h3>批量入库部分失败</h3><p>{detail}</p>"
-        self.refresh(query_text=self.search_input.text().strip() or DEFAULT_EVIDENCE_QUERY)
+        self.refresh_async(query_text=self.search_input.text().strip() or DEFAULT_EVIDENCE_QUERY)
         if failure_html:
             self._set_evidence_html(failure_html, scrollable=True)
 
@@ -1916,12 +2091,13 @@ class KnowledgeWidget(QWidget):
             steps = result.get("pipeline") if isinstance(result.get("pipeline"), list) else []
             if steps:
                 self._set_pipeline_steps(steps)
-            self.refresh(query_text=self.search_input.text().strip() or DEFAULT_EVIDENCE_QUERY)
+            self.refresh_async(query_text=self.search_input.text().strip() or DEFAULT_EVIDENCE_QUERY)
+            self._pending_parser_notice = ("索引重建完成", "success")
             self.parser_pill.set_state("索引重建完成", "success")
             return
         if operation == "export":
             path = str(payload.get("path") or "")
-            self.refresh(load_evidence=False)
+            self._pending_parser_notice = ("快照已导出", "success")
             self.parser_pill.set_state("快照已导出", "success")
             self._set_evidence_html(f"<h3>知识库快照已导出</h3><p>{escape(path)}</p>", scrollable=True)
 
@@ -1932,7 +2108,7 @@ class KnowledgeWidget(QWidget):
     def _search_from_input(self) -> None:
         query = self.search_input.text().strip() or DEFAULT_EVIDENCE_QUERY
         self.search_input.setText(query)
-        self.refresh(query_text=query)
+        self.refresh_async(query_text=query)
 
     def _retrieve_evidence(self, task: dict[str, Any] | None, query_text: str | None) -> dict[str, Any]:
         if query_text is not None:
@@ -2253,20 +2429,9 @@ class KnowledgeWidget(QWidget):
             return "border:1px solid #c8d2df;border-radius:10px;padding:10px;margin:8px 0;background:#f8fafc;"
         return "border:1px solid #2b3a52;border-radius:10px;padding:10px;margin:8px 0;background:#111a28;"
 
-    def _update_document_table(self) -> None:
-        documents_path = self.ingestion_service.documents_path
-        rows = []
-        if documents_path.exists():
-            with documents_path.open("r", encoding="utf-8") as handle:
-                for line in handle:
-                    if not line.strip():
-                        continue
-                    try:
-                        payload = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-                    if isinstance(payload, dict):
-                        rows.append(payload)
+    def _update_document_table(self, rows: list[dict[str, Any]] | None = None) -> None:
+        if rows is None:
+            rows = _read_document_rows(getattr(self.ingestion_service, "documents_path", None))
         self.document_table.setRowCount(len(rows))
         if not rows:
             self._set_document_empty_html()

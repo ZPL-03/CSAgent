@@ -1244,6 +1244,33 @@ def test_main_window_critical_buttons_have_connected_actions(monkeypatch) -> Non
         app.processEvents()
 
 
+def test_main_window_uses_async_knowledge_refresh(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    sync_calls: list[tuple[tuple, dict]] = []
+    async_calls: list[tuple[tuple, dict]] = []
+    try:
+        window.knowledge_widget.refresh = lambda *args, **kwargs: sync_calls.append((args, kwargs))
+        window.knowledge_widget.refresh_async = lambda *args, **kwargs: async_calls.append((args, kwargs))
+
+        task = {"load": {"pressure_mpa": 30.0}}
+        window._pending_knowledge_task = task
+        window._pending_knowledge_load_evidence = True
+        window._pending_knowledge_force = True
+
+        window._flush_knowledge_refresh()
+
+        assert not sync_calls
+        assert len(async_calls) == 1
+        args, kwargs = async_calls[0]
+        assert args == (task,)
+        assert kwargs["load_evidence"] is True
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_main_window_controls_survive_page_theme_language_switches(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
