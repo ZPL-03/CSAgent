@@ -18,6 +18,8 @@ class AgentContract:
     input_contract: str
     output_contract: str
     llm_policy: str
+    memory_policy: str
+    event_policy: str
     failure_policy: str
 
 
@@ -32,6 +34,8 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
         input_contract="自然语言需求、可选覆盖参数。",
         output_contract="task 字典；包含候选池总数、初筛数量、工况、边界、目标和几何参考或固定约束。",
         llm_policy="不调用 LLM。",
+        memory_policy="写入 workflow_snapshots 中的 task、user_input_facts、geometry_reference 和 fixed_geometry 字段；不写入案例库。",
+        event_policy="发出 workflow_started、node_started、tool_started、tool_completed、node_completed 或 node_failed 事件。",
         failure_policy="缺少候选池总数或初筛数量时直接失败，主流程不启动。",
     ),
     AgentContract(
@@ -44,6 +48,8 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
         input_contract="task 字典。",
         output_contract="candidates 列表；候选编号为 TMP_N，display_name 与 candidate_id 一致。",
         llm_policy="仅 LLM 来源候选调用 LLM；主模型优先，失败后回退，输出经自然语言表格解析后才进入候选池。",
+        memory_policy="读取案例记忆和合并 RAG/KG 证据，写入 workflow_snapshots 中的 candidates、source_counter 和 generation_audit。",
+        event_policy="发出 candidate_generation_started、candidate_generation_completed、candidate_generation_audit、tool_completed 或 node_failed 事件。",
         failure_policy="LLM 输出不合规或案例不足不阻断流程，由 DOE 在参数域内补足候选池数量。",
     ),
     AgentContract(
@@ -56,6 +62,8 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
         input_contract="task 字典、candidates 列表。",
         output_contract="screened_candidates 列表；数量由当前任务 top_k 和候选池实际数量共同确定。",
         llm_policy="不调用 LLM。",
+        memory_policy="写入 workflow_snapshots 中的 candidates、evaluated_candidates、screen_summary 和排序字段；不删除未入选候选。",
+        event_policy="发出 screening_started、screening_completed、tool_completed 或 node_failed 事件。",
         failure_policy="候选缺少必要工程字段时按规则诊断剔除或抛出确定性错误，不使用 LLM 补数。",
     ),
     AgentContract(
@@ -68,6 +76,8 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
         input_contract="task 字典、evaluated_candidates 列表。",
         output_contract="results 列表、fem_designs 列表；结果保留 session_candidate_id 用于回溯 TMP_N。",
         llm_policy="不调用 LLM。",
+        memory_policy="通过 simulation_jobs 记录有限元队列状态，写入 workflow_snapshots 中的 fem_designs 和 results。",
+        event_policy="发出 simulation_job_queued、simulation_job_started、simulation_job_completed、fem_started、fem_completed 或 node_failed 事件。",
         failure_policy="Abaqus 不可用或求解失败时返回诊断结果，不伪造通过；作业队列记录失败原因。",
     ),
     AgentContract(
@@ -80,6 +90,8 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
         input_contract="task 字典、fem_designs 列表、results 列表。",
         output_contract="knowledge_updates 列表；包含 case_id、存储状态和校准摘要。",
         llm_policy="不调用 LLM。",
+        memory_policy="写入 data/cases、knowledge/case_library、案例记忆索引和代理公式校准数据；保留 CASE-C-TMP 追踪。",
+        event_policy="发出 knowledge_update_started、knowledge_update_completed、knowledge_update_failed、tool_completed 或 node_failed 事件。",
         failure_policy="单个案例回流失败会写入失败摘要和事件诊断，不修改有限元结果本身。",
     ),
     AgentContract(
@@ -92,6 +104,8 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
         input_contract="task 字典、results 列表、candidates 列表。",
         output_contract="report 字典；包含当前报告 Markdown/PDF 路径、正文、LLM 工程解释状态，以及 overall/fem/design_solution 三类 report_outputs。",
         llm_policy="只在工程解释和制造建议中受控调用 LLM；数值、排序和结论由结构化数据确定。",
+        memory_policy="读取当前快照、候选池、有限元结果和知识回流状态，写入 report、report_outputs 和 data/results 报告文件。",
+        event_policy="发出 report_generation_started、report_completed、report_failed、tool_completed 或 node_failed 事件。",
         failure_policy="LLM 解释失败时退回确定性解释；报告文件生成失败时写入节点失败事件。",
     ),
 )

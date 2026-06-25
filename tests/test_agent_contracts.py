@@ -56,4 +56,11 @@ def test_agent_contracts_match_registered_tools(tmp_path) -> None:
         assert contract.input_contract
         assert contract.output_contract
         assert contract.llm_policy
+        assert contract.memory_policy
+        assert contract.event_policy
         assert contract.failure_policy
+        assert any(
+            token in contract.memory_policy
+            for token in ("workflow_snapshots", "simulation_jobs", "data/cases", "data/results")
+        )
+        assert "node_failed" in contract.event_policy

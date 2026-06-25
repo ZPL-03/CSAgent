@@ -257,6 +257,34 @@ class ReleaseAudit:
         if "工程解释" not in report_policy or "数值" not in report_policy:
             errors.append("报告生成 LLM 策略缺少工程解释或数值边界")
 
+        required_memory = {
+            "parse_task": ["workflow_snapshots"],
+            "generate_candidates": ["workflow_snapshots"],
+            "screen_candidates": ["workflow_snapshots"],
+            "evaluate_candidates": ["simulation_jobs", "workflow_snapshots"],
+            "persist_knowledge": ["data/cases"],
+            "generate_report": ["data/results"],
+        }
+        for node_name, tokens in required_memory.items():
+            policy = by_node.get(node_name).memory_policy if by_node.get(node_name) else ""
+            missing = [token for token in tokens if token not in policy]
+            if missing:
+                errors.append(f"{node_name}.memory_policy 缺少 {missing!r}")
+
+        required_events = {
+            "parse_task": ["tool_completed", "node_failed"],
+            "generate_candidates": ["candidate_generation_completed", "node_failed"],
+            "screen_candidates": ["screening_completed", "node_failed"],
+            "evaluate_candidates": ["simulation_job_completed", "node_failed"],
+            "persist_knowledge": ["knowledge_update_completed", "node_failed"],
+            "generate_report": ["report_completed", "node_failed"],
+        }
+        for node_name, tokens in required_events.items():
+            policy = by_node.get(node_name).event_policy if by_node.get(node_name) else ""
+            missing = [token for token in tokens if token not in policy]
+            if missing:
+                errors.append(f"{node_name}.event_policy 缺少 {missing!r}")
+
         runtime_text = (ROOT / "workflow/runtime.py").read_text(encoding="utf-8")
         event_store_text = (ROOT / "workflow/event_store.py").read_text(encoding="utf-8")
         simulation_queue_text = (ROOT / "workflow/simulation_queue.py").read_text(encoding="utf-8")
@@ -278,7 +306,7 @@ class ReleaseAudit:
         if "simulation_jobs" not in simulation_queue_text:
             errors.append("仿真队列缺少作业表")
 
-        detail = "六智能体契约、LLM 边界、人工确认、快照恢复、工具注册和仿真队列齐备" if not errors else "; ".join(errors[:12])
+        detail = "六智能体契约、LLM 边界、记忆策略、事件策略、人工确认、快照恢复、工具注册和仿真队列齐备" if not errors else "; ".join(errors[:12])
         self.add("多智能体运行契约", not errors, detail)
 
     def check_runtime_knowledge_paths(self) -> None:
