@@ -356,7 +356,30 @@ class ReportGenAgent(BaseAgent):
         if any(term in text for term in forbidden_structure_terms):
             raise ValueError("LLM 报告解释包含当前设计变量域之外的结构型式")
 
+    def _strip_llm_reasoning_blocks(self, text: str) -> str:
+        cleaned = str(text or "")
+        cleaned = re.sub(r"(?is)<think\b[^>]*>.*?</think>", "", cleaned)
+        cleaned = re.sub(r"(?is)<think\b[^>]*>.*", "", cleaned)
+        cleaned = re.sub(r"(?is).*?</think>", "", cleaned)
+        cleaned_lines: List[str] = []
+        reasoning_heading = re.compile(
+            r"^\s*(?:reasoning|analysis|chain\s*of\s*thought|思考过程|推理过程|分析过程)\s*[:：]",
+            flags=re.IGNORECASE,
+        )
+        for raw_line in cleaned.splitlines():
+            stripped = raw_line.strip()
+            if not stripped:
+                cleaned_lines.append("")
+                continue
+            if reasoning_heading.match(stripped):
+                continue
+            if re.fullmatch(r"</?think\b[^>]*>", stripped, flags=re.IGNORECASE):
+                continue
+            cleaned_lines.append(raw_line)
+        return "\n".join(cleaned_lines).strip()
+
     def _deterministic_clean_llm_engineering_text(self, text: str, payload: Dict[str, Any]) -> str:
+        text = self._strip_llm_reasoning_blocks(text)
         known_codes = self._material_codes(json.dumps(payload, ensure_ascii=False, default=str))
         forbidden_structure_terms = ["加强筋", "加筋", "夹芯", "金属衬套"]
         cleaned_lines: List[str] = []
@@ -404,7 +427,7 @@ class ReportGenAgent(BaseAgent):
             json_mode=False,
         ).strip()
         self.emit_llm_trace(self.llm_backend, {"purpose": "report_explanation_sanitize"})
-        return answer
+        return self._strip_llm_reasoning_blocks(answer)
 
     def _render_llm_engineering_explanation(self, summary: Dict[str, Any]) -> str:
         if self.llm_backend is None:
@@ -434,6 +457,9 @@ class ReportGenAgent(BaseAgent):
             json_mode=False,
         ).strip()
         self.emit_llm_trace(self.llm_backend, {"purpose": "report_engineering_explanation"})
+        if not answer:
+            return ""
+        answer = self._strip_llm_reasoning_blocks(answer)
         if not answer:
             return ""
         try:
@@ -545,6 +571,9 @@ class ReportGenAgent(BaseAgent):
                 json_mode=False,
             ).strip()
             self.emit_llm_trace(self.llm_backend, {"purpose": f"report_{report_kind}_explanation"})
+            if not answer:
+                return fallback
+            answer = self._strip_llm_reasoning_blocks(answer)
             if not answer:
                 return fallback
             try:

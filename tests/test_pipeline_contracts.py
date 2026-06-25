@@ -987,6 +987,39 @@ def test_report_postprocess_removes_duplicate_heading_and_mixed_verdict_text(mon
     assert "结论为通过" in cleaned
 
 
+def test_report_strips_reasoning_block_before_validation(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, results, candidates = _report_sample()
+    agent = ReportGenAgent()
+
+    class ControlledBackend:
+        max_tokens = 1800
+
+        def __init__(self):
+            self.calls = 0
+
+        def chat(self, system_prompt, user_prompt, max_tokens_override=None, json_mode=False, **_kwargs):
+            self.calls += 1
+            return (
+                "<think>内部推理不应进入报告。</think>\n"
+                "### 制造工艺适配性\n"
+                "- 围绕当前候选的铺层组织、圆柱壳成型和质量一致性开展工程复核。\n\n"
+                "### 有限元结果解读\n"
+                "- 解释应以结构化校核结果为依据，不新增额外阈值或替代材料。"
+            )
+
+    backend = ControlledBackend()
+    agent.llm_backend = backend
+
+    markdown = agent._render_markdown(task, results, candidates)
+
+    assert "<think" not in markdown.lower()
+    assert "内部推理" not in markdown
+    assert "制造工艺适配性" in markdown
+    assert backend.calls == 1
+    assert agent._last_llm_explanation_used is True
+
+
 def test_report_emits_llm_trace_when_engineering_explanation_fails(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task, results, candidates = _report_sample()

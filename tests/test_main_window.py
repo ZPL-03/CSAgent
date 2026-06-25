@@ -279,13 +279,15 @@ def test_fem_report_uses_output_dir_and_evaluated_results(monkeypatch, tmp_path)
         app.processEvents()
 
 
-def test_report_completion_updates_session_and_open_button(monkeypatch) -> None:
+def test_report_completion_updates_session_and_open_button(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
     window = MainWindow()
     try:
+        report_path = tmp_path / "latest_report.md"
+        report_path.write_text("# 报告\n\n预览内容。", encoding="utf-8")
         report = {
-            "markdown_path": "data/results/latest_report.md",
+            "markdown_path": str(report_path),
             "pdf_path": None,
             "content": "# 报告\n\n预览内容。",
             "llm_explanation_used": False,
