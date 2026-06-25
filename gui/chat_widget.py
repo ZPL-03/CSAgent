@@ -30,7 +30,7 @@ class ChatWidget(QWidget):
         self.content = QWidget()
         self.content_layout = QVBoxLayout(self.content)
         self.content_layout.setContentsMargins(18, 6, 18, 6)
-        self.content_layout.setSpacing(8)
+        self.content_layout.setSpacing(6)
         self.scroll_area.setWidget(self.content)
 
         root_layout = QVBoxLayout(self)
@@ -227,7 +227,7 @@ class ChatWidget(QWidget):
         metrics = self._text_metrics(13)
         value = str(text)
         line_widths = [metrics.horizontalAdvance(line.rstrip()) for line in value.splitlines() if line.strip()]
-        raw_natural = max(line_widths, default=0) + 18
+        raw_natural = max(line_widths, default=0) + 16
         if raw_natural >= target_max:
             return target_max
         return max(target_min, raw_natural)
@@ -261,8 +261,9 @@ class ChatWidget(QWidget):
             f"QFrame#chatBubble {{ background:{bg}; border:1px solid {border}; border-radius:14px; }}"
         )
         layout = QVBoxLayout(frame)
-        horizontal_padding = 12
-        layout.setContentsMargins(6, 2, 6, 2)
+        horizontal_padding = 14
+        vertical_padding = 10
+        layout.setContentsMargins(7, 4, 7, 4)
         layout.setSpacing(0)
         text_label = self._label(text, fg, 13)
         text_width = max(24, bubble_width - horizontal_padding)
@@ -271,7 +272,7 @@ class ChatWidget(QWidget):
         text_label.setFixedHeight(text_height + 2)
         text_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
         layout.addWidget(text_label)
-        frame.setFixedHeight(max(28, text_height + 7))
+        frame.setFixedHeight(max(28, text_height + vertical_padding))
         return frame
 
     def _avatar_label(self, text: str, bg: str, fg: str) -> QLabel:
@@ -313,13 +314,13 @@ class ChatWidget(QWidget):
         column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         column_layout = QVBoxLayout(column)
         column_layout.setContentsMargins(0, 0, 0, 0)
-        column_layout.setSpacing(4)
+        column_layout.setSpacing(3)
         sender_label = self._label(sender, fg, 12, True)
         bubble = self._bubble(message, bg, border, fg, 1120, 44, fit_content=True)
         column_layout.addWidget(sender_label)
         column_layout.addWidget(bubble)
         row_layout.addWidget(column, 1)
-        row_height = max(avatar.height(), sender_label.sizeHint().height() + 4 + bubble.height()) + 6
+        row_height = max(avatar.height(), sender_label.sizeHint().height() + 3 + bubble.height()) + 3
         row.setMinimumHeight(row_height)
         return row
 

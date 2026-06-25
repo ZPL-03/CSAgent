@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-UI_LAYOUT_VERSION = 12
+UI_LAYOUT_VERSION = 13
 
 from PyQt6 import sip
 from PyQt6.QtCore import QObject, QRectF, QSettings, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
@@ -2213,21 +2213,41 @@ class MainWindow(QMainWindow):
             self._sync_main_splitter_sizes()
             return
         geometry = self.ui_state_settings.value("window_geometry")
-        state = self.ui_state_settings.value("window_state")
         geometry_restored = False
         if geometry:
             geometry_restored = self.restoreGeometry(geometry)
-        if state:
-            self.restoreState(state)
-        if not geometry_restored:
+        if not geometry_restored or not self._current_window_geometry_is_usable():
             self._resize_to_available_work_area()
         self._ensure_window_within_work_area(clamp_to_target=True)
         self._sync_main_splitter_sizes()
 
     def _save_window_layout(self) -> None:
         self.ui_state_settings.setValue("layout_version", UI_LAYOUT_VERSION)
+        self.ui_state_settings.remove("window_state")
+        if self.isMaximized() or self.isFullScreen() or not self._current_window_geometry_is_usable():
+            self.ui_state_settings.remove("window_geometry")
+            return
         self.ui_state_settings.setValue("window_geometry", self.saveGeometry())
-        self.ui_state_settings.setValue("window_state", self.saveState())
+
+    def _current_window_geometry_is_usable(self) -> bool:
+        screen = self.screen() or QApplication.primaryScreen()
+        if screen is None:
+            return True
+        available = screen.availableGeometry()
+        width = self.width()
+        height = self.height()
+        if width <= 0 or height <= 0:
+            return False
+        if width > available.width() or height > available.height():
+            return False
+        target = self._target_window_size()
+        min_width = min(960, target.width())
+        min_height = min(640, target.height())
+        if width < min_width or height < min_height:
+            return False
+        aspect = width / max(1, height)
+        target_aspect = target.width() / max(1, target.height())
+        return aspect <= max(1.72, target_aspect + 0.18)
 
     def _connect_signals(self) -> None:
         self.generate_button.clicked.connect(self._start_conversation)

@@ -20,7 +20,8 @@ dependencies:
   - tesseract
   - pip:
       - --extra-index-url https://download.pytorch.org/whl/cu126
-      - torch==2.7.0+cu126
+      - torch==2.11.0+cu126
+      - torchvision==0.26.0+cu126
       - PyQt6==6.4.2
       - PyQt6-Qt6==6.4.3
       - PyQt6_sip==13.10.2
@@ -34,12 +35,14 @@ dependencies:
       - langgraph==0.6.11
       - chromadb==1.5.5
       - sentence-transformers==2.6.1
-      - transformers==4.41.2
-      - tokenizers==0.19.1
+      - transformers==4.57.6
+      - tokenizers==0.22.2
       - safetensors==0.7.0
       - pyvista==0.46.5
       - pyvistaqt==0.11.3
       - PyMuPDF==1.24.14
+      - docling==2.93.0
+      - "mineru[pipeline]==3.1.11"
       - reportlab==4.4.10
       - joblib==1.5.3
       - pytest==8.4.2
@@ -64,8 +67,7 @@ dependencies:
       - pytesseract
       - python-docx
       - python-pptx
-      - pdfplumber
-      - pypdfium2
+      - pypdfium2==4.30.0
       - shapely
       - xlsxwriter
       - watchdog

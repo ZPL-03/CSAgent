@@ -7,7 +7,6 @@ from typing import Any, Dict, Iterable, List
 
 from core.config_loader import load_app_config
 from core.pressure_hull_profile import describe_geometry_text
-from core.rag_engine import RAGEngine
 from core.task_contract import (
     describe_boundary_conditions,
     describe_load_conditions,
@@ -152,6 +151,8 @@ class CaseMemoryIndex:
         self.collection_name = collection_name or str(
             case_memory_config.get("collection_name", DEFAULT_CASE_MEMORY_COLLECTION)
         )
+        from core.rag_engine import RAGEngine
+
         self.engine = RAGEngine(collection_name=self.collection_name)
 
     def upsert_cases(self, records: Iterable[Dict[str, Any]], scope: str = "archive") -> None:

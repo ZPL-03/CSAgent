@@ -26,7 +26,6 @@ from core.paths import (
     RUNTIME_KNOWLEDGE_RAG_DIR,
     RUNTIME_KNOWLEDGE_STRUCTURED_DIR,
 )
-from core.rag_engine import RAGEngine
 
 
 TEXT_SUFFIXES = {
@@ -188,6 +187,117 @@ def _read_text(path: Path) -> str:
         except UnicodeDecodeError:
             continue
     return path.read_text(encoding="utf-8", errors="replace")
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on", "y"}
+
+
+def _external_parser_env() -> dict[str, str]:
+    env = dict(os.environ)
+    no_proxy_values = ["127.0.0.1", "localhost", "::1"]
+    existing_no_proxy = env.get("NO_PROXY") or env.get("no_proxy") or ""
+    for value in existing_no_proxy.split(","):
+        item = value.strip()
+        if item and item not in no_proxy_values:
+            no_proxy_values.append(item)
+    env["NO_PROXY"] = ",".join(no_proxy_values)
+    env["no_proxy"] = env["NO_PROXY"]
+    return env
+
+
+def _pdf_text_profile(path: Path) -> dict[str, float]:
+    try:
+        import fitz
+    except ModuleNotFoundError:
+        return {"page_count": 0.0, "average_chars": 0.0, "text_page_ratio": 0.0}
+    try:
+        document = fitz.open(str(path))
+    except Exception:
+        return {"page_count": 0.0, "average_chars": 0.0, "text_page_ratio": 0.0}
+    with document:
+        page_count = len(document)
+        if page_count <= 0:
+            return {"page_count": 0.0, "average_chars": 0.0, "text_page_ratio": 0.0}
+        sample_count = min(page_count, 12)
+        sample_indexes = sorted({0, page_count - 1, *range(sample_count)})
+        char_counts: list[int] = []
+        for index in sample_indexes:
+            if 0 <= index < page_count:
+                text = document[index].get_text("text") or ""
+                char_counts.append(len(re.sub(r"\s+", "", text)))
+    if not char_counts:
+        return {"page_count": float(page_count), "average_chars": 0.0, "text_page_ratio": 0.0}
+    text_pages = sum(1 for count in char_counts if count >= 80)
+    return {
+        "page_count": float(page_count),
+        "average_chars": sum(char_counts) / len(char_counts),
+        "text_page_ratio": text_pages / len(char_counts),
+    }
+
+
+def _mineru_backend_and_method_for(path: Path) -> tuple[str, str]:
+    suffix = path.suffix.lower()
+    configured_backend = os.getenv("MINERU_BACKEND", "").strip()
+    configured_method = os.getenv("MINERU_PARSE_METHOD", "").strip()
+    if configured_backend and configured_backend.lower() != "auto":
+        backend = configured_backend
+    elif suffix == ".pdf":
+        profile = _pdf_text_profile(path)
+        if profile["average_chars"] < 200 or profile["text_page_ratio"] < 0.5:
+            backend = os.getenv("MINERU_HIGH_ACCURACY_BACKEND", "hybrid-auto-engine")
+        else:
+            backend = os.getenv("MINERU_TEXT_BACKEND", "pipeline")
+    elif suffix in IMAGE_SUFFIXES or suffix in DOCX_SUFFIXES or suffix in PPTX_SUFFIXES:
+        backend = os.getenv("MINERU_HIGH_ACCURACY_BACKEND", "hybrid-auto-engine")
+    else:
+        backend = os.getenv("MINERU_TEXT_BACKEND", "pipeline")
+    if configured_method:
+        return backend, configured_method
+    if suffix == ".pdf" and backend == "pipeline":
+        return backend, "txt"
+    return backend, "auto"
+
+
+def _run_external_parser(args: list[str], timeout_seconds: int) -> tuple[int, str, str]:
+    creationflags = 0
+    if os.name == "nt":
+        creationflags = subprocess.CREATE_NEW_PROCESS_GROUP
+    process = subprocess.Popen(
+        args,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        creationflags=creationflags,
+        env=_external_parser_env(),
+    )
+    try:
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired as exc:
+        if os.name == "nt":
+            subprocess.run(
+                ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                check=False,
+            )
+        else:
+            process.kill()
+        stdout, stderr = process.communicate()
+        detail = "\n".join(part for part in [stdout, stderr] if part).strip()
+        raise RuntimeError(f"外部解析器超时：{timeout_seconds} 秒。{trim_text(detail, 800)}") from exc
+    return process.returncode, stdout, stderr
+
+
+def _build_rag_engine(*, chroma_dir: Path, collection_name: str):
+    from core.rag_engine import RAGEngine
+
+    return RAGEngine(chroma_dir=chroma_dir, collection_name=collection_name)
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
@@ -746,7 +856,7 @@ class KnowledgeIngestionService:
                 }
             )
         try:
-            engine = RAGEngine(chroma_dir=self.vector_chroma_dir, collection_name=self.vector_collection_name)
+            engine = _build_rag_engine(chroma_dir=self.vector_chroma_dir, collection_name=self.vector_collection_name)
             engine.reset_collection()
             engine.upsert_documents(ids=ids, documents=documents, metadatas=metadatas)
             backend = "hash_embedding" if engine.use_hash_embedding_only or engine._embedder_failed else engine.embedding_model_name
@@ -832,6 +942,7 @@ class KnowledgeIngestionService:
             raise RuntimeError("当前环境没有可用的 MinerU 命令。")
         with tempfile.TemporaryDirectory(prefix="csagent_mineru_") as temp_name:
             output_dir = Path(temp_name)
+            backend, method = _mineru_backend_and_method_for(path)
             args = [
                 command,
                 "-p",
@@ -839,30 +950,28 @@ class KnowledgeIngestionService:
                 "-o",
                 str(output_dir),
                 "-m",
-                os.getenv("MINERU_PARSE_METHOD", "auto"),
+                method,
                 "-b",
-                os.getenv("MINERU_BACKEND", "pipeline"),
+                backend,
                 "--formula",
-                "true",
+                str(_env_flag("MINERU_FORMULA", True)).lower(),
                 "--table",
-                "true",
+                str(_env_flag("MINERU_TABLE", True)).lower(),
                 "--image-analysis",
-                "true",
+                str(_env_flag("MINERU_IMAGE_ANALYSIS", False)).lower(),
             ]
             api_url = os.getenv("MINERU_API_URL", "").strip()
             if api_url:
                 args.extend(["--api-url", api_url])
-            completed = subprocess.run(
+            parse_lang = os.getenv("MINERU_PARSE_LANG", "").strip()
+            if parse_lang:
+                args.extend(["-l", parse_lang])
+            returncode, stdout, stderr = _run_external_parser(
                 args,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=int(os.getenv("CSAGENT_MINERU_TIMEOUT", "900")),
+                int(os.getenv("CSAGENT_MINERU_TIMEOUT", "900")),
             )
-            if completed.returncode != 0:
-                message = "\n".join(part for part in [completed.stdout, completed.stderr] if part).strip()
+            if returncode != 0:
+                message = "\n".join(part for part in [stdout, stderr] if part).strip()
                 raise RuntimeError(trim_text(message, 1200) or "MinerU 命令返回非零状态。")
             markdown_files = sorted(output_dir.rglob("*.md"), key=lambda item: item.stat().st_size, reverse=True)
             markdown = "\n\n".join(item.read_text(encoding="utf-8", errors="replace") for item in markdown_files)
@@ -878,7 +987,12 @@ class KnowledgeIngestionService:
             from docling.datamodel.pipeline_options import PdfPipelineOptions
         except ModuleNotFoundError as exc:
             raise RuntimeError("当前环境没有安装 Docling。") from exc
-        pdf_options = PdfPipelineOptions(do_ocr=True, do_table_structure=True, do_formula_enrichment=True, images_scale=2.0)
+        pdf_options = PdfPipelineOptions(
+            do_ocr=_env_flag("DOCLING_OCR", False),
+            do_table_structure=_env_flag("DOCLING_TABLE_STRUCTURE", True),
+            do_formula_enrichment=_env_flag("DOCLING_FORMULA_ENRICHMENT", False),
+            images_scale=float(os.getenv("DOCLING_IMAGES_SCALE", "1.0")),
+        )
         converter = DocumentConverter(
             format_options={
                 InputFormat.PDF: PdfFormatOption(pipeline_options=pdf_options),

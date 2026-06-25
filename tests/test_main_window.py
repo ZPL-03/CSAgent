@@ -1529,7 +1529,7 @@ def test_chat_bubble_width_tracks_rendered_text_width() -> None:
         text = "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，生成 12 个候选。"
         target_max, target_min = widget._responsive_width(920, 220)
         rendered_width = widget._text_metrics(13).horizontalAdvance(text)
-        raw_width = rendered_width + 18
+        raw_width = rendered_width + 16
         expected_width = target_max if raw_width >= target_max else max(target_min, raw_width)
 
         assert widget._content_width(text, target_max, target_min) == expected_width
@@ -1562,6 +1562,7 @@ def test_chat_short_runtime_bubbles_follow_text_width() -> None:
             text_width = widget._text_metrics(13).horizontalAdvance(message)
             assert bubble.width() - text_width <= 20
             assert bubble.width() <= 360
+            assert bubble.height() <= 36
     finally:
         widget.close()
         app.processEvents()

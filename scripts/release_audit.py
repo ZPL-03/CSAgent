@@ -17,6 +17,10 @@ import yaml
 
 ROOT = Path(__file__).resolve().parent.parent
 sys.dont_write_bytecode = True
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8")
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -682,6 +686,11 @@ class ReleaseAudit:
                     Qt.TextFlag.TextWordWrap,
                     text,
                 )
+                label_top = text_label.mapTo(bubble, QPoint(0, 0)).y()
+                label_bottom = label_top + text_label.height()
+                if text_label.height() < bounds.height() or label_top < 0 or label_bottom > bubble.height() - 1:
+                    errors.append(f"{theme}/{page_name} 对话气泡纵向裁切：{text[:32]}")
+                    return
                 wrapped_lines = max(1, round(bounds.height() / max(1, metrics.lineSpacing())))
                 natural_width = max(
                     [metrics.horizontalAdvance(line.rstrip()) for line in text.splitlines() if line.strip()],

@@ -12,7 +12,6 @@ from typing import Any, Dict, Iterable, List
 
 from core.config_loader import load_app_config
 from core.paths import CHROMA_DIR, ROOT_DIR
-from core.rag_engine import RAGEngine
 from core.task_contract import describe_boundary_conditions, describe_load_conditions, task_payload_from_request
 
 
@@ -434,6 +433,9 @@ class VectorChunkRetriever:
     ) -> None:
         self.enabled = enabled
         self.max_snippet_chars = max_snippet_chars
+        if enabled:
+            from core.rag_engine import RAGEngine
+
         self.engine = RAGEngine(chroma_dir=chroma_dir, collection_name=collection_name) if enabled else None
 
     @property

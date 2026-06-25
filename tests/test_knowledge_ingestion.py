@@ -2,8 +2,15 @@ from __future__ import annotations
 
 import json
 import gzip
+import sys
 
-from core.knowledge_ingestion import KnowledgeIngestionService, SUPPORTED_INGEST_SUFFIXES, SUPPORTED_QT_FILE_FILTER
+from core.knowledge_ingestion import (
+    KnowledgeIngestionService,
+    SUPPORTED_INGEST_SUFFIXES,
+    SUPPORTED_QT_FILE_FILTER,
+    _mineru_backend_and_method_for,
+    _run_external_parser,
+)
 
 
 def test_runtime_knowledge_empty_status_exposes_pipeline_contract(tmp_path) -> None:
@@ -97,6 +104,109 @@ def test_runtime_knowledge_ingestion_builds_chunks_kg_vector_index_and_dedupes(t
     assert all(item["evidence_chunk_id"] in chunk_ids for item in relations)
 
 
+def test_runtime_knowledge_ingestion_prefers_mineru_and_falls_back_to_docling(tmp_path, monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_USE_HASH_EMBEDDING", "1")
+
+    first_source = tmp_path / "mineru_priority.pdf"
+    first_source.write_bytes(b"%PDF-1.4\n% temporary parser routing fixture\n")
+
+    def mineru_parser(self, path):
+        return "\n\n".join(
+            [
+                "# MinerU pressure hull",
+                "T700 composite pressure hull uses ASME RD-1172, PBIPF and Abaqus Riks.",
+                "Filament winding and curing quality control reduce initial imperfection risk.",
+            ]
+        )
+
+    def docling_must_not_run(self, path):
+        raise AssertionError("Docling should not run when MinerU succeeds.")
+
+    monkeypatch.setattr(KnowledgeIngestionService, "_parse_with_mineru", mineru_parser)
+    monkeypatch.setattr(KnowledgeIngestionService, "_parse_with_docling", docling_must_not_run)
+    service = KnowledgeIngestionService(base_dir=tmp_path / "knowledge_mineru", chunk_token_size=48, chunk_overlap_tokens=8)
+    first_result = service.ingest_file(first_source)
+
+    assert first_result.success
+    assert first_result.parser_backend == "mineru"
+    assert first_result.chunk_count >= 1
+
+    second_source = tmp_path / "docling_fallback.pdf"
+    second_source.write_bytes(b"%PDF-1.4\n% temporary parser routing fixture\n")
+
+    def mineru_unavailable(self, path):
+        raise RuntimeError("mineru unavailable")
+
+    def docling_parser(self, path):
+        return "\n\n".join(
+            [
+                "# Docling pressure hull",
+                "M40J composite pressure hull under external pressure uses ASME RD-1172 and PBIPF.",
+                "Abaqus finite element verification records buckling and ultimate pressure evidence.",
+            ]
+        )
+
+    monkeypatch.setattr(KnowledgeIngestionService, "_parse_with_mineru", mineru_unavailable)
+    monkeypatch.setattr(KnowledgeIngestionService, "_parse_with_docling", docling_parser)
+    fallback_service = KnowledgeIngestionService(
+        base_dir=tmp_path / "knowledge_docling",
+        chunk_token_size=48,
+        chunk_overlap_tokens=8,
+    )
+    second_result = fallback_service.ingest_file(second_source)
+
+    assert second_result.success
+    assert second_result.parser_backend == "docling"
+    assert second_result.chunk_count >= 1
+
+
+def test_external_parser_bypasses_local_api_proxy(monkeypatch) -> None:
+    monkeypatch.delenv("NO_PROXY", raising=False)
+    monkeypatch.delenv("no_proxy", raising=False)
+
+    returncode, stdout, _stderr = _run_external_parser(
+        [sys.executable, "-c", "import os; print(os.environ.get('NO_PROXY', ''))"],
+        15,
+    )
+
+    assert returncode == 0
+    values = {item.strip() for item in stdout.strip().split(",")}
+    assert {"127.0.0.1", "localhost", "::1"}.issubset(values)
+
+
+def test_mineru_text_pdf_uses_pipeline_text_route(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("MINERU_BACKEND", raising=False)
+    monkeypatch.delenv("MINERU_PARSE_METHOD", raising=False)
+    from reportlab.pdfgen import canvas
+
+    source = tmp_path / "text_layer.pdf"
+    pdf = canvas.Canvas(str(source))
+    for row in range(20):
+        pdf.drawString(72, 760 - row * 24, "CSAgent pressure hull text layer. " * 5)
+    pdf.save()
+
+    backend, method = _mineru_backend_and_method_for(source)
+
+    assert backend == "pipeline"
+    assert method == "txt"
+
+
+def test_mineru_sparse_pdf_uses_high_accuracy_route(tmp_path, monkeypatch) -> None:
+    monkeypatch.delenv("MINERU_BACKEND", raising=False)
+    monkeypatch.delenv("MINERU_PARSE_METHOD", raising=False)
+    from reportlab.pdfgen import canvas
+
+    source = tmp_path / "sparse_layer.pdf"
+    pdf = canvas.Canvas(str(source))
+    pdf.showPage()
+    pdf.save()
+
+    backend, method = _mineru_backend_and_method_for(source)
+
+    assert backend == "hybrid-auto-engine"
+    assert method == "auto"
+
+
 def test_runtime_knowledge_ingestion_accepts_office_table_and_pdf_text_layers(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_USE_HASH_EMBEDDING", "1")
 
@@ -180,7 +290,10 @@ def test_runtime_knowledge_ingestion_marks_vector_status_warning_when_backend_fa
         encoding="utf-8",
     )
 
-    monkeypatch.setattr("core.knowledge_ingestion.RAGEngine", BrokenRAGEngine)
+    monkeypatch.setattr(
+        "core.knowledge_ingestion._build_rag_engine",
+        lambda **kwargs: BrokenRAGEngine(**kwargs),
+    )
     service = KnowledgeIngestionService(base_dir=tmp_path / "knowledge", chunk_token_size=48, chunk_overlap_tokens=8)
     result = service.ingest_file(source)
 
