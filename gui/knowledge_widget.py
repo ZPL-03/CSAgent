@@ -240,7 +240,7 @@ class KnowledgeGraphView(QWidget):
         self.update()
 
     def set_show_relations(self, enabled: bool) -> None:
-        """兼容旧调用，实际控制关系标签显示状态。"""
+        """统一控制关系标签显示状态。"""
 
         self.set_show_relation_labels(enabled)
 

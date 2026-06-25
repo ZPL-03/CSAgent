@@ -142,6 +142,7 @@ class ReleaseAudit:
         self.check_knowledge_pipeline_contract()
         self.check_knowledge_file_type_contract()
         self.check_gui_workbench_contract()
+        self.check_async_runtime_contract()
         if self.with_gui_render:
             self.check_gui_render_contract()
         self.check_ui_assets()
@@ -498,6 +499,48 @@ class ReleaseAudit:
                     missing.append(f"{name}:{token}")
         detail = "四页导航、六智能体 DAG、对话区、实时视口、知识图谱交互和设置页配置入口齐备" if not missing else "; ".join(missing[:12])
         self.add("GUI 工作台契约", not missing, detail)
+
+    def check_async_runtime_contract(self) -> None:
+        files = {
+            "main": (ROOT / "gui/main_window.py").read_text(encoding="utf-8"),
+            "knowledge": (ROOT / "gui/knowledge_widget.py").read_text(encoding="utf-8"),
+        }
+        required_tokens = {
+            "main": [
+                "class PipelineWorker(QObject)",
+                "self.worker_thread = QThread(self)",
+                "self.worker.moveToThread(self.worker_thread)",
+                "self.worker_thread.started.connect(self.worker.run)",
+                "self.worker.message.connect(self._handle_message)",
+                "self.worker.finished.connect(self._handle_finished)",
+                "self.worker.failed.connect(self._handle_failed)",
+            ],
+            "knowledge": [
+                "class KnowledgeIngestWorker(QObject)",
+                "class KnowledgeMaintenanceWorker(QObject)",
+                "class KnowledgeRefreshWorker(QObject)",
+                "self._ingest_thread = QThread(self)",
+                "self._ingest_worker.moveToThread(self._ingest_thread)",
+                "self._maintenance_thread = QThread(self)",
+                "self._maintenance_worker.moveToThread(self._maintenance_thread)",
+                "self._refresh_thread = QThread(self)",
+                "self._refresh_worker.moveToThread(self._refresh_thread)",
+            ],
+        }
+        errors: list[str] = []
+        for name, tokens in required_tokens.items():
+            text = files[name]
+            for token in tokens:
+                if token not in text:
+                    errors.append(f"{name}:{token}")
+        if "KnowledgeIngestionService().ingest_file" in files["knowledge"]:
+            errors.append("knowledge_widget:ingest_file 不能在 GUI 主对象直接同步调用")
+        detail = (
+            "自然语言流程、有限元批处理、知识入库、索引维护和知识刷新均通过后台 Worker/QThread 推进"
+            if not errors
+            else "; ".join(errors[:12])
+        )
+        self.add("GUI 后台任务契约", not errors, detail)
 
     def check_gui_render_contract(self) -> None:
         import os
