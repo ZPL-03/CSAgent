@@ -455,8 +455,8 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         margin-right: 8px;
     }}
     QLineEdit#settingsInput, QComboBox#settingsInput {{
-        min-height: 30px;
-        padding: 1px 10px;
+        min-height: 32px;
+        padding: 3px 10px;
         padding-right: 28px;
     }}
     QComboBox#settingsInput::drop-down {{
@@ -481,6 +481,34 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         border-bottom: 1px solid {color["border_soft"]};
         padding: 7px 8px;
         font-weight: 700;
+    }}
+    QFrame#candidateDetailPanel {{
+        background: {color["surface"]};
+        border: 1px solid {color["border"]};
+        border-radius: 6px;
+    }}
+    QPushButton#candidateTabButton {{
+        background: {color["tab_bg"]};
+        color: {color["muted"]};
+        border: 0;
+        border-top: 3px solid transparent;
+        border-bottom: 1px solid {color["border"]};
+        border-radius: 0;
+        min-height: 34px;
+        padding: 4px 0 5px 0;
+        font-size: 13px;
+        font-weight: 700;
+        text-align: center;
+    }}
+    QPushButton#candidateTabButton:checked {{
+        background: {color["tab_selected"]};
+        color: {color["text"]};
+        border-top: 3px solid {color["accent"]};
+        border-bottom: 1px solid {color["tab_selected"]};
+    }}
+    QPushButton#candidateTabButton:hover {{
+        color: {color["text"]};
+        background: {color["button_hover"]};
     }}
     QTabWidget::pane {{
         border: 1px solid {color["border"]};
@@ -520,6 +548,14 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         background: {color["button_disabled"]};
         color: {color["disabled_text"]};
         border-color: {color["border_soft"]};
+    }}
+    QPushButton#sendButton {{
+        min-width: 42px;
+        padding: 8px 8px;
+    }}
+    QPushButton#confirmButton {{
+        min-width: 64px;
+        padding: 8px 8px;
     }}
     QPushButton[variant="primary"] {{
         background: {color["primary"]};
@@ -708,7 +744,7 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         min-height: 30px;
         max-height: 30px;
         border-radius: 8px;
-        padding: 3px 28px 3px 10px;
+        padding: 3px 30px 3px 10px;
         background: {color["button_bg"]};
         border: 1px solid {color["border_soft"]};
         color: {color["text"]};
@@ -836,9 +872,9 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         background: {color["app_bg"]};
     }}
     QScrollBar:vertical {{
-        background: {color["app_bg"]};
+        background: transparent;
         width: 8px;
-        margin: 2px 1px 2px 1px;
+        margin: 2px 2px 2px 2px;
         border: 0;
     }}
     QScrollBar::handle:vertical {{

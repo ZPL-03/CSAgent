@@ -5,18 +5,20 @@ from __future__ import annotations
 from html import escape
 from typing import Iterable
 
-from PyQt6.QtCore import QSize, Qt, pyqtSignal
+from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
+    QFrame,
     QGridLayout,
     QHeaderView,
+    QHBoxLayout,
     QLabel,
+    QPushButton,
     QSizePolicy,
     QSplitter,
-    QTabBar,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
-    QTabWidget,
     QTextBrowser,
     QVBoxLayout,
     QWidget,
@@ -25,18 +27,6 @@ from PyQt6.QtWidgets import (
 from gui.i18n import DEFAULT_LANGUAGE, text as tr
 from core.pressure_hull_profile import GEOMETRY_LABELS, TYPE_DISPLAY_NAMES
 from core.task_contract import describe_boundary_conditions, describe_load_conditions
-
-
-class EqualWidthTabBar(QTabBar):
-    """候选详情页签等宽显示，宽度来自当前控件实际可用空间。"""
-
-    def tabSizeHint(self, index: int) -> QSize:
-        size = super().tabSizeHint(index)
-        count = max(1, self.count())
-        available = max(self.width(), self.parentWidget().width() if self.parentWidget() else 0)
-        if available > 0:
-            size.setWidth(max(96, available // count))
-        return size
 
 
 def _format_generation_label(source: object, language: str = DEFAULT_LANGUAGE) -> str:
@@ -124,21 +114,40 @@ class CandidateWidget(QWidget):
 
         self.detail_browser = QTextBrowser()
         self.audit_browser = QTextBrowser()
-        self.detail_tabs = QTabWidget()
-        self.detail_tabs.setObjectName("candidateDetailTabs")
-        self.detail_tabs.setTabBar(EqualWidthTabBar(self.detail_tabs))
-        self.detail_tabs.setDocumentMode(True)
-        self.detail_tabs.addTab(self.detail_browser, tr("candidate.tab.detail", language=self.language))
-        self.detail_tabs.addTab(self.audit_browser, tr("candidate.tab.audit", language=self.language))
-        self.detail_tabs.tabBar().setExpanding(True)
-        self.detail_tabs.tabBar().setUsesScrollButtons(False)
-        self.detail_tabs.tabBar().setElideMode(Qt.TextElideMode.ElideNone)
-        self.detail_tabs.setMinimumWidth(300)
-        self.detail_tabs.setMaximumHeight(300)
+        self.detail_container = QFrame()
+        self.detail_container.setObjectName("candidateDetailPanel")
+        self.detail_container.setMinimumWidth(300)
+        self.detail_container.setMaximumHeight(300)
+        self.detail_button = QPushButton(tr("candidate.tab.detail", language=self.language))
+        self.audit_button = QPushButton(tr("candidate.tab.audit", language=self.language))
+        for button in [self.detail_button, self.audit_button]:
+            button.setObjectName("candidateTabButton")
+            button.setCheckable(True)
+            button.setAutoExclusive(True)
+            button.setMinimumWidth(0)
+            button.setMinimumHeight(34)
+            button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.detail_button.setChecked(True)
+        self.detail_button.clicked.connect(lambda checked: self._set_detail_page(0) if checked else None)
+        self.audit_button.clicked.connect(lambda checked: self._set_detail_page(1) if checked else None)
+        tab_layout = QHBoxLayout()
+        tab_layout.setContentsMargins(0, 0, 0, 0)
+        tab_layout.setSpacing(0)
+        tab_layout.addWidget(self.detail_button, 1)
+        tab_layout.addWidget(self.audit_button, 1)
+        self.detail_stack = QStackedWidget()
+        self.detail_stack.setObjectName("candidateDetailStack")
+        self.detail_stack.addWidget(self.detail_browser)
+        self.detail_stack.addWidget(self.audit_browser)
+        detail_layout = QVBoxLayout(self.detail_container)
+        detail_layout.setContentsMargins(0, 0, 0, 0)
+        detail_layout.setSpacing(0)
+        detail_layout.addLayout(tab_layout)
+        detail_layout.addWidget(self.detail_stack, 1)
 
         splitter = QSplitter()
         splitter.addWidget(self.table)
-        splitter.addWidget(self.detail_tabs)
+        splitter.addWidget(self.detail_container)
         splitter.setChildrenCollapsible(False)
         splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         splitter.setStretchFactor(0, 1)
@@ -170,8 +179,8 @@ class CandidateWidget(QWidget):
     def set_language(self, language: str) -> None:
         self.language = language
         self.table.setHorizontalHeaderLabels(self._headers())
-        self.detail_tabs.setTabText(0, tr("candidate.tab.detail", language=self.language))
-        self.detail_tabs.setTabText(1, tr("candidate.tab.audit", language=self.language))
+        self.detail_button.setText(tr("candidate.tab.detail", language=self.language))
+        self.audit_button.setText(tr("candidate.tab.audit", language=self.language))
         self._update_metric_cards()
         if not self.candidates:
             self.summary_label.setText(tr("candidate.empty", language=self.language))
@@ -271,8 +280,8 @@ class CandidateWidget(QWidget):
         self.setMaximumHeight(16777215)
         self.metric_widget.setVisible(True)
         self.table.setVisible(True)
-        self.detail_tabs.setMaximumHeight(16777215)
-        self.detail_tabs.setVisible(True)
+        self.detail_container.setMaximumHeight(16777215)
+        self.detail_container.setVisible(True)
         self.splitter.setSizes([640, 640])
         source_counter: dict[str, int] = {}
 
@@ -309,11 +318,9 @@ class CandidateWidget(QWidget):
         self._update_metric_cards()
         summary = " / ".join(f"{key}: {value}" for key, value in sorted(source_counter.items()))
         pool_audit = self._generation_audit_for_pool()
-        audit_summary = self._generation_audit_summary(pool_audit)
         self.audit_browser.setHtml(self._generation_audit_html(pool_audit))
         self.summary_label.setText(
             f"当前候选方案数：{len(self.candidates)} | 来源构成：{summary or '-'} | "
-            f"来源审计：{audit_summary} | "
             "说明：候选阶段只使用临时编号，只有做过 ABAQUS 校核后才会分配正式 C 编号。"
         )
 
@@ -322,7 +329,7 @@ class CandidateWidget(QWidget):
         else:
             self.detail_browser.setHtml(self._empty_detail_html())
             self.audit_browser.setHtml(self._generation_audit_html({}))
-        self._sync_detail_tab_widths()
+        self._sync_detail_pages()
 
     def reset_view(self) -> None:
         if hasattr(self, "detail_browser"):
@@ -420,12 +427,18 @@ class CandidateWidget(QWidget):
         )
         self.detail_browser.setHtml(html)
 
-    def _sync_detail_tab_widths(self) -> None:
-        if not hasattr(self, "detail_tabs"):
+    def _set_detail_page(self, index: int) -> None:
+        if not hasattr(self, "detail_stack"):
             return
-        self.detail_tabs.tabBar().updateGeometry()
-        self.detail_tabs.tabBar().update()
+        self.detail_stack.setCurrentIndex(index)
+
+    def _sync_detail_pages(self) -> None:
+        if not hasattr(self, "detail_container"):
+            return
+        self.detail_container.updateGeometry()
+        self.detail_button.updateGeometry()
+        self.audit_button.updateGeometry()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        self._sync_detail_tab_widths()
+        self._sync_detail_pages()

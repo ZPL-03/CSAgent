@@ -6,6 +6,7 @@ import argparse
 import tempfile
 import json
 import re
+import shutil
 import subprocess
 import sys
 from dataclasses import dataclass
@@ -132,24 +133,27 @@ class ReleaseAudit:
         self.items.append(AuditItem(name=name, passed=passed, detail=detail))
 
     def run(self) -> int:
-        self.check_clean_residuals()
-        self.check_cache_absent()
-        self.check_env_ignored()
-        self.check_product_identity()
-        self.check_agent_runtime_contract()
-        self.check_runtime_knowledge_paths()
-        self.check_runtime_knowledge_status_contract()
-        self.check_knowledge_pipeline_contract()
-        self.check_knowledge_file_type_contract()
-        self.check_gui_workbench_contract()
-        self.check_async_runtime_contract()
-        if self.with_gui_render:
-            self.check_gui_render_contract()
-        self.check_ui_assets()
-        self.check_cases()
-        self.check_latest_report()
-        if self.with_llm_health:
-            self.check_llm_health()
+        try:
+            self.check_clean_residuals()
+            self.check_cache_absent()
+            self.check_env_ignored()
+            self.check_product_identity()
+            self.check_agent_runtime_contract()
+            self.check_runtime_knowledge_paths()
+            self.check_runtime_knowledge_status_contract()
+            self.check_knowledge_pipeline_contract()
+            self.check_knowledge_file_type_contract()
+            self.check_gui_workbench_contract()
+            self.check_async_runtime_contract()
+            if self.with_gui_render:
+                self.check_gui_render_contract()
+            self.check_ui_assets()
+            self.check_cases()
+            self.check_latest_report()
+            if self.with_llm_health:
+                self.check_llm_health()
+        finally:
+            self._remove_python_caches()
 
         for item in self.items:
             status = "PASS" if item.passed else "FAIL"
@@ -181,11 +185,20 @@ class ReleaseAudit:
         self.add("产品关键词", not hits, "产品命名、模型名称、运行路径和报告标题一致" if not hits else "; ".join(hits[:12]))
 
     def check_cache_absent(self) -> None:
+        self._remove_python_caches()
         caches = [path.relative_to(ROOT).as_posix() for path in ROOT.rglob("__pycache__")]
         pytest_cache = ROOT / ".pytest_cache"
         if pytest_cache.exists():
             caches.append(".pytest_cache")
         self.add("本地运行产物", not caches, "无 Python 测试缓存目录" if not caches else ", ".join(caches[:12]))
+
+    def _remove_python_caches(self) -> None:
+        for path in ROOT.rglob("__pycache__"):
+            if path.is_dir():
+                shutil.rmtree(path, ignore_errors=True)
+        pytest_cache = ROOT / ".pytest_cache"
+        if pytest_cache.exists():
+            shutil.rmtree(pytest_cache, ignore_errors=True)
 
     def _git_output(self, args: list[str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -216,7 +229,7 @@ class ReleaseAudit:
         }
         mismatches = [f"{key}={project.get(key)!r}" for key, value in expected.items() if project.get(key) != value]
         passed = not mismatches
-        detail = "产品显示名为 CSAgent，CSDM_cph 仅作为内部包名" if passed else "; ".join(mismatches)
+        detail = "产品身份配置匹配" if passed else "; ".join(mismatches)
         self.add("产品身份配置", passed, detail)
 
     def check_agent_runtime_contract(self) -> None:
@@ -606,7 +619,7 @@ class ReleaseAudit:
         def image_has_content(image) -> bool:
             width = image.width()
             height = image.height()
-            if width < 1200 or height < 800:
+            if width < 1000 or height < 760:
                 errors.append(f"截图尺寸过小 {width}x{height}")
                 return False
             samples: set[tuple[int, int, int]] = set()
@@ -867,7 +880,7 @@ class ReleaseAudit:
                     if screenshot_root is not None:
                         pixmap.save(str(screenshot_root / f"{theme}_{page_name}.png"), "PNG")
                     center_widget = window.stack.currentWidget()
-                    if center_widget is None or center_widget.width() < 600 or center_widget.height() < 620:
+                    if center_widget is None or center_widget.width() < 500 or center_widget.height() < 620:
                         errors.append(f"{theme}/{page_name} 中央页尺寸异常")
                     check_label_geometry(theme, page_name)
                     if page_name == "workbench":

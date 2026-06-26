@@ -92,6 +92,9 @@ def _attach_deterministic_downstream(orchestrator: OrchestratorAgent, output_dir
     """把 FEM 和知识回流替换为可审计的快速验收适配器，报告阶段仍使用正式报告智能体。"""
 
     output_dir.mkdir(parents=True, exist_ok=True)
+    if hasattr(orchestrator, "candidate_gen") and hasattr(orchestrator.candidate_gen, "case_retriever"):
+        orchestrator.candidate_gen.case_retriever.use_vector_index = False
+        orchestrator.candidate_gen.case_retriever._case_memory_failed = True
 
     def prepare_candidate_for_fem(task: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
         next_index = len(getattr(prepare_candidate_for_fem, "_seen", [])) + 1

@@ -124,9 +124,29 @@ class RAGEngine:
 
     def _build_sentence_transformer(self, sentence_transformer_cls):
         kwargs = self._sentence_transformer_kwargs(sentence_transformer_cls)
-        if not self.local_files_only or "local_files_only" in kwargs:
-            return sentence_transformer_cls(self.embedding_model_name, **kwargs)
+        force_offline_env = self.local_files_only and "local_files_only" not in kwargs
+        try:
+            return self._call_sentence_transformer(sentence_transformer_cls, kwargs, force_offline_env=force_offline_env)
+        except TypeError as exc:
+            if "local_files_only" not in str(exc) or "local_files_only" not in kwargs:
+                raise
+            retry_kwargs = dict(kwargs)
+            retry_kwargs.pop("local_files_only", None)
+            return self._call_sentence_transformer(
+                sentence_transformer_cls,
+                retry_kwargs,
+                force_offline_env=self.local_files_only,
+            )
 
+    def _call_sentence_transformer(
+        self,
+        sentence_transformer_cls,
+        kwargs: Dict[str, Any],
+        *,
+        force_offline_env: bool = False,
+    ):
+        if not force_offline_env:
+            return sentence_transformer_cls(self.embedding_model_name, **kwargs)
         previous_transformers_offline = os.environ.get("TRANSFORMERS_OFFLINE")
         previous_hf_offline = os.environ.get("HF_HUB_OFFLINE")
         os.environ["TRANSFORMERS_OFFLINE"] = "1"

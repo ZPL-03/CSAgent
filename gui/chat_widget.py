@@ -29,8 +29,8 @@ class ChatWidget(QWidget):
         self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.content = QWidget()
         self.content_layout = QVBoxLayout(self.content)
-        self.content_layout.setContentsMargins(18, 6, 18, 6)
-        self.content_layout.setSpacing(6)
+        self.content_layout.setContentsMargins(16, 3, 16, 3)
+        self.content_layout.setSpacing(3)
         self.scroll_area.setWidget(self.content)
 
         root_layout = QVBoxLayout(self)
@@ -172,7 +172,8 @@ class ChatWidget(QWidget):
             return
         self._scroll_pending = True
         QTimer.singleShot(0, self._scroll_to_bottom)
-        QTimer.singleShot(35, self._scroll_to_bottom)
+        QTimer.singleShot(45, self._scroll_to_bottom)
+        QTimer.singleShot(120, self._scroll_to_bottom)
 
     def _label(self, text: str, color: str, size: int = 13, bold: bool = False) -> QLabel:
         label = QLabel(text)
@@ -199,47 +200,31 @@ class ChatWidget(QWidget):
         return QFontMetrics(self._text_font(size, bold))
 
     def _responsive_width(self, max_width: int, min_width: int) -> tuple[int, int]:
-        viewport_width = max(
-            self.scroll_area.viewport().width(),
-            self.scroll_area.width(),
-            self.content.width(),
-            self.width(),
-        )
+        viewport_width = self.scroll_area.viewport().width() or self.scroll_area.width() or self.width()
         if viewport_width <= 0:
             viewport_width = self.width()
-        available = max(320, viewport_width - 48)
-        conversational_cap = max(420, int(viewport_width * 0.76))
+        available = max(260, viewport_width - 52)
+        conversational_cap = max(320, int(viewport_width * 0.78))
         available = min(available, conversational_cap)
         target_max = min(max_width, available)
         target_min = min(max(min_width, 36), target_max)
         return target_max, target_min
 
-    def _wrapped_line_count(self, text: str, content_width: int) -> int:
-        metrics = self._text_metrics(13)
-        rect = metrics.boundingRect(
-            QRect(0, 0, max(24, content_width), 4000),
-            Qt.TextFlag.TextWordWrap,
-            str(text),
-        )
-        return max(1, round(rect.height() / max(1, metrics.lineSpacing())))
-
-    def _content_width(self, text: str, target_max: int, target_min: int) -> int:
-        metrics = self._text_metrics(13)
-        value = str(text)
-        line_widths = [metrics.horizontalAdvance(line.rstrip()) for line in value.splitlines() if line.strip()]
-        raw_natural = max(line_widths, default=0) + 16
-        if raw_natural >= target_max:
-            return target_max
-        return max(target_min, raw_natural)
-
-    def _wrapped_text_height(self, text: str, width: int) -> int:
+    def _text_rect(self, text: str, width: int) -> QRect:
         metrics = self._text_metrics(13)
         rect = metrics.boundingRect(
             QRect(0, 0, max(24, width), 4000),
-            Qt.TextFlag.TextWordWrap,
+            Qt.TextFlag.TextWordWrap | Qt.TextFlag.TextExpandTabs,
             str(text),
         )
-        return max(metrics.height(), rect.height())
+        return rect
+
+    def _content_width(self, text: str, target_max: int, target_min: int) -> int:
+        metrics = self._text_metrics(13)
+        lines = [line.rstrip() for line in str(text).splitlines()] or [""]
+        horizontal_padding = 10
+        natural = max((metrics.horizontalAdvance(line) for line in lines), default=0) + horizontal_padding
+        return max(target_min, min(target_max, natural))
 
     def _bubble(
         self,
@@ -261,18 +246,21 @@ class ChatWidget(QWidget):
             f"QFrame#chatBubble {{ background:{bg}; border:1px solid {border}; border-radius:14px; }}"
         )
         layout = QVBoxLayout(frame)
-        horizontal_padding = 14
-        vertical_padding = 10
-        layout.setContentsMargins(7, 4, 7, 4)
+        left_pad = 5
+        right_pad = 5
+        top_pad = 1
+        bottom_pad = 1
+        horizontal_padding = left_pad + right_pad
+        layout.setContentsMargins(left_pad, top_pad, right_pad, bottom_pad)
         layout.setSpacing(0)
         text_label = self._label(text, fg, 13)
         text_width = max(24, bubble_width - horizontal_padding)
         text_label.setFixedWidth(text_width)
-        text_height = self._wrapped_text_height(text, text_width)
-        text_label.setFixedHeight(text_height + 2)
+        text_height = max(self._text_metrics(13).height(), self._text_rect(text, text_width).height() + 3)
+        text_label.setMinimumHeight(text_height)
         text_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
         layout.addWidget(text_label)
-        frame.setFixedHeight(max(28, text_height + vertical_padding))
+        frame.setMinimumHeight(max(24, text_height + top_pad + bottom_pad + 2))
         return frame
 
     def _avatar_label(self, text: str, bg: str, fg: str) -> QLabel:
@@ -291,14 +279,15 @@ class ChatWidget(QWidget):
         row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         row_layout = QHBoxLayout(row)
         row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(10)
+        row_layout.setSpacing(8)
 
         if role == "user":
             row_layout.addStretch(1)
             bubble = self._bubble(message, palette["user_bg"], palette["user_bg"], palette["user_text"], 1120, 44, fit_content=True)
             row_layout.addWidget(bubble)
-            row_layout.addWidget(self._avatar_label("U", palette["user_bg"], palette["user_text"]), 0, Qt.AlignmentFlag.AlignTop)
-            row.setMinimumHeight(bubble.height() + 4)
+            avatar = self._avatar_label("U", palette["user_bg"], palette["user_text"])
+            row_layout.addWidget(avatar, 0, Qt.AlignmentFlag.AlignTop)
+            row.setMinimumHeight(max(avatar.sizeHint().height(), bubble.sizeHint().height()) + 2)
             return row
 
         if role == "system":
@@ -314,13 +303,13 @@ class ChatWidget(QWidget):
         column.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         column_layout = QVBoxLayout(column)
         column_layout.setContentsMargins(0, 0, 0, 0)
-        column_layout.setSpacing(3)
+        column_layout.setSpacing(1)
         sender_label = self._label(sender, fg, 12, True)
         bubble = self._bubble(message, bg, border, fg, 1120, 44, fit_content=True)
         column_layout.addWidget(sender_label)
         column_layout.addWidget(bubble)
         row_layout.addWidget(column, 1)
-        row_height = max(avatar.height(), sender_label.sizeHint().height() + 3 + bubble.height()) + 3
+        row_height = max(avatar.sizeHint().height(), sender_label.sizeHint().height() + 1 + bubble.sizeHint().height()) + 2
         row.setMinimumHeight(row_height)
         return row
 
@@ -388,6 +377,7 @@ class ChatWidget(QWidget):
     def _render_messages(self) -> None:
         self._last_render_width = self.width()
         self._clear_layout()
+        follow_latest = self._should_follow_latest()
         if not self._messages:
             self.content_layout.addWidget(self._empty_widget(), 0, Qt.AlignmentFlag.AlignTop)
             self.content_layout.addStretch(1)
@@ -397,6 +387,8 @@ class ChatWidget(QWidget):
             self.content_layout.addWidget(self._message_widget(sender, message))
         self.content_layout.addStretch(1)
         self._sync_content_minimum_height()
+        if follow_latest:
+            self._queue_scroll_to_bottom()
 
     def _sync_content_minimum_height(self) -> None:
         margins = self.content_layout.contentsMargins()
@@ -415,9 +407,9 @@ class ChatWidget(QWidget):
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-        if abs(event.size().width() - self._last_render_width) >= 32 and not self._resize_render_pending:
+        if abs(event.size().width() - self._last_render_width) >= 48 and not self._resize_render_pending:
             self._resize_render_pending = True
-            QTimer.singleShot(60, self._render_after_resize)
+            QTimer.singleShot(120, self._render_after_resize)
 
     def _render_after_resize(self) -> None:
         self._resize_render_pending = False

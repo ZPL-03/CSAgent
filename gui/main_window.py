@@ -16,7 +16,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-UI_LAYOUT_VERSION = 13
+UI_LAYOUT_VERSION = 23
 
 from PyQt6 import sip
 from PyQt6.QtCore import QObject, QRectF, QSettings, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
@@ -396,7 +396,7 @@ class PipelineWorker(QObject):
 class CenterStackedWidget(QStackedWidget):
     """中心页面栈只向主窗口暴露可控的最小尺寸。"""
 
-    MAX_MINIMUM_WIDTH = 600
+    MAX_MINIMUM_WIDTH = 520
     MAX_MINIMUM_HEIGHT = 720
 
     def minimumSizeHint(self) -> QSize:
@@ -504,7 +504,7 @@ class MainWindow(QMainWindow):
             self.theme_selector.setCurrentIndex(current_theme_index)
 
         self.chat_widget = ChatWidget()
-        self.chat_widget.setMinimumHeight(220)
+        self.chat_widget.setMinimumHeight(210)
         self.chat_widget.set_empty_text(self.locale.text("chat.empty"))
         self._apply_chat_empty_state()
         self.status_label = QLabel(self.locale.text("status.waiting"))
@@ -519,9 +519,12 @@ class MainWindow(QMainWindow):
         self.generate_button = QPushButton(self.locale.text("button.start"))
         self.confirm_yes_button = QPushButton(self.locale.text("button.confirm"))
         self.confirm_no_button = QPushButton(self.locale.text("button.pause"))
-        self.generate_button.setFixedWidth(56)
-        self.confirm_yes_button.setFixedWidth(84)
-        self.confirm_no_button.setFixedWidth(100)
+        self.generate_button.setObjectName("sendButton")
+        self.confirm_yes_button.setObjectName("confirmButton")
+        self.confirm_no_button.setObjectName("confirmButton")
+        self.generate_button.setFixedWidth(50)
+        self.confirm_yes_button.setFixedWidth(74)
+        self.confirm_no_button.setFixedWidth(124)
         self.trace_button = QPushButton(self.locale.text("button.view_trace"))
         self.trace_button.setObjectName("traceLinkButton")
         self.trace_button.setMinimumWidth(132)
@@ -560,7 +563,7 @@ class MainWindow(QMainWindow):
         self.pending_card = QLabel(self.locale.text("metric.pending_zero"))
         self.pass_card = QLabel(self.locale.text("metric.pass", count=0))
         for metric_card in [self.stage_card, self.candidate_card, self.pending_card, self.pass_card]:
-            metric_card.setFixedHeight(64)
+            metric_card.setFixedHeight(40)
             metric_card.setWordWrap(True)
             metric_card.setTextFormat(Qt.TextFormat.RichText)
             metric_card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -611,7 +614,7 @@ class MainWindow(QMainWindow):
         self.run_audit_label.setWordWrap(True)
 
         self.workbench_candidate_widget = CandidateWidget(language=self.locale.language)
-        self.workbench_candidate_widget.setMinimumHeight(270)
+        self.workbench_candidate_widget.setMinimumHeight(320)
         self.knowledge_widget = KnowledgeWidget()
         self.knowledge_widget.refreshed.connect(self._refresh_knowledge_sidebar)
         self.result_trace_widget = ResultTraceWidget()
@@ -625,8 +628,8 @@ class MainWindow(QMainWindow):
             self.locale.text("live_view.empty"),
             language=self.locale.language,
         )
-        self.live_result_view.setMinimumHeight(210)
-        self.live_result_view.setMaximumHeight(260)
+        self.live_result_view.setMinimumHeight(164)
+        self.live_result_view.setMaximumHeight(224)
         self.log_widget.setMinimumHeight(128)
 
         self._build_layout()
@@ -694,8 +697,8 @@ class MainWindow(QMainWindow):
         self.input_action_layout = input_action_layout
 
         stats_layout = QGridLayout()
-        stats_layout.setHorizontalSpacing(10)
-        stats_layout.setVerticalSpacing(10)
+        stats_layout.setHorizontalSpacing(8)
+        stats_layout.setVerticalSpacing(8)
         stats_layout.addWidget(self.stage_card, 0, 0)
         stats_layout.addWidget(self.candidate_card, 0, 1)
         stats_layout.addWidget(self.pending_card, 1, 0)
@@ -704,14 +707,14 @@ class MainWindow(QMainWindow):
         stats_layout.setColumnMinimumWidth(1, 0)
         stats_layout.setColumnStretch(0, 1)
         stats_layout.setColumnStretch(1, 1)
-        stats_layout.setRowMinimumHeight(0, 64)
-        stats_layout.setRowMinimumHeight(1, 64)
+        stats_layout.setRowMinimumHeight(0, 40)
+        stats_layout.setRowMinimumHeight(1, 40)
         stats_layout.setRowStretch(0, 0)
         stats_layout.setRowStretch(1, 0)
 
         agent_layout = QVBoxLayout()
-        agent_layout.setContentsMargins(14, 14, 12, 10)
-        agent_layout.setSpacing(11)
+        agent_layout.setContentsMargins(14, 14, 12, 4)
+        agent_layout.setSpacing(9)
         agent_layout.addWidget(self.agent_header)
         for agent_name, description_key in self.AGENT_DESCRIPTIONS:
             card = AgentStatusCard()
@@ -726,7 +729,7 @@ class MainWindow(QMainWindow):
             agent_layout.addWidget(card)
 
         queue_layout = QVBoxLayout()
-        queue_layout.setContentsMargins(14, 8, 12, 14)
+        queue_layout.setContentsMargins(14, 2, 12, 14)
         queue_layout.setSpacing(10)
         queue_layout.addWidget(self.queue_header)
         queue_layout.addWidget(self.queue_progress)
@@ -754,7 +757,7 @@ class MainWindow(QMainWindow):
         workbench_splitter = QSplitter(Qt.Orientation.Vertical)
         workbench_splitter.addWidget(self.workbench_candidate_widget)
         workbench_splitter.addWidget(chat_panel)
-        workbench_splitter.setSizes([430, 455])
+        workbench_splitter.setSizes([455, 430])
         self.workbench_splitter = workbench_splitter
 
         workbench_page = QWidget()
@@ -764,7 +767,7 @@ class MainWindow(QMainWindow):
         workbench_layout.addWidget(workbench_splitter)
 
         right_layout = QVBoxLayout()
-        right_layout.setContentsMargins(12, 14, 12, 14)
+        right_layout.setContentsMargins(10, 14, 10, 14)
         right_layout.setSpacing(8)
         live_header_layout = QHBoxLayout()
         live_header_layout.setContentsMargins(0, 0, 0, 0)
@@ -819,12 +822,11 @@ class MainWindow(QMainWindow):
         workbench_left_content = QWidget()
         left_layout = QVBoxLayout(workbench_left_content)
         left_layout.setContentsMargins(0, 0, 0, 0)
-        left_layout.setSpacing(16)
+        left_layout.setSpacing(6)
         left_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         agent_widget = QWidget()
         agent_widget.setLayout(agent_layout)
-        agent_widget.setMinimumHeight(480)
-        agent_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        agent_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         queue_widget = QWidget()
         queue_widget.setLayout(queue_layout)
         queue_widget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
@@ -838,8 +840,8 @@ class MainWindow(QMainWindow):
         workbench_left_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         workbench_left_scroll.setWidget(workbench_left_content)
         workbench_left_layout.addWidget(workbench_left_scroll)
-        workbench_left.setMinimumWidth(248)
-        workbench_left.setMaximumWidth(286)
+        workbench_left.setMinimumWidth(236)
+        workbench_left.setMaximumWidth(280)
 
         knowledge_left = self._build_knowledge_left_page()
         monitor_left = self._build_monitor_left_page()
@@ -847,7 +849,7 @@ class MainWindow(QMainWindow):
 
         workbench_right_content = QWidget()
         workbench_right_content.setObjectName("resultRailContent")
-        workbench_right_content.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        workbench_right_content.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         workbench_right_content.setLayout(right_layout)
         workbench_right_scroll = QScrollArea()
         workbench_right_scroll.setObjectName("resultRail")
@@ -865,10 +867,10 @@ class MainWindow(QMainWindow):
         workbench_right_layout.setSpacing(0)
         workbench_right_layout.addWidget(workbench_right_scroll)
         workbench_right.setMinimumWidth(330)
-        workbench_right.setMaximumWidth(430)
+        workbench_right.setMaximumWidth(400)
 
         self.stack = CenterStackedWidget()
-        self.stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Ignored)
+        self.stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
         self.stack.addWidget(workbench_page)
         self.stack.addWidget(self.knowledge_widget)
         self.monitor_page = self._build_monitor_page()
@@ -877,22 +879,22 @@ class MainWindow(QMainWindow):
         self.stack.addWidget(self.settings_page)
 
         self.left_stack = QStackedWidget()
-        self.left_stack.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Ignored)
+        self.left_stack.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         self.left_stack.addWidget(workbench_left)
         self.left_stack.addWidget(knowledge_left)
         self.left_stack.addWidget(monitor_left)
         self.left_stack.addWidget(settings_left)
-        self.left_stack.setMinimumWidth(248)
-        self.left_stack.setMaximumWidth(286)
+        self.left_stack.setMinimumWidth(236)
+        self.left_stack.setMaximumWidth(280)
 
         self.right_stack = QStackedWidget()
-        self.right_stack.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Ignored)
+        self.right_stack.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Preferred)
         self.right_stack.addWidget(workbench_right)
         self.right_stack.addWidget(self._build_knowledge_right_page())
         self.right_stack.addWidget(self._build_monitor_right_page())
         self.right_stack.addWidget(self._build_settings_right_page())
         self.right_stack.setMinimumWidth(330)
-        self.right_stack.setMaximumWidth(430)
+        self.right_stack.setMaximumWidth(400)
 
         main_splitter = QSplitter(Qt.Orientation.Horizontal)
         main_splitter.setObjectName("mainShell")
@@ -903,7 +905,7 @@ class MainWindow(QMainWindow):
         main_splitter.setStretchFactor(0, 0)
         main_splitter.setStretchFactor(1, 1)
         main_splitter.setStretchFactor(2, 0)
-        main_splitter.setSizes([270, 980, 370])
+        main_splitter.setSizes([252, 760, 384])
         self.main_splitter = main_splitter
         self.setCentralWidget(main_splitter)
 
@@ -917,24 +919,34 @@ class MainWindow(QMainWindow):
         if total_width <= 0:
             return
 
-        target_left = min(286, max(248, int(total_width * 0.18)))
-        target_right = 370 if total_width >= 1180 else 340
-        minimum_center = 520
-        minimum_left = 232
-        minimum_right = 318
+        minimum_left = 210
+        maximum_left = 272
+        minimum_right = 330
+        maximum_right = 400
+        left_width = min(maximum_left, max(minimum_left, int(total_width * 0.165)))
+        right_width = min(maximum_right, max(minimum_right, int(total_width * 0.215)))
+        minimum_center = 580
 
-        available_for_sidebars = max(0, total_width - minimum_center)
-        if target_left + target_right > available_for_sidebars:
-            scale = available_for_sidebars / max(1, target_left + target_right)
-            left_width = max(minimum_left, int(target_left * scale))
-            right_width = max(minimum_right, available_for_sidebars - left_width)
-            if left_width + right_width > available_for_sidebars:
-                right_width = max(0, available_for_sidebars - left_width)
-        else:
-            left_width = target_left
-            right_width = target_right
+        if total_width < left_width + minimum_center + right_width:
+            overflow = left_width + minimum_center + right_width - total_width
+            left_reduce = min(max(0, left_width - 200), overflow)
+            left_width -= left_reduce
+            overflow -= left_reduce
+            right_reduce = min(max(0, right_width - 300), overflow)
+            right_width -= right_reduce
+            overflow -= right_reduce
+            if overflow > 0:
+                minimum_center = max(420, minimum_center - overflow)
 
+        center_width = max(minimum_center, total_width - left_width - right_width)
+        if left_width + center_width + right_width > total_width:
+            center_width = max(0, total_width - left_width - right_width)
+
+        left_width = max(200, min(maximum_left, left_width))
+        right_width = max(minimum_right, min(maximum_right, right_width))
         center_width = max(0, total_width - left_width - right_width)
+        self.left_stack.setMinimumWidth(left_width)
+        self.left_stack.setMaximumWidth(left_width)
         self.right_stack.setMinimumWidth(right_width)
         self.right_stack.setMaximumWidth(right_width)
         self.main_splitter.setSizes([left_width, center_width, right_width])
@@ -949,7 +961,7 @@ class MainWindow(QMainWindow):
         page = QWidget()
         page.setObjectName("agentRail")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(14, 14, 0, 14)
+        layout.setContentsMargins(14, 14, 8, 14)
         layout.setSpacing(9)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         header = QLabel(title)
@@ -957,7 +969,7 @@ class MainWindow(QMainWindow):
         layout.addWidget(header)
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 12, 0)
+        content_layout.setContentsMargins(0, 0, 6, 0)
         content_layout.setSpacing(9)
         content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
         for primary, secondary in cards:
@@ -965,14 +977,14 @@ class MainWindow(QMainWindow):
             card.setObjectName("agentCard")
             card.setWordWrap(True)
             card.setProperty("state", "waiting")
-            card.setMinimumHeight(56)
+            card.setMinimumHeight(58)
             card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             content_layout.addWidget(card)
         if footer:
             footer_label = QLabel(footer)
             footer_label.setObjectName("statusLabel")
             footer_label.setWordWrap(True)
-            footer_label.setMinimumHeight(58)
+            footer_label.setMinimumHeight(60)
             footer_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             content_layout.addWidget(footer_label)
         scroll = QScrollArea()
@@ -989,7 +1001,7 @@ class MainWindow(QMainWindow):
         page = QWidget()
         page.setObjectName("resultRail")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(14, 14, 0, 14)
+        layout.setContentsMargins(14, 14, 8, 14)
         layout.setSpacing(9)
         header = QLabel(title)
         header.setObjectName("sectionTitle")
@@ -1012,7 +1024,7 @@ class MainWindow(QMainWindow):
         page = QWidget()
         page.setObjectName("agentRail")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(14, 14, 0, 14)
+        layout.setContentsMargins(14, 14, 8, 14)
         layout.setSpacing(8)
 
         header = QLabel("知识库 · CORPUS")
@@ -1021,7 +1033,7 @@ class MainWindow(QMainWindow):
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 12, 0)
+        content_layout.setContentsMargins(0, 0, 6, 0)
         content_layout.setSpacing(8)
         content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
@@ -1038,7 +1050,7 @@ class MainWindow(QMainWindow):
             card.setObjectName("agentCard")
             card.setWordWrap(True)
             card.setProperty("state", "waiting")
-            card.setMinimumHeight(72)
+            card.setMinimumHeight(74)
             card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             content_layout.addWidget(card)
             self.knowledge_sidebar_labels[key] = card
@@ -1055,7 +1067,7 @@ class MainWindow(QMainWindow):
             card = QLabel(f"<b>{primary}</b><br>{secondary}")
             card.setObjectName("statusLabel")
             card.setWordWrap(True)
-            card.setMinimumHeight(50)
+            card.setMinimumHeight(52)
             card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             content_layout.addWidget(card)
 
@@ -1070,7 +1082,7 @@ class MainWindow(QMainWindow):
             card = QLabel(f"<b>{title}</b><br>{body}")
             card.setObjectName("statusLabel")
             card.setWordWrap(True)
-            card.setMinimumHeight(52)
+            card.setMinimumHeight(54)
             card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             content_layout.addWidget(card)
             self.knowledge_index_labels[key] = card
@@ -1172,7 +1184,7 @@ class MainWindow(QMainWindow):
         page = QWidget()
         page.setObjectName("agentRail")
         layout = QVBoxLayout(page)
-        layout.setContentsMargins(14, 14, 0, 14)
+        layout.setContentsMargins(14, 14, 8, 14)
         layout.setSpacing(9)
         layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
@@ -1182,7 +1194,7 @@ class MainWindow(QMainWindow):
 
         content = QWidget()
         content_layout = QVBoxLayout(content)
-        content_layout.setContentsMargins(0, 0, 12, 0)
+        content_layout.setContentsMargins(0, 0, 6, 0)
         content_layout.setSpacing(9)
         content_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
@@ -1199,7 +1211,7 @@ class MainWindow(QMainWindow):
             card.setObjectName("agentCard")
             card.setWordWrap(True)
             card.setProperty("state", "waiting")
-            card.setMinimumHeight(78)
+            card.setMinimumHeight(62)
             card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
             content_layout.addWidget(card)
             self.settings_sidebar_labels[key] = card
@@ -1207,7 +1219,7 @@ class MainWindow(QMainWindow):
         footer = QLabel("运行事实源为本项目 YAML 配置、.env 环境变量和本地运行数据；GUI 不显示密钥正文。")
         footer.setObjectName("statusLabel")
         footer.setWordWrap(True)
-        footer.setMinimumHeight(62)
+        footer.setMinimumHeight(58)
         footer.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         content_layout.addWidget(footer)
         scroll = QScrollArea()
@@ -1481,7 +1493,7 @@ class MainWindow(QMainWindow):
             self._settings_summary_card(
                 "RAG / KG",
                 f"top_k {knowledge.get('top_k', 5)} · KG {knowledge.get('kg_top_k', 8)}",
-                f"chunk {knowledge.get('chunk_token_size', 512)} · ov {knowledge.get('chunk_overlap_tokens', 64)}",
+                f"chunk {knowledge.get('chunk_token_size', 512)} / overlap {knowledge.get('chunk_overlap_tokens', 64)}",
             ),
         ]
         for index, card in enumerate(overview_cards):
@@ -1698,10 +1710,10 @@ class MainWindow(QMainWindow):
         card = QFrame()
         card.setObjectName("configCard")
         card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
-        card.setMinimumHeight(86)
-        card.setMaximumHeight(92)
+        card.setMinimumHeight(96)
+        card.setMaximumHeight(104)
         layout = QVBoxLayout(card)
-        layout.setContentsMargins(12, 8, 12, 8)
+        layout.setContentsMargins(12, 7, 12, 7)
         layout.setSpacing(3)
         title_label = QLabel(title)
         title_label.setObjectName("configKey")
@@ -2053,12 +2065,15 @@ class MainWindow(QMainWindow):
 
     def _fit_input_action_buttons(self) -> None:
         for button, minimum_width in [
-            (self.generate_button, 56),
-            (self.confirm_yes_button, 84),
-            (self.confirm_no_button, 100),
+            (self.generate_button, 42),
+            (self.confirm_yes_button, 76),
+            (self.confirm_no_button, 96),
         ]:
             text_width = button.fontMetrics().horizontalAdvance(button.text())
-            button.setFixedWidth(max(minimum_width, text_width + 24))
+            width = max(minimum_width, text_width + 22)
+            button.setMinimumWidth(0)
+            button.setMaximumWidth(16777215)
+            button.setFixedWidth(width)
 
     def _apply_styles(self) -> None:
         for card in [self.stage_card, self.candidate_card, self.pending_card, self.pass_card]:
@@ -2151,22 +2166,26 @@ class MainWindow(QMainWindow):
     def _target_window_size(self) -> QSize:
         screen = QApplication.primaryScreen()
         if screen is None:
-            return QSize(1280, 960)
+            return QSize(1280, 900)
         available = screen.availableGeometry()
-        max_width = max(320, available.width() - 32)
-        max_height = max(320, available.height() - 40)
-        if max_width >= 1360 and max_height >= 1020:
-            return QSize(1360, 1020)
-        if max_width >= 1280 and max_height >= 960:
-            return QSize(1280, 960)
-        height = min(max_height, max(560, int(max_width * 3 / 4)))
-        width = min(max_width, int(height * 4 / 3))
-        if width < 960 and max_width >= 960:
-            width = 960
-            height = min(max_height, int(width * 3 / 4))
+        max_width = max(640, available.width() - 36)
+        max_height = max(560, available.height() - 56)
+        if max_width >= 1360 and max_height >= 900:
+            return QSize(1360, min(920, max_height))
+        if max_width >= 1280 and max_height >= 840:
+            return QSize(1280, min(900, max_height))
+        width = min(max_width, max(900, int(max_height * 1.48)))
+        height = min(max_height, max(620, int(width * 0.70)))
+        if height > max_height:
+            height = max_height
+            width = min(max_width, max(800, int(height * 1.45)))
         return QSize(width, height)
 
     def _resize_to_available_work_area(self) -> None:
+        screen = QApplication.primaryScreen()
+        if screen is not None:
+            available = screen.availableGeometry()
+            self.setMaximumSize(available.width(), available.height())
         self.resize(self._target_window_size())
 
     def _ensure_window_within_work_area(self, *, clamp_to_target: bool = False) -> None:
@@ -2174,14 +2193,14 @@ class MainWindow(QMainWindow):
         if screen is None:
             return
         available = screen.availableGeometry()
+        self.setMaximumSize(available.width(), available.height())
+        if self.isMaximized() or self.isFullScreen():
+            return
         target = self._target_window_size()
         if clamp_to_target:
             aspect = self.width() / max(1, self.height())
             target_aspect = target.width() / max(1, target.height())
-            abnormal_aspect = aspect > max(1.72, target_aspect + 0.18)
-            oversized = self.width() > target.width() or self.height() > target.height()
-            if self.isMaximized() and (abnormal_aspect or oversized):
-                self.setWindowState(self.windowState() & ~Qt.WindowState.WindowMaximized)
+            abnormal_aspect = aspect > max(1.62, target_aspect + 0.10)
             if abnormal_aspect:
                 width = min(target.width(), available.width())
                 height = min(target.height(), available.height())
@@ -2247,7 +2266,9 @@ class MainWindow(QMainWindow):
             return False
         aspect = width / max(1, height)
         target_aspect = target.width() / max(1, target.height())
-        return aspect <= max(1.72, target_aspect + 0.18)
+        if width > min(available.width(), target.width() + 160) and not self.isMaximized():
+            return False
+        return aspect <= max(1.62, target_aspect + 0.10)
 
     def _connect_signals(self) -> None:
         self.generate_button.clicked.connect(self._start_conversation)
@@ -2445,7 +2466,7 @@ class MainWindow(QMainWindow):
         candidate_pool_target = requested_candidate_pool_size(self.session.task) if self.session.task else 0
         requested_top_k = requested_screen_top_k(self.session.task) if self.session.task else 0
         stage_display = self._display_stage(self.session.stage or "idle")
-        pending_label_zh = "待初筛" if self.session.stage == "awaiting_screen_confirmation" else "待 FEM 校核"
+        pending_label_zh = "待初筛" if self.session.stage == "awaiting_screen_confirmation" else "待 FEM"
         pending_label_en = "Pending Screening" if self.session.stage == "awaiting_screen_confirmation" else "Pending FEM"
         def metric_html(label: str, value: str) -> str:
             light_theme = resolve_theme(self.locale.theme) == "light"
@@ -2454,7 +2475,7 @@ class MainWindow(QMainWindow):
             return (
                 f"<span style='color:{label_color};font-size:12px;'>"
                 f"{label}</span><br>"
-                f"<span style='color:{value_color};font-size:15px;font-weight:800;'>"
+                f"<span style='color:{value_color};font-size:12px;font-weight:800;'>"
                 f"{value}</span>"
             )
 
@@ -2493,15 +2514,15 @@ class MainWindow(QMainWindow):
             "parsing": "任务解析中",
             "generate_candidates": "候选生成中",
             "candidate_generation_started": "候选生成中",
-            "awaiting_screen_confirmation": "等待初筛确认",
+            "awaiting_screen_confirmation": "初筛确认",
             "screen_candidates": "代理初筛中",
             "screen_candidates_failed": "初筛失败",
-            "awaiting_fem_confirmation": "等待FEM确认",
+            "awaiting_fem_confirmation": "FEM确认",
             "evaluate_candidates": "有限元校核中",
             "evaluate_candidates_failed": "有限元失败",
             "persist_knowledge": "知识回流中",
             "persist_knowledge_failed": "知识回流失败",
-            "awaiting_report_confirmation": "等待报告确认",
+            "awaiting_report_confirmation": "报告确认",
             "generate_report": "报告生成中",
             "generate_report_failed": "报告失败",
             "completed": "已完成",
@@ -2902,7 +2923,7 @@ class MainWindow(QMainWindow):
             self.session.stage,
             self.session.pending_confirmation,
         )
-        self._queue_knowledge_refresh(self.session.task, load_evidence=False)
+        self._refresh_knowledge_for_current_task(load_evidence=False)
         self._refresh_live_view()
         self._update_overview_cards()
         self._sync_status_label_with_session()
@@ -2920,7 +2941,7 @@ class MainWindow(QMainWindow):
             self.session.stage,
             self.session.pending_confirmation,
         )
-        self._queue_knowledge_refresh(self.session.task, load_evidence=False)
+        self._refresh_knowledge_for_current_task(load_evidence=False)
         self._refresh_live_view()
         self._update_overview_cards()
         self._sync_status_label_with_session()
@@ -2935,7 +2956,7 @@ class MainWindow(QMainWindow):
         if self._live_refresh_pending:
             return
         self._live_refresh_pending = True
-        QTimer.singleShot(45, self._flush_live_view)
+        QTimer.singleShot(90, self._flush_live_view)
 
     def _flush_live_view(self) -> None:
         self._live_refresh_pending = False
@@ -3055,6 +3076,13 @@ class MainWindow(QMainWindow):
     def _refresh_knowledge_view(self) -> None:
         self._queue_knowledge_refresh(self.session.task, load_evidence=True, force=True, delay_ms=0)
         self.status_label.setText(self.locale.text("status.knowledge_refreshed"))
+
+    def _refresh_knowledge_for_current_task(self, load_evidence: bool = False) -> None:
+        task_key = self._knowledge_task_key(self.session.task)
+        if load_evidence or task_key != self._last_knowledge_refresh_key:
+            self._queue_knowledge_refresh(self.session.task, load_evidence=load_evidence, force=load_evidence)
+        else:
+            self._refresh_knowledge_sidebar()
 
     def _knowledge_task_key(self, task: dict | None) -> str:
         if not task:

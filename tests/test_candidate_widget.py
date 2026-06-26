@@ -67,7 +67,7 @@ def test_candidate_widget_renders_generation_audit() -> None:
         html = widget.audit_browser.toHtml()
         detail_html = widget.detail_browser.toHtml()
 
-        assert "来源审计" in widget.summary_label.text()
+        assert "来源构成" in widget.summary_label.text()
         assert "候选来源与去重审计" in html
         assert "候选来源与去重审计" not in detail_html
         assert "初始配额" in html
@@ -76,7 +76,7 @@ def test_candidate_widget_renders_generation_audit() -> None:
         assert "DOE 补足" in html
         assert widget.total_metric.text().endswith("1")
         assert widget.llm_metric.text().endswith("1")
-        assert widget.detail_tabs.count() == 2
+        assert widget.detail_stack.count() == 2
         assert selected and selected[-1]["candidate_id"] == "TMP_1"
     finally:
         widget.close()
@@ -90,10 +90,10 @@ def test_candidate_widget_metrics_span_above_table_and_detail() -> None:
         assert widget.layout().itemAt(0).widget() is widget.metric_widget
         assert widget.layout().itemAt(1).widget() is widget.splitter
         assert widget.splitter.widget(0) is widget.table
-        assert widget.splitter.widget(1) is widget.detail_tabs
+        assert widget.splitter.widget(1) is widget.detail_container
         assert widget.metric_widget.maximumHeight() <= 64
         assert widget.metric_widget.isHidden() is False
-        assert widget.detail_tabs.isHidden() is False
+        assert widget.detail_container.isHidden() is False
         assert widget.table.isHidden() is False
         assert widget.table.rowCount() == 0
         assert widget.total_metric.text().endswith("0")
@@ -102,7 +102,7 @@ def test_candidate_widget_metrics_span_above_table_and_detail() -> None:
 
         widget.update_candidates([_candidate()])
         assert widget.metric_widget.isHidden() is False
-        assert widget.detail_tabs.isHidden() is False
+        assert widget.detail_container.isHidden() is False
         assert widget.total_metric.maximumHeight() == 52
         assert widget.table.rowCount() == 1
     finally:

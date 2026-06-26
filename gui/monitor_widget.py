@@ -381,6 +381,7 @@ class MonitorDashboardWidget(QWidget):
         title_label.setObjectName("configSubtitle")
         value_label = QLabel(value)
         value_label.setObjectName("configTitle")
+        value_label.setWordWrap(True)
         detail_label = QLabel("-")
         detail_label.setObjectName("configSubtitle")
         detail_label.setWordWrap(True)

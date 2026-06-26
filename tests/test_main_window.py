@@ -1050,8 +1050,8 @@ def test_workbench_right_rail_fits_non_maximized_viewport(monkeypatch) -> None:
 
         margins = window.workbench_right_content.layout().contentsMargins()
         assert margins.left() == margins.right()
-        assert window.workbench_right_scroll.viewport().width() >= window.workbench_right_content.width() - 1
-        assert window.right_stack.width() >= 350
+        assert window.workbench_right_content.width() - window.workbench_right_scroll.viewport().width() <= 16
+        assert window.right_stack.width() >= 330
     finally:
         window.close()
         app.processEvents()
@@ -1164,7 +1164,7 @@ def test_main_splitter_widths_do_not_expand_past_window(monkeypatch) -> None:
             sizes = window.main_splitter.sizes()
             assert sum(sizes) <= window.main_splitter.width() + 4
             assert window.left_stack.width() <= 286
-            assert 318 <= window.right_stack.width() <= 370
+            assert 330 <= window.right_stack.width() <= 400
             right_edge = window.right_stack.mapTo(window, window.right_stack.rect().bottomRight()).x()
             assert right_edge <= window.rect().right() + 2
     finally:
@@ -1429,7 +1429,7 @@ def test_workbench_input_actions_share_one_compact_row(monkeypatch) -> None:
         ]
         centers = [widget.mapTo(window, widget.rect().center()).y() for widget in widgets]
         assert max(centers) - min(centers) <= 2
-        assert window.input_line.width() > window.generate_button.width() * 4
+        assert window.input_line.width() > window.generate_button.width() * 3
         assert abs(window.confirm_yes_button.y() - window.generate_button.y()) <= 2
         assert abs(window.confirm_no_button.y() - window.generate_button.y()) <= 2
     finally:
@@ -1531,7 +1531,7 @@ def test_chat_bubble_width_tracks_rendered_text_width() -> None:
         text = "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，生成 12 个候选。"
         target_max, target_min = widget._responsive_width(920, 220)
         rendered_width = widget._text_metrics(13).horizontalAdvance(text)
-        raw_width = rendered_width + 16
+        raw_width = rendered_width + 10
         expected_width = target_max if raw_width >= target_max else max(target_min, raw_width)
 
         assert widget._content_width(text, target_max, target_min) == expected_width

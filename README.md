@@ -8,8 +8,6 @@ CSAgent 多智能体智能设计平台面向复合材料外压圆柱耐压壳智
 
 自然语言需求 -> 用户事实抽取 -> LLM 候选提案 -> 案例迁移 -> DOE 采样 -> PBIPF 公式初筛 -> ABAQUS 校核 -> 案例回流 -> 设计报告输出。
 
-`config/app_config.yaml` 中的产品显示名为 `CSAgent 多智能体智能设计平台`，`CSDM_cph` 仅作为本地目录、包名和环境变量前缀使用，不作为界面、报告或运行记录中的用户可见产品名。
-
 主对话流程接入 `workflow/` 多智能体运行时。该运行时使用 LangGraph 状态图组织任务解析、候选生成、代理初筛、有限元校核、知识回流和报告导出，并通过 SQLite 记录运行事件、工具调用和状态快照。PyQt6 工作台支持流程恢复、智能体运行追踪和可视化状态展示。
 
 ## 设计对象
@@ -131,6 +129,6 @@ D:\anaconda3\envs\AGENT\python.exe scripts\build_initial_cases.py --reset --coun
 
 ## 有限元说明
 
-自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出。流程先执行单位外压线性屈曲分析并提取一阶模态云图，再以一阶模态缺陷进入 Static Riks 后屈曲分析，极限压力取最大 LPF 与基准外压的乘积。GUI 的工作台候选池、右侧实时视口和监控页 FEM 指标区读取候选几何、有限元结果和 `visualization_json`；右侧实时视口优先使用 `pyvistaqt` 显示可旋转、缩放、平移的三维几何模型和模态云图，没有候选或结果时显示参考耐压壳模型。交互式 OpenGL 视图不可用、`QT_QPA_PLATFORM=offscreen`、`CSDM_cph_DISABLE_INTERACTIVE_3D=1` 或离线审计环境中，界面使用与当前主题一致的 Matplotlib 静态工程预览显示参考几何、候选几何或一阶模态云图。离线图注跟随界面语言，并在详情中展示模态数据路径、点面数量和可用性状态。
+自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出。流程先执行单位外压线性屈曲分析并提取一阶模态云图，再以一阶模态缺陷进入 Static Riks 后屈曲分析，极限压力取最大 LPF 与基准外压的乘积。GUI 的工作台候选池、右侧实时视口和监控页 FEM 指标区读取候选几何、有限元结果和 `visualization_json`；右侧实时视口初始显示等待提示，候选生成后显示可旋转、缩放、平移的三维几何模型，有限元校核完成后可在几何模型和一阶模态云图之间切换。交互式 OpenGL 视图不可用时，界面使用与当前主题一致的 Matplotlib 静态工程预览显示候选几何或一阶模态云图。离线图注跟随界面语言，并在详情中展示模态数据路径、点面数量和可用性状态。
 
-`reference/wangge.py` 与 `reference/zhangusdfld.for` 只作为人工建模和用户子程序参考，不属于主流程必需资产。`reference/zhangusdfld.for` 通过 `config/app_config.yaml` 的 `abaqus.use_user_subroutine` 显式启用，默认关闭以避免本机用户子程序编译环境阻断主流程。未找到 ABAQUS 命令时返回带诊断信息的失败结果，不伪造有限元通过。
+用户子程序通过 `config/app_config.yaml` 的 `abaqus.user_subroutine` 和 `abaqus.use_user_subroutine` 显式配置；默认关闭以避免本机编译环境阻断主流程。未找到 ABAQUS 命令时返回带诊断信息的失败结果，不伪造有限元通过。

@@ -279,6 +279,50 @@ class InteractivePlotWidget(QWidget):
         except (TypeError, ValueError):
             return None
 
+    def _projected_parallel_scale(
+        self,
+        bounds: tuple[float, float, float, float, float, float],
+        direction: tuple[float, float, float],
+    ) -> float:
+        xmin, xmax, ymin, ymax, zmin, zmax = bounds
+        corners = [
+            (x, y, z)
+            for x in (xmin, xmax)
+            for y in (ymin, ymax)
+            for z in (zmin, zmax)
+        ]
+
+        def normalize(vector: tuple[float, float, float]) -> tuple[float, float, float]:
+            norm = math.sqrt(sum(value * value for value in vector))
+            if norm <= 1e-9:
+                return (1.0, 0.0, 0.0)
+            return tuple(value / norm for value in vector)
+
+        def cross(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
+            return (
+                a[1] * b[2] - a[2] * b[1],
+                a[2] * b[0] - a[0] * b[2],
+                a[0] * b[1] - a[1] * b[0],
+            )
+
+        view_dir = normalize(direction)
+        view_up = (0.0, 0.0, 1.0)
+        right = normalize(cross(view_dir, view_up))
+        true_up = normalize(cross(right, view_dir))
+        projected_x = [corner[0] * right[0] + corner[1] * right[1] + corner[2] * right[2] for corner in corners]
+        projected_y = [corner[0] * true_up[0] + corner[1] * true_up[1] + corner[2] * true_up[2] for corner in corners]
+        projected_width = max(projected_x) - min(projected_x)
+        projected_height = max(projected_y) - min(projected_y)
+
+        widget_width = max(1, self.width())
+        widget_height = max(1, self.height())
+        aspect = max(0.55, min(2.6, widget_width / widget_height))
+        scale = max(projected_height * 0.5, projected_width / (2.0 * aspect)) * 1.12
+        dx = max(xmax - xmin, 1.0)
+        dy = max(ymax - ymin, 1.0)
+        dz = max(zmax - zmin, 1.0)
+        return max(scale, dz * 0.62, min(dx, dy) * 0.32)
+
     def _apply_default_camera(self, zoom: float, bounds: tuple[float, float, float, float, float, float] | None = None) -> None:
         assert self.plotter is not None
         bounds = bounds or self._scene_bounds
@@ -311,7 +355,7 @@ class InteractivePlotWidget(QWidget):
         camera.SetViewUp(0.0, 0.0, 1.0)
         try:
             camera.ParallelProjectionOn()
-            camera.SetParallelScale(max(diagonal * 0.41, dz * 0.88, dy * 0.74))
+            camera.SetParallelScale(self._projected_parallel_scale(bounds, direction))
         except Exception:
             pass
         try:

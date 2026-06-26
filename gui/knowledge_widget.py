@@ -386,7 +386,7 @@ class KnowledgeGraphView(QWidget):
                     if target:
                         neighbor_names.add(target)
             sorted_nodes = [item for item in sorted_nodes if item[0] in neighbor_names]
-        max_nodes = 56
+        max_nodes = 80
         visible_nodes = sorted_nodes[:max_nodes]
         visible_names = {name for name, _ in visible_nodes}
         visible_relations = [
@@ -403,7 +403,7 @@ class KnowledgeGraphView(QWidget):
                 str(relation.get("relation") or ""),
             )
         )
-        relation_limit = 120 if self.filter_text or self.active_node_types or self.active_relation_types else 28
+        relation_limit = 140 if self.filter_text or self.active_node_types or self.active_relation_types else 28
         visible_relations = visible_relations[:relation_limit]
         if visible_relations:
             connected_names: set[str] = set()
@@ -536,9 +536,9 @@ class KnowledgeGraphView(QWidget):
 
         main_component = components[0]
         has_side_components = len(components) > 1 and graph_rect.width() >= 520
-        main_center = QPointF(graph_center.x() - (graph_rect.width() * 0.08 if has_side_components else 0), graph_center.y())
-        main_rx = max(120.0, graph_rect.width() * (0.36 if has_side_components else 0.46)) * self._scale
-        main_ry = max(72.0, graph_rect.height() * 0.34) * self._scale
+        main_center = QPointF(graph_center.x() - (graph_rect.width() * 0.06 if has_side_components else 0), graph_center.y())
+        main_rx = max(136.0, graph_rect.width() * (0.42 if has_side_components else 0.50)) * self._scale
+        main_ry = max(96.0, graph_rect.height() * 0.43) * self._scale
         place_component(main_component, main_center, main_rx, main_ry)
 
         small_components = components[1:]
@@ -568,7 +568,7 @@ class KnowledgeGraphView(QWidget):
     def _fit_positions_to_rect(self, positions: dict[str, QPointF], graph_rect: QRectF) -> dict[str, QPointF]:
         if len(positions) < 2:
             return positions
-        padding = 34.0
+        padding = 12.0
         min_x = min(point.x() for point in positions.values())
         max_x = max(point.x() for point in positions.values())
         min_y = min(point.y() for point in positions.values())
@@ -577,16 +577,15 @@ class KnowledgeGraphView(QWidget):
         height = max(1.0, max_y - min_y)
         available_width = max(1.0, graph_rect.width() - padding * 2.0)
         available_height = max(1.0, graph_rect.height() - padding * 2.0)
-        factor = min(1.72, available_width / width, available_height / height)
-        vertical_factor = min(2.35, max(factor, available_height / height * 0.98))
+        factor = min(1.92, available_width / width, available_height / height)
+        vertical_factor = min(2.55, max(factor, available_height / height * 1.08))
         current_center = QPointF((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
-        label_balance_offset = min(14.0, graph_rect.height() * 0.03)
-        target_center = QPointF(graph_rect.center().x(), graph_rect.center().y() - label_balance_offset)
+        target_center = graph_rect.center()
         fitted: dict[str, QPointF] = {}
-        safe_left = graph_rect.left() + 34.0
-        safe_right = graph_rect.right() - 34.0
-        safe_top = graph_rect.top() + 34.0
-        safe_bottom = graph_rect.bottom() - 34.0
+        safe_left = graph_rect.left() + 16.0
+        safe_right = graph_rect.right() - 16.0
+        safe_top = graph_rect.top() + 12.0
+        safe_bottom = graph_rect.bottom() - 12.0
         for name, point in positions.items():
             x = target_center.x() + (point.x() - current_center.x()) * factor
             y = target_center.y() + (point.y() - current_center.y()) * vertical_factor
@@ -712,10 +711,10 @@ class KnowledgeGraphView(QWidget):
 
         path = QPainterPath(source)
         path.quadTo(control, target)
-        width = 1.56 if highlight else 1.04
+        width = 0.84 if highlight else 0.54
         shadow = QColor("#020617" if self.theme == "dark" else "#ffffff")
         shadow.setAlpha(96 if self.theme == "dark" else 132)
-        painter.setPen(QPen(shadow, width + 0.95, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.setPen(QPen(shadow, width + 0.28, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         painter.drawPath(path)
         painter.setPen(QPen(color, width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
         painter.drawPath(path)
@@ -856,7 +855,7 @@ class KnowledgeGraphView(QWidget):
         occupied: list[QRectF] | None = None,
         force: bool = False,
     ) -> bool:
-        max_width = 190
+        max_width = 270
         lines = self._wrapped_label_lines(name, metrics, max_width=max_width, max_lines=2)
         if not lines:
             return False
@@ -944,7 +943,7 @@ class KnowledgeGraphView(QWidget):
         painter.fillRect(self.rect(), colors["bg"])
 
         panel = QRectF(1, 1, self.width() - 2, self.height() - 2)
-        graph_rect = panel.adjusted(14, 30, -14, -8)
+        graph_rect = panel.adjusted(12, 24, -12, -6)
         self._draw_background(painter, panel, graph_rect, colors)
         self._draw_grid(painter, graph_rect, colors["grid"])
 
@@ -957,9 +956,9 @@ class KnowledgeGraphView(QWidget):
         small_font.setBold(True)
         painter.setFont(small_font)
         painter.setPen(colors["muted"])
-        legend_left = max(300.0, self.width() * 0.56)
-        header_top = 5.0
-        header_height = 24.0
+        legend_left = max(320.0, self.width() * 0.56)
+        header_top = 4.0
+        header_height = 20.0
         painter.drawText(
             QRectF(18, header_top, max(120.0, legend_left - 28.0), header_height),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
@@ -988,7 +987,7 @@ class KnowledgeGraphView(QWidget):
             for relation in self.highlight_relations
         }
         edge_label_requests: list[tuple[QPointF, QPointF, str, bool]] = []
-        show_all_relation_labels = self.show_relation_labels and self.show_labels and len(visible_relations) <= 28
+        show_all_relation_labels = self.show_relation_labels and self.show_labels and len(visible_relations) <= 48
         for relation in visible_relations:
             source = str(relation.get("source") or "")
             target = str(relation.get("target") or "")
@@ -998,7 +997,7 @@ class KnowledgeGraphView(QWidget):
             selected_edge = bool(self._selected_node_name and self._selected_node_name in {source, target})
             highlight = key in highlighted or selected_edge
             edge_color = QColor(colors["highlight"]) if highlight else QColor("#1d4ed8" if self.theme == "light" else "#f59e0b")
-            edge_color.setAlpha(238 if key in highlighted else (206 if selected_edge else (172 if self.theme == "light" else 184)))
+            edge_color.setAlpha(232 if key in highlighted else (196 if selected_edge else (162 if self.theme == "light" else 172)))
             source_radius = self._node_radius(source, degrees, counts) + 3.0
             target_radius = self._node_radius(target, degrees, counts) + 5.0
             edge_source, edge_target = self._trim_edge(positions[source], positions[target], source_radius, target_radius)
@@ -1017,7 +1016,7 @@ class KnowledgeGraphView(QWidget):
         label_font.setPointSize(8)
         label_font.setBold(True)
         label_metrics = QFontMetrics(label_font)
-        label_budget = len(visible_nodes) if len(visible_nodes) <= 20 else min(len(visible_nodes), 16)
+        label_budget = len(visible_nodes) if len(visible_nodes) <= 24 else min(len(visible_nodes), 22)
         ranked_label_names = {
             name
             for name, _entity_type in sorted(
@@ -1350,7 +1349,7 @@ class KnowledgeWidget(QWidget):
         self.graph_relation_filter = QComboBox()
         self.graph_relation_filter.setObjectName("graphFilterCombo")
         for combo in [self.graph_type_filter, self.graph_relation_filter]:
-            combo.setMinimumWidth(176)
+            combo.setMinimumWidth(250)
             combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.graph_reset_button = QPushButton("F")
         self.graph_reset_button.setToolTip("适配图谱")
@@ -1552,11 +1551,11 @@ class KnowledgeWidget(QWidget):
 
         graph_panel = QFrame()
         graph_panel.setObjectName("knowledgeGraphPanel")
-        graph_panel.setMinimumHeight(480)
-        graph_panel.setMaximumHeight(520)
+        graph_panel.setMinimumHeight(458)
+        graph_panel.setMaximumHeight(500)
         graph_layout = QVBoxLayout(graph_panel)
-        graph_layout.setContentsMargins(8, 4, 8, 8)
-        graph_layout.setSpacing(1)
+        graph_layout.setContentsMargins(8, 3, 8, 7)
+        graph_layout.setSpacing(0)
         graph_header = QHBoxLayout()
         graph_header.setContentsMargins(0, 0, 0, 0)
         graph_header.setSpacing(8)
@@ -1576,11 +1575,11 @@ class KnowledgeWidget(QWidget):
 
         graph_filter_panel = QFrame()
         graph_filter_panel.setObjectName("graphFilterPanel")
-        graph_filter_panel.setMinimumHeight(36)
-        graph_filter_panel.setMaximumHeight(38)
+        graph_filter_panel.setMinimumHeight(34)
+        graph_filter_panel.setMaximumHeight(36)
         self.graph_filter_panel = graph_filter_panel
         graph_filter_layout = QHBoxLayout(graph_filter_panel)
-        graph_filter_layout.setContentsMargins(8, 2, 8, 2)
+        graph_filter_layout.setContentsMargins(8, 1, 8, 1)
         graph_filter_layout.setSpacing(8)
         self.graph_type_filter.setVisible(True)
         self.graph_relation_filter.setVisible(True)

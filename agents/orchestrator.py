@@ -283,15 +283,17 @@ class OrchestratorAgent(BaseAgent):
         candidates = self.generate_candidates(task)
         top_candidates = self.screen_candidates(task, candidates)
 
-        results: List[Dict] = []
-        for candidate in top_candidates:
-            results.append(self.evaluate_candidate(task, candidate))
+        fem_candidates = self.prepare_candidates_for_fem(task, top_candidates)
+        results = [self.evaluate_prepared_candidate(task, candidate) for candidate in fem_candidates]
+        knowledge_updates = self.persist_knowledge_records(task, fem_candidates, results)
 
-        report = self.generate_report(task, results, top_candidates)
+        report = self.generate_report(task, results, fem_candidates)
         return {
             "task": task,
             "candidates": candidates,
             "top_candidates": top_candidates,
+            "fem_candidates": fem_candidates,
             "results": results,
+            "knowledge_updates": knowledge_updates,
             "report": report,
         }

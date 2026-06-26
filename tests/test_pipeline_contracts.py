@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections import Counter
+import os
 
 import pytest
 
@@ -716,6 +717,61 @@ def test_knowledge_persistence_rejects_cross_session_result_with_same_formal_id(
     assert [item[0] for item in events] == ["knowledge_update_failed", "knowledge_update_completed"]
 
 
+def test_orchestrator_run_uses_batch_fem_promotion(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
+    candidates = [
+        {"candidate_id": "TMP_10", "display_name": "TMP_10", "source": "DOE"},
+        {"candidate_id": "TMP_4", "display_name": "TMP_4", "source": "LLM"},
+        {"candidate_id": "TMP_9", "display_name": "TMP_9", "source": "CASE_TRANSFER"},
+    ]
+    orchestrator = OrchestratorAgent.__new__(OrchestratorAgent)
+    orchestrator.emit = lambda *_args, **_kwargs: None
+    orchestrator.parse_instruction = lambda *_args, **_kwargs: task
+    orchestrator.generate_candidates = lambda _task: candidates
+    orchestrator.screen_candidates = lambda _task, _candidates: list(_candidates)
+    monkeypatch.setattr(orchestrator_module, "reserve_candidate_ids", lambda count: [f"C{16 + index}" for index in range(count)])
+
+    evaluated = []
+    persisted = {}
+
+    def evaluate_prepared_candidate(_task, fem_candidate):
+        evaluated.append(fem_candidate)
+        return {
+            "candidate_id": fem_candidate["candidate_id"],
+            "session_candidate_id": fem_candidate["session_candidate_id"],
+            "status": "success",
+        }
+
+    def persist_knowledge_records(_task, fem_candidates, results):
+        persisted["fem_candidates"] = list(fem_candidates)
+        persisted["results"] = list(results)
+        return [
+            {
+                "status": "stored",
+                "candidate_id": candidate["candidate_id"],
+                "session_candidate_id": candidate["session_candidate_id"],
+                "case_id": candidate["candidate_id"].replace("C", "CASE_"),
+            }
+            for candidate in fem_candidates
+        ]
+
+    orchestrator.evaluate_prepared_candidate = evaluate_prepared_candidate
+    orchestrator.persist_knowledge_records = persist_knowledge_records
+    orchestrator.generate_report = lambda _task, results, fem_candidates: {
+        "result_count": len(results),
+        "candidate_ids": [item["candidate_id"] for item in fem_candidates],
+    }
+
+    payload = OrchestratorAgent.run(orchestrator, "test")
+
+    assert [item["candidate_id"] for item in payload["fem_candidates"]] == ["C16", "C17", "C18"]
+    assert [item["session_candidate_id"] for item in payload["fem_candidates"]] == ["TMP_10", "TMP_4", "TMP_9"]
+    assert [item["candidate_id"] for item in evaluated] == ["C16", "C17", "C18"]
+    assert [item["session_candidate_id"] for item in payload["knowledge_updates"]] == ["TMP_10", "TMP_4", "TMP_9"]
+    assert [item["candidate_id"] for item in persisted["results"]] == ["C16", "C17", "C18"]
+
+
 def test_knowledge_case_record_keeps_only_real_task_trace(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task_record = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
@@ -763,6 +819,41 @@ def test_rag_engine_matches_installed_sentence_transformer_signature(tmp_path):
 
     assert legacy_kwargs == {"cache_folder": str(tmp_path)}
     assert modern_kwargs == {"cache_folder": str(tmp_path), "local_files_only": True}
+
+
+def test_rag_engine_retries_without_local_files_only_when_adapter_rejects_it(tmp_path, monkeypatch):
+    class MisreportedSentenceTransformer:
+        def __init__(self, model_name_or_path=None, cache_folder=None, local_files_only=False):
+            calls.append(
+                {
+                    "model": model_name_or_path,
+                    "cache_folder": cache_folder,
+                    "local_files_only": local_files_only,
+                    "transformers_offline": os.environ.get("TRANSFORMERS_OFFLINE"),
+                    "hf_offline": os.environ.get("HF_HUB_OFFLINE"),
+                }
+            )
+            if local_files_only:
+                raise TypeError("__init__() got an unexpected keyword argument 'local_files_only'")
+
+    calls = []
+    monkeypatch.delenv("TRANSFORMERS_OFFLINE", raising=False)
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
+    engine = RAGEngine.__new__(RAGEngine)
+    engine.embedding_model_name = "local-bge"
+    engine.embedding_cache_dir = tmp_path
+    engine.local_files_only = True
+
+    model = engine._build_sentence_transformer(MisreportedSentenceTransformer)
+
+    assert isinstance(model, MisreportedSentenceTransformer)
+    assert len(calls) == 2
+    assert calls[0]["local_files_only"] is True
+    assert calls[1]["local_files_only"] is False
+    assert calls[1]["transformers_offline"] == "1"
+    assert calls[1]["hf_offline"] == "1"
+    assert "TRANSFORMERS_OFFLINE" not in os.environ
+    assert "HF_HUB_OFFLINE" not in os.environ
 
 
 def test_knowledge_record_survives_case_memory_vector_failure(monkeypatch, tmp_path):

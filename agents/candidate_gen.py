@@ -50,7 +50,7 @@ class CandidateGenAgent(BaseAgent):
         self.doe_sampler = DOESampler()
         self.rule_checker = RuleChecker()
         self.case_retriever = CaseRetriever()
-        self.knowledge_base = DomainKnowledgeBase()
+        self.knowledge_base: DomainKnowledgeBase | None = None
         self.material_catalog = self._build_material_catalog()
         self.llm_backend: LLMBackend | None = None
         self.last_generation_audit: Dict[str, Any] = {}
@@ -178,6 +178,8 @@ class CandidateGenAgent(BaseAgent):
 
     def _knowledge_guidance(self, task: Dict[str, Any], top_k: int) -> List[str]:
         """仅为 LLM 路径检索项目知识库/知识图谱片段，避免与历史案例迁移职责混用。"""
+        if self.knowledge_base is None:
+            self.knowledge_base = DomainKnowledgeBase()
         return self.knowledge_base.format_snippets(task, top_k=max(1, min(3, top_k)))
 
     def _build_prompt(
