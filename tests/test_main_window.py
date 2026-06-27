@@ -9,15 +9,16 @@ from pathlib import Path
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 import yaml
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont, QFontMetrics
-from PyQt6.QtWidgets import QApplication, QComboBox, QFrame, QLabel, QLineEdit, QPushButton
+from PyQt6.QtWidgets import QApplication, QComboBox, QFrame, QLabel, QLineEdit, QPushButton, QScrollArea
 
 import gui.main_window as main_window_module
 from core.task_parser import TaskParser
 from gui.candidate_widget import CandidateWidget
 from gui.chat_widget import ChatWidget
 from gui.knowledge_widget import KnowledgeWidget
-from gui.main_window import MainWindow
+from gui.main_window import MainWindow, PipelineSession
 from gui.theme import application_stylesheet
 from gui.workbench_widgets import AgentStatusCard, FlowDagWidget, StatusPill
 from workflow.event_store import WorkflowEventStore
@@ -1051,7 +1052,7 @@ def test_workbench_right_rail_fits_non_maximized_viewport(monkeypatch) -> None:
         margins = window.workbench_right_content.layout().contentsMargins()
         assert margins.left() == margins.right()
         assert window.workbench_right_content.width() - window.workbench_right_scroll.viewport().width() <= 16
-        assert window.right_stack.width() >= 330
+        assert window.right_stack.width() >= 300
     finally:
         window.close()
         app.processEvents()
@@ -1061,21 +1062,31 @@ def test_candidate_pool_empty_and_runtime_use_same_splitter_balance() -> None:
     app = _app()
     widget = CandidateWidget()
     try:
-        widget.resize(760, 280)
+        widget.resize(700, 360)
         widget.show()
         app.processEvents()
+        assert widget.splitter.orientation() == Qt.Orientation.Vertical
         empty_sizes = widget.splitter.sizes()
 
         widget.update_candidates([_candidate(f"C{index}") for index in range(1, 7)])
         app.processEvents()
+        assert widget.splitter.orientation() == Qt.Orientation.Vertical
         runtime_sizes = widget.splitter.sizes()
 
         for sizes in [empty_sizes, runtime_sizes]:
-            table_width, detail_width = sizes
-            assert table_width >= 260
-            assert detail_width >= 280
-            assert 0.8 <= table_width / max(1, detail_width) <= 1.25
-        assert abs(empty_sizes[0] - runtime_sizes[0]) <= 32
+            table_height, detail_height = sizes
+            assert table_height >= 120
+            assert detail_height >= 140
+            assert 0.55 <= table_height / max(1, detail_height) <= 1.05
+        assert abs(empty_sizes[0] - runtime_sizes[0]) <= 40
+
+        widget.resize(900, 360)
+        app.processEvents()
+        assert widget.splitter.orientation() == Qt.Orientation.Horizontal
+        table_width, detail_width = widget.splitter.sizes()
+        assert table_width >= 420
+        assert detail_width >= 420
+        assert abs(table_width - detail_width) <= 4
     finally:
         widget.close()
         app.processEvents()
@@ -1164,9 +1175,77 @@ def test_main_splitter_widths_do_not_expand_past_window(monkeypatch) -> None:
             sizes = window.main_splitter.sizes()
             assert sum(sizes) <= window.main_splitter.width() + 4
             assert window.left_stack.width() <= 286
-            assert 330 <= window.right_stack.width() <= 400
+            assert 300 <= window.right_stack.width() <= 360
             right_edge = window.right_stack.mapTo(window, window.right_stack.rect().bottomRight()).x()
             assert right_edge <= window.rect().right() + 2
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_workbench_runtime_layout_remains_visible_at_large_window_sizes(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
+    candidate = {
+        "candidate_id": "C1",
+        "display_name": "C1",
+        "source": "DOE",
+        "hull_type": "CYLINDRICAL",
+        "geometry": {
+            "length_mm": 424.237,
+            "radius_mm": 86.598,
+            "thickness_mm": 16.554,
+            "alpha_deg": 42.164,
+            "beta_deg": 27.44,
+        },
+        "layup": {},
+        "material_system": {"name": "T700/Epoxy"},
+    }
+    window = MainWindow()
+    try:
+        window._switch_workspace_page(0)
+        window._apply_session(
+            PipelineSession(
+                task=task,
+                workflow_run_id="RUN_LAYOUT",
+                instruction="外压 30 MPa，生成 6 个候选，初筛保留 3 个候选",
+                candidates=[candidate],
+                screened_candidates=[candidate],
+                evaluated_candidates=[candidate],
+                pending_confirmation="fem_evaluation",
+                stage="awaiting_fem_confirmation",
+            )
+        )
+        window._flush_live_view()
+
+        for width, height in [(1440, 900), (1680, 1050), (1920, 1080)]:
+            window.resize(width, height)
+            window.show()
+            app.processEvents()
+            window._sync_main_splitter_sizes()
+            window._sync_workbench_left_rail()
+            window.live_result_view.fit_view()
+            for _ in range(8):
+                app.processEvents()
+
+            assert sum(window.main_splitter.sizes()) <= window.main_splitter.width() + 4
+            assert window.left_stack.mapTo(window, window.left_stack.rect().topLeft()).x() >= -1
+            assert window.right_stack.mapTo(window, window.right_stack.rect().topRight()).x() <= window.rect().right() + 2
+
+            rail_scroll = next(
+                scroll
+                for scroll in window.findChildren(QScrollArea)
+                if scroll.objectName() == "railScroll" and scroll.isVisible()
+            )
+            content = rail_scroll.widget()
+            assert content is not None
+            assert content.width() == rail_scroll.viewport().width()
+
+            pixmap = window.live_result_view.static_label.pixmap()
+            if pixmap is not None and not pixmap.isNull():
+                assert pixmap.width() <= window.live_result_view.static_label.width()
+                assert pixmap.height() <= window.live_result_view.static_label.height()
     finally:
         window.close()
         app.processEvents()
@@ -1531,7 +1610,7 @@ def test_chat_bubble_width_tracks_rendered_text_width() -> None:
         text = "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，生成 12 个候选。"
         target_max, target_min = widget._responsive_width(920, 220)
         rendered_width = widget._text_metrics(13).horizontalAdvance(text)
-        raw_width = rendered_width + 10
+        raw_width = rendered_width + 20
         expected_width = target_max if raw_width >= target_max else max(target_min, raw_width)
 
         assert widget._content_width(text, target_max, target_min) == expected_width
@@ -1562,9 +1641,9 @@ def test_chat_short_runtime_bubbles_follow_text_width() -> None:
         assert len(bubbles) == len(messages)
         for bubble, (_, message) in zip(bubbles, messages):
             text_width = widget._text_metrics(13).horizontalAdvance(message)
-            assert bubble.width() - text_width <= 20
+            assert bubble.width() - text_width <= 28
             assert bubble.width() <= 360
-            assert bubble.height() <= 36
+            assert bubble.height() <= 38
     finally:
         widget.close()
         app.processEvents()
@@ -1619,6 +1698,115 @@ def test_agent_status_card_aligns_dot_and_labels_without_rich_text_blocks() -> N
         assert card.title.text() == "ORCHESTRATOR"
     finally:
         card.close()
+        app.processEvents()
+
+
+def test_agent_status_card_size_hint_matches_fixed_height() -> None:
+    app = _app()
+    card = AgentStatusCard()
+    try:
+        card.set_content("REPORT_GEN", "done", "完成", "报告输出与解释")
+
+        assert card.minimumHeight() == 66
+        assert card.maximumHeight() == 66
+        assert card.sizeHint().height() == 66
+        assert card.minimumSizeHint().height() == 66
+    finally:
+        card.close()
+        app.processEvents()
+
+
+def test_workbench_agent_queue_gap_stays_compact(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window.resize(1440, 900)
+        window.show()
+        app.processEvents()
+
+        report_card = window.agent_cards["REPORT_GEN"]
+        report_bottom = report_card.mapTo(window, report_card.rect().bottomLeft()).y()
+        queue_top = window.queue_header.mapTo(window, window.queue_header.rect().topLeft()).y()
+
+        assert 6 <= queue_top - report_bottom <= 14
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_workbench_agent_rail_content_width_tracks_viewport(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window.resize(1440, 900)
+        window.show()
+        app.processEvents()
+
+        rail_scroll = next(
+            scroll
+            for scroll in window.findChildren(QScrollArea)
+            if scroll.objectName() == "railScroll" and scroll.isVisible()
+        )
+        content = rail_scroll.widget()
+        assert content is not None
+        assert content.width() == rail_scroll.viewport().width()
+
+        report_card = window.agent_cards["REPORT_GEN"]
+        viewport_right = rail_scroll.viewport().mapTo(window, rail_scroll.viewport().rect().topRight()).x()
+        report_right = report_card.mapTo(window, report_card.rect().topRight()).x()
+        assert report_right <= viewport_right
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_left_rail_scrollbars_and_card_margins_are_consistent(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+
+    def visible_rail_scroll() -> QScrollArea:
+        current_left = window.left_stack.currentWidget()
+        return next(
+            scroll
+            for scroll in current_left.findChildren(QScrollArea)
+            if scroll.objectName() == "railScroll" and scroll.isVisible()
+        )
+
+    try:
+        window.resize(1440, 900)
+        window.show()
+        app.processEvents()
+
+        for page_index in [0, 1]:
+            window._switch_workspace_page(page_index)
+            app.processEvents()
+            rail = visible_rail_scroll()
+            content = rail.widget()
+            assert content is not None
+            assert content.width() == rail.viewport().width()
+
+            scrollbar = rail.verticalScrollBar()
+            assert scrollbar.isVisible()
+            scrollbar_right = scrollbar.mapTo(rail, scrollbar.rect().topRight()).x()
+            assert scrollbar_right >= rail.width() - 2
+
+            cards = [
+                card
+                for card in rail.findChildren(QFrame) + rail.findChildren(QLabel)
+                if card.isVisible() and card.objectName() in {"agentStatusCard", "agentCard"}
+            ]
+            assert cards
+            card = cards[0]
+            viewport_left = rail.viewport().mapTo(window, rail.viewport().rect().topLeft()).x()
+            viewport_right = rail.viewport().mapTo(window, rail.viewport().rect().topRight()).x()
+            card_left = card.mapTo(window, card.rect().topLeft()).x()
+            card_right = card.mapTo(window, card.rect().topRight()).x()
+            assert abs((card_left - viewport_left) - (viewport_right - card_right)) <= 3
+    finally:
+        window.close()
         app.processEvents()
 
 

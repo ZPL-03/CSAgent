@@ -681,6 +681,29 @@ def test_knowledge_widget_toolbar_buttons_click_through(monkeypatch, tmp_path) -
         app.processEvents()
 
 
+def test_knowledge_case_pill_deduplicates_formal_case_records(monkeypatch, tmp_path) -> None:
+    cases_dir = tmp_path / "cases"
+    library_dir = tmp_path / "case_library"
+    cases_dir.mkdir()
+    library_dir.mkdir()
+    for case_id in ["CASE_1", "CASE_2"]:
+        (cases_dir / f"{case_id}.json").write_text("{}", encoding="utf-8")
+    (library_dir / "CASE_2.json").write_text("{}", encoding="utf-8")
+
+    monkeypatch.setattr("gui.knowledge_widget.CASES_DIR", cases_dir)
+    monkeypatch.setattr("gui.knowledge_widget.CASE_LIBRARY_DIR", library_dir)
+
+    app = _app()
+    widget = KnowledgeWidget()
+    try:
+        widget._update_status_pills({"ready": True, "rag_chunk_count": 1})
+
+        assert widget.case_pill.text == "案例库 2 / 正式 1"
+    finally:
+        widget.close()
+        app.processEvents()
+
+
 def test_knowledge_widget_runs_real_ingestion_pipeline(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CSDM_cph_USE_HASH_EMBEDDING", "1")
 

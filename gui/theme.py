@@ -293,6 +293,14 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         padding: 8px 0 3px 0;
         letter-spacing: 0;
     }}
+    QLabel#liveSectionTitle {{
+        background: transparent;
+        color: {color["section"]};
+        font-size: 12px;
+        font-weight: 700;
+        padding: 0;
+        letter-spacing: 0;
+    }}
     QWidget#agentRail {{
         background: {color["agent_bg"]};
         border: 1px solid {color["agent_border"]};
@@ -315,6 +323,7 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
     }}
     QWidget#agentRail QLabel#sectionTitle {{
         color: {color["agent_text"]};
+        padding: 4px 0 2px 0;
     }}
     QFrame#agentStatusCard {{
         background: {color["agent_card"]};
@@ -455,8 +464,9 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         margin-right: 8px;
     }}
     QLineEdit#settingsInput, QComboBox#settingsInput {{
-        min-height: 32px;
-        padding: 3px 10px;
+        min-height: 36px;
+        max-height: 36px;
+        padding: 0px 10px;
         padding-right: 28px;
     }}
     QComboBox#settingsInput::drop-down {{
@@ -494,8 +504,9 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         border-top: 3px solid transparent;
         border-bottom: 1px solid {color["border"]};
         border-radius: 0;
-        min-height: 34px;
-        padding: 4px 0 5px 0;
+        min-height: 40px;
+        max-height: 40px;
+        padding: 0;
         font-size: 13px;
         font-weight: 700;
         text-align: center;
@@ -550,8 +561,8 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
         border-color: {color["border_soft"]};
     }}
     QPushButton#sendButton {{
-        min-width: 42px;
-        padding: 8px 8px;
+        min-width: 36px;
+        padding: 8px 4px;
     }}
     QPushButton#confirmButton {{
         min-width: 64px;

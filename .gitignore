@@ -1,11 +1,11 @@
-# Python cache
+# Python 缓存
 __pycache__/
 *.py[cod]
 .pytest_cache/
 .mypy_cache/
 .ruff_cache/
 
-# Local env
+# 本地环境
 .env
 AGENTS.md
 .venv/
@@ -19,7 +19,7 @@ venv/
 .DS_Store
 Thumbs.db
 
-# Runtime outputs
+# 运行产物
 data/io/
 data/tasks/
 data/abaqus_runs/
@@ -35,7 +35,7 @@ knowledge/chroma_db/
 knowledge/runtime/
 models/embedding_cache/
 
-# Abaqus session / generated files
+# Abaqus 会话与生成文件
 abaqus.rpy*
 abaqus*.rec
 abaqus/build_*.py
@@ -50,5 +50,14 @@ abaqus/build_*.py
 *.sim
 *.rec
 
-# Logs
+# 已跟踪的正式 FEM 可视化工件
+!data/abaqus_runs/
+!data/abaqus_runs/**/
+!data/abaqus_runs/**/*.inp
+!data/abaqus_runs/**/*.odb
+!data/abaqus_runs/**/*_mode1.json
+data/abaqus_runs/**/*.fil
+data/abaqus_runs/**/candidate_input.json
+
+# 日志
 *.log

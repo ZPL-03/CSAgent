@@ -1,14 +1,20 @@
 from __future__ import annotations
 
 import json
+import os
 
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+
+from PyQt6.QtWidgets import QApplication
+
+from gui.interactive_view import InteractivePlotWidget
 from gui.render_utils import mode_shape_payload_status, render_candidate_png_bytes, render_mode_shape_png_bytes
 
 
-def _candidate() -> dict:
+def _candidate(candidate_id: str = "TMP_1") -> dict:
     return {
-        "candidate_id": "TMP_1",
-        "display_name": "TMP_1",
+        "candidate_id": candidate_id,
+        "display_name": candidate_id,
         "geometry": {
             "length_mm": 500.0,
             "radius_mm": 100.0,
@@ -18,6 +24,13 @@ def _candidate() -> dict:
         },
         "material_system": {"name": "T700/Epoxy"},
     }
+
+
+def _app() -> QApplication:
+    app = QApplication.instance()
+    if app is None:
+        app = QApplication([])
+    return app
 
 
 def test_render_candidate_static_png() -> None:
@@ -69,3 +82,39 @@ def test_render_mode_shape_static_png_and_status(tmp_path) -> None:
     assert png is not None
     assert png.startswith(b"\x89PNG")
     assert len(png) > 1000
+
+
+def test_interactive_view_projected_scale_tracks_viewport_bounds() -> None:
+    app = _app()
+    widget = InteractivePlotWidget("empty")
+    try:
+        widget.resize(301, 208)
+        bounds = (0.0, 424.237, -86.598, 86.598, -86.598, 86.598)
+
+        scale = widget._projected_parallel_scale(bounds, (-1.0, -1.0, -1.0))
+
+        assert 235.0 <= scale <= 285.0
+    finally:
+        widget.close()
+        app.processEvents()
+
+
+def test_static_plot_preview_rescales_after_stack_activation() -> None:
+    app = _app()
+    widget = InteractivePlotWidget("empty")
+    try:
+        widget.resize(301, 178)
+        widget.show()
+        app.processEvents()
+
+        widget.show_candidate(_candidate("TMP_STATIC"))
+        for _ in range(8):
+            app.processEvents()
+
+        pixmap = widget.static_label.pixmap()
+        assert pixmap is not None
+        assert pixmap.width() <= widget.static_label.width()
+        assert pixmap.height() <= widget.static_label.height()
+    finally:
+        widget.close()
+        app.processEvents()

@@ -66,6 +66,8 @@ class CandidateWidget(QWidget):
     """展示候选方案表格、设计细节与来源审计。"""
 
     COLUMN_COUNT = 8
+    COMPACT_WIDTH = 760
+    HEADER_HEIGHT = 40
     candidateSelected = pyqtSignal(dict)
 
     def __init__(self, language: str = DEFAULT_LANGUAGE) -> None:
@@ -85,6 +87,7 @@ class CandidateWidget(QWidget):
         self.table.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self.table.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
         self.table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        self.table.horizontalHeader().setFixedHeight(self.HEADER_HEIGHT)
         for column, width in enumerate([92, 104, 118, 100, 112, 118, 116, 98]):
             self.table.setColumnWidth(column, width)
         self.table.itemSelectionChanged.connect(self._refresh_detail)
@@ -125,7 +128,7 @@ class CandidateWidget(QWidget):
             button.setCheckable(True)
             button.setAutoExclusive(True)
             button.setMinimumWidth(0)
-            button.setMinimumHeight(34)
+            button.setFixedHeight(self.HEADER_HEIGHT)
             button.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         self.detail_button.setChecked(True)
         self.detail_button.clicked.connect(lambda checked: self._set_detail_page(0) if checked else None)
@@ -145,14 +148,13 @@ class CandidateWidget(QWidget):
         detail_layout.addLayout(tab_layout)
         detail_layout.addWidget(self.detail_stack, 1)
 
-        splitter = QSplitter()
+        splitter = QSplitter(Qt.Orientation.Horizontal)
         splitter.addWidget(self.table)
         splitter.addWidget(self.detail_container)
         splitter.setChildrenCollapsible(False)
         splitter.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 1)
-        splitter.setSizes([640, 640])
         self.splitter = splitter
 
         layout = QVBoxLayout(self)
@@ -282,7 +284,7 @@ class CandidateWidget(QWidget):
         self.table.setVisible(True)
         self.detail_container.setMaximumHeight(16777215)
         self.detail_container.setVisible(True)
-        self.splitter.setSizes([640, 640])
+        self._sync_splitter_geometry(force=True)
         source_counter: dict[str, int] = {}
 
         for row, candidate in enumerate(self.candidates):
@@ -439,6 +441,29 @@ class CandidateWidget(QWidget):
         self.detail_button.updateGeometry()
         self.audit_button.updateGeometry()
 
+    def _sync_splitter_geometry(self, force: bool = False) -> None:
+        if not hasattr(self, "splitter"):
+            return
+        width = max(self.width(), self.splitter.width())
+        compact = width < self.COMPACT_WIDTH
+        orientation = Qt.Orientation.Vertical if compact else Qt.Orientation.Horizontal
+        if self.splitter.orientation() != orientation:
+            self.splitter.setOrientation(orientation)
+            force = True
+        if not force:
+            return
+        if compact:
+            total_height = max(360, self.height() - self.metric_widget.height() - 12)
+            table_height = max(150, total_height // 2)
+            detail_height = max(170, total_height - table_height)
+            self.splitter.setSizes([table_height, detail_height])
+        else:
+            total_width = max(1, width)
+            table_width = max(1, total_width // 2)
+            detail_width = max(1, total_width - table_width)
+            self.splitter.setSizes([table_width, detail_width])
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
+        self._sync_splitter_geometry()
         self._sync_detail_pages()

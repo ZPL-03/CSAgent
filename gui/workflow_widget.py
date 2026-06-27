@@ -143,22 +143,38 @@ class WorkflowWidget(QWidget):
         self.browser.append(f"<p><b>运行审计已导出：</b>{self._safe(path)}</p>")
 
     def _llm_status_html(self) -> str:
-        health_by_name = {str(item.get("name") or ""): item for item in self.llm_health_results}
+        configured = list(configured_llm_backends())
+        configured_by_name = {str(item.get("name") or ""): item for item in configured}
+        status_items: list[dict[str, Any]]
+        if self.llm_health_results:
+            status_items = []
+            seen_names: set[str] = set()
+            for health in self.llm_health_results:
+                name = str(health.get("name") or "")
+                seen_names.add(name)
+                merged = dict(configured_by_name.get(name, {}))
+                merged.update(health)
+                status_items.append(merged)
+            for backend in configured:
+                name = str(backend.get("name") or "")
+                if name not in seen_names:
+                    status_items.append(dict(backend))
+        else:
+            status_items = configured
         rows = []
-        for backend in configured_llm_backends():
-            health = health_by_name.get(str(backend.get("name") or ""), {})
-            latency = health.get("latency_ms")
+        for backend in status_items:
+            latency = backend.get("latency_ms")
             latency_text = "-" if latency in (None, "") else f"{latency} ms"
-            health_status = health.get("health_message") or "未检测"
-            error = health.get("error") or "-"
+            health_status = backend.get("health_message") or "未检测"
+            error = backend.get("error") or "-"
             rows.append(
                 "<tr>"
-                f"<td>{self._safe(backend['role'])}</td>"
-                f"<td>{self._safe(backend['name'])}</td>"
-                f"<td>{self._safe(backend['model'])}</td>"
-                f"<td>{'是' if backend['base_url_configured'] else '否'}</td>"
-                f"<td>{'是' if backend['api_key_configured'] else '否'}</td>"
-                f"<td>{'可调用' if backend['available_for_call'] else '不可调用'}</td>"
+                f"<td>{self._safe(backend.get('role'))}</td>"
+                f"<td>{self._safe(backend.get('name'))}</td>"
+                f"<td>{self._safe(backend.get('model'))}</td>"
+                f"<td>{'是' if backend.get('base_url_configured') else '否'}</td>"
+                f"<td>{'是' if backend.get('api_key_configured') else '否'}</td>"
+                f"<td>{'可调用' if backend.get('available_for_call') else '不可调用'}</td>"
                 f"<td>{self._safe(health_status)}</td>"
                 f"<td>{self._safe(latency_text)}</td>"
                 f"<td>{self._safe(error)}</td>"

@@ -64,6 +64,14 @@ def _read_document_rows(documents_path: Path | str | None) -> list[dict[str, Any
     return rows
 
 
+def _case_memory_counts() -> tuple[int, int, int]:
+    """返回去重案例总数、评估档案数和正式可迁移案例数。"""
+
+    archive_ids = {path.stem for path in CASES_DIR.glob("CASE_*.json")} if CASES_DIR.exists() else set()
+    formal_ids = {path.stem for path in CASE_LIBRARY_DIR.glob("CASE_*.json")} if CASE_LIBRARY_DIR.exists() else set()
+    return len(archive_ids | formal_ids), len(archive_ids), len(formal_ids)
+
+
 class GraphChipButton(QPushButton):
     """知识图谱筛选 chip，自绘以避免平台原生按钮样式干扰。"""
 
@@ -568,7 +576,7 @@ class KnowledgeGraphView(QWidget):
     def _fit_positions_to_rect(self, positions: dict[str, QPointF], graph_rect: QRectF) -> dict[str, QPointF]:
         if len(positions) < 2:
             return positions
-        padding = 12.0
+        padding = 22.0
         min_x = min(point.x() for point in positions.values())
         max_x = max(point.x() for point in positions.values())
         min_y = min(point.y() for point in positions.values())
@@ -577,15 +585,15 @@ class KnowledgeGraphView(QWidget):
         height = max(1.0, max_y - min_y)
         available_width = max(1.0, graph_rect.width() - padding * 2.0)
         available_height = max(1.0, graph_rect.height() - padding * 2.0)
-        factor = min(1.92, available_width / width, available_height / height)
-        vertical_factor = min(2.55, max(factor, available_height / height * 1.08))
+        factor = min(1.86, available_width / width, available_height / height)
+        vertical_factor = factor
         current_center = QPointF((min_x + max_x) / 2.0, (min_y + max_y) / 2.0)
         target_center = graph_rect.center()
         fitted: dict[str, QPointF] = {}
-        safe_left = graph_rect.left() + 16.0
-        safe_right = graph_rect.right() - 16.0
-        safe_top = graph_rect.top() + 12.0
-        safe_bottom = graph_rect.bottom() - 12.0
+        safe_left = graph_rect.left() + 22.0
+        safe_right = graph_rect.right() - 22.0
+        safe_top = max(graph_rect.top() + 22.0, 64.0)
+        safe_bottom = graph_rect.bottom() - 22.0
         for name, point in positions.items():
             x = target_center.x() + (point.x() - current_center.x()) * factor
             y = target_center.y() + (point.y() - current_center.y()) * vertical_factor
@@ -943,7 +951,7 @@ class KnowledgeGraphView(QWidget):
         painter.fillRect(self.rect(), colors["bg"])
 
         panel = QRectF(1, 1, self.width() - 2, self.height() - 2)
-        graph_rect = panel.adjusted(12, 24, -12, -6)
+        graph_rect = panel.adjusted(12, 28, -12, -16)
         self._draw_background(painter, panel, graph_rect, colors)
         self._draw_grid(painter, graph_rect, colors["grid"])
 
@@ -1312,6 +1320,14 @@ class KnowledgeWidget(QWidget):
         self.rebuild_button = QPushButton("重建索引")
         self.export_snapshot_button = QPushButton("导出快照")
         self.refresh_button = QPushButton("刷新状态")
+        for action_button in [
+            self.upload_button,
+            self.batch_button,
+            self.rebuild_button,
+            self.export_snapshot_button,
+            self.refresh_button,
+        ]:
+            action_button.setMinimumWidth(118)
 
         self.document_table = QTableWidget(0, 6)
         self.document_table.setHorizontalHeaderLabels(["文档", "解析器", "Chunk", "SHA256", "入库时间", "路径"])
@@ -2348,8 +2364,8 @@ class KnowledgeWidget(QWidget):
         self.vector_pill.set_state(vector_label, vector_state)
         self.kg_pill.set_state(f"KG {relation_count} 关系", "success" if relation_count else "pending")
         self.parser_pill.set_state(str(parser or "解析器待调用"), "success" if parser else "pending")
-        case_count = len(list(CASES_DIR.glob("CASE_*.json"))) + len(list(CASE_LIBRARY_DIR.glob("CASE_*.json")))
-        self.case_pill.set_state(f"案例库 {case_count} 条", "success" if case_count else "pending")
+        case_count, _archive_count, formal_count = _case_memory_counts()
+        self.case_pill.set_state(f"案例库 {case_count} / 正式 {formal_count}", "success" if case_count else "pending")
 
     def _update_summary(self, status: dict[str, Any]) -> None:
         metrics = self._load_metrics()

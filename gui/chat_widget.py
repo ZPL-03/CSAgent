@@ -222,7 +222,7 @@ class ChatWidget(QWidget):
     def _content_width(self, text: str, target_max: int, target_min: int) -> int:
         metrics = self._text_metrics(13)
         lines = [line.rstrip() for line in str(text).splitlines()] or [""]
-        horizontal_padding = 10
+        horizontal_padding = 20
         natural = max((metrics.horizontalAdvance(line) for line in lines), default=0) + horizontal_padding
         return max(target_min, min(target_max, natural))
 
@@ -246,21 +246,21 @@ class ChatWidget(QWidget):
             f"QFrame#chatBubble {{ background:{bg}; border:1px solid {border}; border-radius:14px; }}"
         )
         layout = QVBoxLayout(frame)
-        left_pad = 5
-        right_pad = 5
-        top_pad = 1
-        bottom_pad = 1
+        left_pad = 7
+        right_pad = 7
+        top_pad = 3
+        bottom_pad = 3
         horizontal_padding = left_pad + right_pad
         layout.setContentsMargins(left_pad, top_pad, right_pad, bottom_pad)
         layout.setSpacing(0)
         text_label = self._label(text, fg, 13)
         text_width = max(24, bubble_width - horizontal_padding)
         text_label.setFixedWidth(text_width)
-        text_height = max(self._text_metrics(13).height(), self._text_rect(text, text_width).height() + 3)
-        text_label.setMinimumHeight(text_height)
+        text_height = max(self._text_metrics(13).height(), self._text_rect(text, text_width).height() + 2)
+        text_label.setFixedHeight(text_height)
         text_label.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Minimum)
         layout.addWidget(text_label)
-        frame.setMinimumHeight(max(24, text_height + top_pad + bottom_pad + 2))
+        frame.setMinimumHeight(max(30, text_height + top_pad + bottom_pad + 2))
         return frame
 
     def _avatar_label(self, text: str, bg: str, fg: str) -> QLabel:

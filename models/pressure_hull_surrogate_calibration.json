@@ -1,8 +1,8 @@
 {
   "selected_model": "PBIPF_ASME_RD_1172",
-  "training_size": 10,
-  "bias_MPa": 21.762062,
-  "scale": 2.11535,
+  "training_size": 5,
+  "bias_MPa": 6.892498,
+  "scale": 1.160336,
   "feature_order": [
     "length_mm",
     "radius_mm",

@@ -122,7 +122,7 @@ D:\anaconda3\envs\AGENT\python.exe scripts\run_natural_language_acceptance.py --
 批量生成初始案例：
 
 ```powershell
-D:\anaconda3\envs\AGENT\python.exe scripts\build_initial_cases.py --reset --count 10 --task-count 1 --pressures 30 --target-pressure 35
+D:\anaconda3\envs\AGENT\python.exe scripts\build_initial_cases.py --reset --count 5 --task-count 1 --pressures 30 --target-pressure 35
 ```
 
 `--reset` 会清理现有案例、任务、求解输入输出、Abaqus 工件、案例记忆索引和代理公式校准文件，再从 `CASE_1` 和 `C1` 重新计数。初始案例生成使用参数范围内的拉丁超立方采样；批量建库默认不写入会话任务编号，只有显式使用 `--record-task` 时才记录 `TASK_N` 追溯文件。

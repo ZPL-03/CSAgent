@@ -9,6 +9,7 @@ import re
 import shutil
 import subprocess
 import sys
+import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -123,10 +124,12 @@ class ReleaseAudit:
         with_llm_health: bool = False,
         with_gui_render: bool = False,
         keep_gui_screenshots: bool = False,
+        update_ui_screenshots: bool = False,
     ) -> None:
         self.with_llm_health = with_llm_health
         self.with_gui_render = with_gui_render
         self.keep_gui_screenshots = keep_gui_screenshots
+        self.update_ui_screenshots = update_ui_screenshots
         self.items: list[AuditItem] = []
 
     def add(self, name: str, passed: bool, detail: str) -> None:
@@ -790,6 +793,30 @@ class ReleaseAudit:
                         return
                 previous_bottom = top + bubble.height()
 
+        def check_candidate_pool_geometry(theme: str, page_name: str) -> None:
+            widget = window.workbench_candidate_widget
+            splitter = widget.splitter
+            widget_width = widget.width()
+            expected_orientation = Qt.Orientation.Vertical if widget_width < widget.COMPACT_WIDTH else Qt.Orientation.Horizontal
+            if splitter.orientation() != expected_orientation:
+                errors.append(f"{theme}/{page_name} 候选池分割方向异常")
+                return
+            if expected_orientation == Qt.Orientation.Vertical:
+                if widget.detail_container.width() < widget_width - 48:
+                    errors.append(f"{theme}/{page_name} 候选详情宽度异常")
+                    return
+            else:
+                sizes = splitter.sizes()
+                if len(sizes) == 2 and (sizes[0] < 420 or sizes[1] < 420 or abs(sizes[0] - sizes[1]) > 8):
+                    errors.append(f"{theme}/{page_name} 候选池横向宽度异常：{sizes}")
+                    return
+
+        def drain_gui_events(duration_ms: int = 240) -> None:
+            deadline = time.monotonic() + duration_ms / 1000
+            while time.monotonic() < deadline:
+                app.processEvents()
+                time.sleep(0.01)
+
         def build_runtime_session() -> PipelineSession:
             instruction = "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
             task = TaskParser().parse_instruction(instruction)
@@ -839,7 +866,8 @@ class ReleaseAudit:
             window._handle_runtime_state_event("simulation_job_completed", "evaluate_candidates", "SimulationQueue")
             window._handle_runtime_state_event("node_completed", "persist_knowledge", "persist_knowledge")
             window._handle_runtime_state_event("node_started", "generate_report", "generate_report")
-            app.processEvents()
+            window.live_result_view.fit_view()
+            drain_gui_events()
             pixmap = window.grab()
             image = pixmap.toImage()
             if not image_has_content(image):
@@ -848,10 +876,14 @@ class ReleaseAudit:
                 pixmap.save(str(screenshot_root / f"{theme}_workbench_runtime.png"), "PNG")
             check_label_geometry(theme, "workbench_runtime")
             check_chat_bubble_geometry(theme, "workbench_runtime")
+            check_candidate_pool_geometry(theme, "workbench_runtime")
 
         screenshot_root: Path | None = None
         temp_dir: tempfile.TemporaryDirectory[str] | None = None
-        if self.keep_gui_screenshots:
+        if self.update_ui_screenshots:
+            screenshot_root = ROOT / "assets/screenshots"
+            screenshot_root.mkdir(parents=True, exist_ok=True)
+        elif self.keep_gui_screenshots:
             screenshot_root = ROOT / "data/runtime/release_gui_audit" / datetime.now().strftime("RUN_%Y%m%d_%H%M%S")
             screenshot_root.mkdir(parents=True, exist_ok=True)
         else:
@@ -860,18 +892,19 @@ class ReleaseAudit:
 
         page_names = ["workbench", "knowledge", "monitor", "settings"]
         try:
-            window.resize(1280, 960)
+            window.setMaximumSize(1440, 900)
+            window.resize(1440, 900)
             window.show()
-            app.processEvents()
+            drain_gui_events()
             check_button_bindings()
             screenshots = 0
             for theme in ["dark", "light"]:
                 set_runtime_theme(theme)
                 window._reset_session()
-                app.processEvents()
+                drain_gui_events()
                 for index, page_name in enumerate(page_names):
                     window._switch_workspace_page(index)
-                    app.processEvents()
+                    drain_gui_events()
                     pixmap = window.grab()
                     image = pixmap.toImage()
                     screenshots += 1
@@ -880,17 +913,18 @@ class ReleaseAudit:
                     if screenshot_root is not None:
                         pixmap.save(str(screenshot_root / f"{theme}_{page_name}.png"), "PNG")
                     center_widget = window.stack.currentWidget()
-                    if center_widget is None or center_widget.width() < 500 or center_widget.height() < 620:
+                    if center_widget is None or center_widget.width() < 480 or center_widget.height() < 620:
                         errors.append(f"{theme}/{page_name} 中央页尺寸异常")
                     check_label_geometry(theme, page_name)
                     if page_name == "workbench":
                         check_workbench_left_rail_geometry(theme, page_name)
+                        check_candidate_pool_geometry(theme, page_name)
                 render_runtime_workbench(theme)
                 screenshots += 1
                 check_workbench_left_rail_geometry(theme, "workbench_runtime")
 
             window._switch_workspace_page(1)
-            app.processEvents()
+            drain_gui_events()
             graph_view = window.knowledge_widget.graph_view
             if graph_view.width() < 520 or graph_view.height() < 300:
                 errors.append(f"知识图谱画布尺寸异常 {graph_view.width()}x{graph_view.height()}")
@@ -929,6 +963,7 @@ class ReleaseAudit:
 
         detail = (
             f"深浅主题四页渲染通过，截图 {screenshots} 张，关键按钮绑定完整，对话气泡布局紧凑"
+            + (f"，展示资产已写入 {screenshot_root.relative_to(ROOT).as_posix()}" if self.update_ui_screenshots and screenshot_root else "")
             + (f"，保留目录 {screenshot_root.relative_to(ROOT).as_posix()}" if self.keep_gui_screenshots and screenshot_root else "")
             if not errors
             else "; ".join(errors[:12])
@@ -1023,11 +1058,13 @@ def main() -> int:
     parser.add_argument("--with-llm-health", action="store_true", help="同时检查 LLM 主/回退模型连通性")
     parser.add_argument("--with-gui-render", action="store_true", help="同时渲染主窗口并检查四页布局")
     parser.add_argument("--keep-gui-screenshots", action="store_true", help="保留 GUI 渲染审计截图到 data/runtime")
+    parser.add_argument("--update-ui-screenshots", action="store_true", help="将 GUI 渲染截图写入 assets/screenshots")
     args = parser.parse_args()
     return ReleaseAudit(
         with_llm_health=args.with_llm_health,
         with_gui_render=args.with_gui_render,
         keep_gui_screenshots=args.keep_gui_screenshots,
+        update_ui_screenshots=args.update_ui_screenshots,
     ).run()
 
 

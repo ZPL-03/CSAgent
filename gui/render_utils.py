@@ -61,8 +61,8 @@ def _center_rendered_png(png_bytes: bytes, background_hex: str) -> bytes:
         if bbox is None:
             return png_bytes
         canvas_width, canvas_height = image.size
-        pad_x = max(22, int(canvas_width * 0.16))
-        pad_y = max(22, int(canvas_height * 0.22))
+        pad_x = max(28, int(canvas_width * 0.20))
+        pad_y = max(24, int(canvas_height * 0.18))
         cropped = image.crop(bbox)
         target_width = max(1, canvas_width - pad_x * 2)
         target_height = max(1, canvas_height - pad_y * 2)
@@ -235,11 +235,11 @@ def render_candidate_png_bytes(
             except Exception:
                 pass
             try:
-                axis.set_box_aspect((max(length, 1.0), max(radius * 2.0, 1.0), max(radius * 2.0, 1.0)), zoom=1.0)
+                axis.set_box_aspect((max(length, 1.0), max(radius * 2.0, 1.0), max(radius * 2.0, 1.0)), zoom=0.82)
             except TypeError:
                 axis.set_box_aspect((max(length, 1.0), max(radius * 2.0, 1.0), max(radius * 2.0, 1.0)))
-            radial_limit = radius * 1.2
-            axial_limit = length * 0.68
+            radial_limit = radius * 1.45
+            axial_limit = length * 0.82
             axis.set_xlim(-axial_limit, axial_limit)
             axis.set_ylim(-radial_limit, radial_limit)
             axis.set_zlim(-radial_limit, radial_limit)
@@ -469,4 +469,4 @@ def render_mode_shape_png_bytes(
 
     buffer = io.BytesIO()
     canvas.print_png(buffer)
-    return buffer.getvalue()
+    return _center_rendered_png(buffer.getvalue(), bg)

@@ -6,7 +6,7 @@ import math
 import os
 from typing import Dict
 
-from PyQt6.QtCore import QEvent, Qt
+from PyQt6.QtCore import QEvent, QTimer, Qt
 from PyQt6.QtGui import QPixmap
 from PyQt6.QtWidgets import QLabel, QStackedLayout, QVBoxLayout, QWidget
 
@@ -179,9 +179,10 @@ class InteractivePlotWidget(QWidget):
             return False
         self._static_pixmap = pixmap
         self.static_label.setToolTip(tr("plot.offline_preview", language=self.language))
-        self._update_static_pixmap()
         self._display_mode = "static"
         self.stack.setCurrentWidget(self.static_label)
+        self._update_static_pixmap()
+        self._schedule_static_pixmap_update()
         return True
 
     def _show_static_candidate(self, candidate: Dict, fallback_message: str) -> bool:
@@ -244,6 +245,11 @@ class InteractivePlotWidget(QWidget):
                 Qt.TransformationMode.SmoothTransformation,
             )
         )
+
+    def _schedule_static_pixmap_update(self) -> None:
+        QTimer.singleShot(0, self._update_static_pixmap)
+        QTimer.singleShot(80, self._update_static_pixmap)
+        QTimer.singleShot(180, self._update_static_pixmap)
 
     def _store_initial_camera(self) -> None:
         if self.plotter is not None:
@@ -314,54 +320,58 @@ class InteractivePlotWidget(QWidget):
         projected_width = max(projected_x) - min(projected_x)
         projected_height = max(projected_y) - min(projected_y)
 
-        widget_width = max(1, self.width())
-        widget_height = max(1, self.height())
+        viewport = getattr(getattr(self.plotter, "interactor", None), "size", lambda: None)()
+        widget_width = max(1, viewport.width() if viewport is not None and viewport.width() > 0 else self.width())
+        widget_height = max(1, viewport.height() if viewport is not None and viewport.height() > 0 else self.height())
         aspect = max(0.55, min(2.6, widget_width / widget_height))
-        scale = max(projected_height * 0.5, projected_width / (2.0 * aspect)) * 1.12
+        scale = max(projected_height * 0.5, projected_width / (2.0 * aspect)) * 1.36
         dx = max(xmax - xmin, 1.0)
         dy = max(ymax - ymin, 1.0)
         dz = max(zmax - zmin, 1.0)
-        return max(scale, dz * 0.62, min(dx, dy) * 0.32)
+        return max(scale, dz * 0.58, min(dx, dy) * 0.26)
 
     def _apply_default_camera(self, zoom: float, bounds: tuple[float, float, float, float, float, float] | None = None) -> None:
         assert self.plotter is not None
         bounds = bounds or self._scene_bounds
         if bounds is None:
+            self.plotter.enable_parallel_projection()
             self.plotter.view_isometric()
             self.plotter.reset_camera()
-            self.plotter.camera.zoom(zoom)
+            try:
+                camera = self.plotter.camera
+                camera.SetParallelScale(camera.GetParallelScale() * 1.16)
+            except Exception:
+                self.plotter.camera.zoom(0.86)
+            if zoom != 1.0:
+                self.plotter.camera.zoom(zoom)
             self._store_initial_camera()
             self.plotter.render()
             return
 
-        xmin, xmax, ymin, ymax, zmin, zmax = bounds
-        center = ((xmin + xmax) * 0.5, (ymin + ymax) * 0.5, (zmin + zmax) * 0.5)
-        dx = max(xmax - xmin, 1.0)
-        dy = max(ymax - ymin, 1.0)
-        dz = max(zmax - zmin, 1.0)
-        diagonal = max(math.sqrt(dx * dx + dy * dy + dz * dz), 1.0)
-        direction = (1.55, -1.8, 1.05)
-        norm = math.sqrt(sum(value * value for value in direction))
-        unit = tuple(value / norm for value in direction)
-        distance = diagonal * 1.84
-        camera_position = (
-            center[0] + unit[0] * distance,
-            center[1] + unit[1] * distance,
-            center[2] + unit[2] * distance,
-        )
         camera = self.plotter.camera
-        camera.SetFocalPoint(*center)
-        camera.SetPosition(*camera_position)
-        camera.SetViewUp(0.0, 0.0, 1.0)
         try:
+            self.plotter.enable_parallel_projection()
             camera.ParallelProjectionOn()
-            camera.SetParallelScale(self._projected_parallel_scale(bounds, direction))
         except Exception:
             pass
+        xmin, xmax, ymin, ymax, zmin, zmax = bounds
+        center = ((xmin + xmax) * 0.5, (ymin + ymax) * 0.5, (zmin + zmax) * 0.5)
+        span = math.sqrt((xmax - xmin) ** 2 + (ymax - ymin) ** 2 + (zmax - zmin) ** 2)
+        distance = max(span * 2.4, 1.0)
         try:
-            self.plotter.reset_camera_clipping_range(bounds)
+            camera.SetFocalPoint(*center)
+            camera.SetPosition(center[0] + distance, center[1] + distance, center[2] + distance)
+            camera.SetViewUp(0.0, 0.0, 1.0)
+            camera.SetParallelScale(self._projected_parallel_scale(bounds, (-1.0, -1.0, -1.0)))
         except Exception:
+            try:
+                camera.zoom(0.84)
+            except Exception:
+                pass
+        try:
             self.plotter.reset_camera_clipping_range()
+        except Exception:
+            pass
         if zoom != 1.0:
             self.plotter.camera.zoom(zoom)
         self._store_initial_camera()
@@ -371,7 +381,10 @@ class InteractivePlotWidget(QWidget):
         if self.plotter is None or self._initial_camera_position is None:
             return
         self.plotter.camera_position = self._initial_camera_position
-        self.plotter.reset_camera()
+        try:
+            self.plotter.reset_camera_clipping_range()
+        except Exception:
+            pass
         self.plotter.render()
 
     def reset_view(self) -> None:
@@ -386,6 +399,19 @@ class InteractivePlotWidget(QWidget):
         self._apply_default_camera(1.0)
         self._store_initial_camera()
         self.plotter.render()
+
+    def _schedule_fit_view(self, zoom: float = 1.0) -> None:
+        """等待布局稳定后按最终视口重新适配三维结果。"""
+
+        def apply_fit() -> None:
+            if self._display_mode != "plot" or self.plotter is None or self._scene_bounds is None:
+                return
+            self._apply_default_camera(zoom, self._scene_bounds)
+
+        QTimer.singleShot(0, apply_fit)
+        QTimer.singleShot(80, apply_fit)
+        QTimer.singleShot(220, apply_fit)
+        QTimer.singleShot(420, apply_fit)
 
     def eventFilter(self, watched, event):
         if self.plotter is not None and watched is getattr(self.plotter, "interactor", None):
@@ -432,6 +458,7 @@ class InteractivePlotWidget(QWidget):
             self.plotter.add_mesh(mesh, **kwargs)
         self._scene_bounds = self._combined_bounds(meshes)
         self._apply_default_camera(1.0, self._scene_bounds)
+        self._schedule_fit_view(1.0)
         return True
 
     def closeEvent(self, event) -> None:
@@ -442,6 +469,8 @@ class InteractivePlotWidget(QWidget):
         self._rerender_static_if_needed()
         self._update_static_pixmap()
         self._restore_display_mode()
+        if self._display_mode == "plot" and self.plotter is not None:
+            self._schedule_fit_view(1.0)
         super().resizeEvent(event)
 
     def showEvent(self, event) -> None:
@@ -451,8 +480,9 @@ class InteractivePlotWidget(QWidget):
 
     def _restore_display_mode(self) -> None:
         if self._display_mode == "static" and self._static_pixmap is not None:
-            self._update_static_pixmap()
             self.stack.setCurrentWidget(self.static_label)
+            self._update_static_pixmap()
+            self._schedule_static_pixmap_update()
             return
         if self._display_mode == "plot" and self.plotter is not None:
             self.stack.setCurrentWidget(self.plot_container)
@@ -473,6 +503,7 @@ class InteractivePlotWidget(QWidget):
             self.plotter.add_mesh(mesh, **kwargs)
         self._scene_bounds = self._combined_bounds(meshes)
         self._apply_default_camera(1.0, self._scene_bounds)
+        self._schedule_fit_view(1.0)
 
     def show_mode_shape(self, result: Dict) -> None:
         scene = build_mode_shape_scene(result)
@@ -500,4 +531,5 @@ class InteractivePlotWidget(QWidget):
             },
         )
         self._scene_bounds = self._mesh_bounds(mesh)
-        self._apply_default_camera(1.02, self._scene_bounds)
+        self._apply_default_camera(1.0, self._scene_bounds)
+        self._schedule_fit_view(1.0)

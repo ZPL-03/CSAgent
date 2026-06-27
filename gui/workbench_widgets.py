@@ -45,7 +45,7 @@ class AgentStatusCard(QFrame):
         self.state = "waiting"
         self.setObjectName("agentStatusCard")
         self.setProperty("state", self.state)
-        self.setFixedHeight(60)
+        self.setFixedHeight(66)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         self.dot = QLabel()
@@ -68,14 +68,22 @@ class AgentStatusCard(QFrame):
 
         text_layout = QVBoxLayout()
         text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(3)
+        text_layout.setSpacing(4)
         text_layout.addLayout(header_layout)
         text_layout.addWidget(self.detail)
 
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(14, 8, 14, 8)
+        layout.setContentsMargins(14, 9, 14, 9)
         layout.setSpacing(0)
         layout.addLayout(text_layout, 1)
+
+    def sizeHint(self) -> QSize:
+        width = max(super().sizeHint().width(), 128)
+        return QSize(width, 66)
+
+    def minimumSizeHint(self) -> QSize:
+        width = max(super().minimumSizeHint().width(), 128)
+        return QSize(width, 66)
 
     def set_theme(self, theme: str) -> None:
         self.theme = resolve_theme(theme)
