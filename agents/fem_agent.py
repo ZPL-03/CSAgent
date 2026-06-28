@@ -11,13 +11,22 @@ from abaqus.job_utils import diagnose_failure, is_abaqus_available, read_tail_te
 from agents.base import BaseAgent
 from core.config_loader import load_app_config
 from core.io_utils import read_json, write_json
-from core.paths import ABAQUS_RUNS_DIR, ABAQUS_TEMPLATE_DIR, IO_DIR, ROOT_DIR
+from core.paths import ABAQUS_RUNS_DIR, ABAQUS_TEMPLATE_DIR, IO_DIR, ROOT_DIR, to_project_relative_path
 from core.schema_validator import validate_or_raise
 from core.task_contract import describe_boundary_conditions, describe_load_conditions
 
 
 class FEMAgent(BaseAgent):
     agent_name = "FEM_AGENT"
+    artifact_path_keys = {
+        "abaqus_odb",
+        "linear_buckling_odb",
+        "postbuckling_odb",
+        "abaqus_inp",
+        "postbuckling_inp",
+        "visualization_json",
+        "artifact_dir",
+    }
 
     def __init__(self, progress_callback=None, config: Dict | None = None) -> None:
         super().__init__(progress_callback=progress_callback)
@@ -112,6 +121,9 @@ class FEMAgent(BaseAgent):
 
     def _annotate_result(self, candidate: Dict, result: Dict) -> Dict:
         annotated = dict(result)
+        for key in self.artifact_path_keys:
+            if annotated.get(key):
+                annotated[key] = to_project_relative_path(annotated[key])
         annotated["load_summary"] = describe_load_conditions(candidate.get("load_conditions", {}))
         annotated["boundary_summary"] = describe_boundary_conditions(candidate.get("boundary_conditions", {}))
         annotated["diagnosis_summary"] = self._diagnosis_summary(annotated)

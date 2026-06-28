@@ -29,6 +29,25 @@ ABAQUS_DIR = ROOT_DIR / "abaqus"
 ABAQUS_TEMPLATE_DIR = ABAQUS_DIR / "templates"
 
 
+def resolve_project_path(path_value: object | None) -> Path | None:
+    if path_value in (None, ""):
+        return None
+    path = Path(str(path_value))
+    return path if path.is_absolute() else ROOT_DIR / path
+
+
+def to_project_relative_path(path_value: object | None) -> str | None:
+    if path_value in (None, ""):
+        return None
+    path = Path(str(path_value))
+    if not path.is_absolute():
+        return str(path)
+    try:
+        return str(path.resolve().relative_to(ROOT_DIR.resolve()))
+    except ValueError:
+        return str(path)
+
+
 def ensure_project_dirs() -> None:
     """确保项目运行所需目录存在。"""
     for path in [

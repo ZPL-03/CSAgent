@@ -14,6 +14,7 @@ try:
 except Exception:  # pragma: no cover
     pv = None
 
+from core.paths import resolve_project_path
 from core.pressure_hull_profile import build_pressure_hull_meshes
 
 
@@ -106,7 +107,9 @@ def load_mode_shape_payload(result: Dict) -> Dict | None:
     visualization_json = result.get("visualization_json")
     if not visualization_json:
         return None
-    path = Path(str(visualization_json))
+    path = resolve_project_path(visualization_json)
+    if path is None:
+        return None
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
@@ -118,7 +121,9 @@ def mode_shape_payload_status(result: Dict) -> Dict:
     visualization_json = result.get("visualization_json")
     if not visualization_json:
         return {"available": False, "message": "未提供模态数据路径"}
-    path = Path(str(visualization_json))
+    path = resolve_project_path(visualization_json)
+    if path is None:
+        return {"available": False, "message": "未提供模态数据路径"}
     if not path.exists():
         return {"available": False, "message": f"模态数据文件不存在：{path}"}
     try:

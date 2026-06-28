@@ -4,7 +4,7 @@ import json
 import re
 from pathlib import Path
 
-from core.paths import CASES_DIR
+from core.paths import CASES_DIR, resolve_project_path
 from core.schema_validator import validate_or_raise
 from gui.render_utils import mode_shape_payload_status
 
@@ -49,7 +49,8 @@ def test_case_library_numbering_and_fem_artifacts_are_consistent() -> None:
         for key in ["abaqus_inp", "linear_buckling_odb", "postbuckling_odb", "abaqus_odb", "visualization_json"]:
             artifact = result.get(key)
             assert artifact, f"{path.name} 缺少 {key}"
-            artifact_path = Path(str(artifact))
+            artifact_path = resolve_project_path(artifact)
+            assert artifact_path is not None
             assert artifact_path.exists(), f"{path.name} 的 {key} 文件不存在：{artifact_path}"
             assert artifact_path.is_file()
 

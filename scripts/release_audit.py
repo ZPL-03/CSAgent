@@ -26,6 +26,7 @@ if hasattr(sys.stderr, "reconfigure"):
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from core.paths import resolve_project_path
 from core.schema_validator import validate_or_raise
 
 
@@ -203,20 +204,29 @@ class ReleaseAudit:
         if pytest_cache.exists():
             shutil.rmtree(pytest_cache, ignore_errors=True)
 
-    def _git_output(self, args: list[str]) -> subprocess.CompletedProcess[str]:
-        return subprocess.run(
-            ["git", *args],
-            cwd=ROOT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            capture_output=True,
-            check=False,
-        )
+    def _git_output(self, args: list[str]) -> subprocess.CompletedProcess[str] | None:
+        try:
+            return subprocess.run(
+                ["git", *args],
+                cwd=ROOT,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                capture_output=True,
+                check=False,
+            )
+        except FileNotFoundError:
+            return None
 
     def check_env_ignored(self) -> None:
+        if not (ROOT / ".git").exists():
+            self.add("本地密钥文件", True, "部署副本无 Git 元数据，.env 不参与版本控制")
+            return
         tracked = self._git_output(["ls-files", ".env"])
         ignored = self._git_output(["check-ignore", "-q", ".env"])
+        if tracked is None or ignored is None:
+            self.add("本地密钥文件", False, "检测到 Git 元数据但 git 命令不可用")
+            return
         passed = tracked.stdout.strip() == "" and ignored.returncode == 0
         detail = ".env 未跟踪且被 .gitignore 忽略" if passed else f"tracked={tracked.stdout.strip()!r}, ignored_rc={ignored.returncode}"
         self.add("本地密钥文件", passed, detail)
@@ -1020,6 +1030,16 @@ class ReleaseAudit:
                 errors.append(f"{path.name}: design 身份不一致")
             if result.get("candidate_id") != expected_candidate:
                 errors.append(f"{path.name}: abaqus_results.candidate_id={result.get('candidate_id')}")
+            for artifact_key in [
+                "abaqus_inp",
+                "linear_buckling_odb",
+                "postbuckling_odb",
+                "abaqus_odb",
+                "visualization_json",
+            ]:
+                artifact_path = resolve_project_path(result.get(artifact_key))
+                if artifact_path is None or not artifact_path.is_file():
+                    errors.append(f"{path.name}: {artifact_key} 文件不存在")
             if "????" in path.read_text(encoding="utf-8") or "\ufffd" in path.read_text(encoding="utf-8"):
                 errors.append(f"{path.name}: 存在乱码占位符")
 

@@ -15,7 +15,7 @@ if str(ROOT) not in sys.path:
 from agents.fem_agent import FEMAgent
 from core.case_memory import CaseMemoryIndex
 from core.io_utils import read_json, write_json
-from core.paths import CASES_DIR, CASE_LIBRARY_DIR, IO_DIR
+from core.paths import CASES_DIR, CASE_LIBRARY_DIR, IO_DIR, resolve_project_path
 from scripts.clean_artifacts import purge_business_records
 from scripts.migrate_contracts import normalize_case_record
 
@@ -105,7 +105,8 @@ def main() -> int:
             continue
 
         odb_path = payload.get("abaqus_results", {}).get("abaqus_odb")
-        if not args.force and odb_path and Path(odb_path).exists():
+        resolved_odb_path = resolve_project_path(odb_path)
+        if not args.force and resolved_odb_path and resolved_odb_path.exists():
             continue
         pending.append(case_path)
 
