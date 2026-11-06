@@ -190,7 +190,7 @@ def test_acceptance_runner_can_limit_default_case_count() -> None:
             "设计一个外压圆柱耐压壳，外压 24 MPa，半径约 120 mm，长度约 600 mm，生成 8 个候选，预筛 4 个进入校核",
             {
                 "pressure": 24.0,
-                "target": 30.0,
+                "target": 24.0,
                 "total": 8,
                 "top_k": 4,
                 "boundary_type": "END_CLAMPED",

@@ -122,11 +122,39 @@ class RAGEngine:
             kwargs["local_files_only"] = self.local_files_only
         return kwargs
 
-    def _build_sentence_transformer(self, sentence_transformer_cls):
+    def _resolve_embedding_model_reference(self) -> str:
+        model_path = Path(self.embedding_model_name).expanduser()
+        if model_path.is_dir():
+            return str(model_path.resolve())
+        if not self.local_files_only:
+            return self.embedding_model_name
+
+        try:
+            from huggingface_hub import snapshot_download
+
+            return str(
+                snapshot_download(
+                    repo_id=self.embedding_model_name,
+                    cache_dir=str(self.embedding_cache_dir),
+                    local_files_only=True,
+                )
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"本地嵌入模型不可用：{self.embedding_model_name}；"
+                f"缓存目录：{self.embedding_cache_dir}"
+            ) from exc
+
+    def _build_sentence_transformer(self, sentence_transformer_cls, model_name_or_path: str | None = None):
         kwargs = self._sentence_transformer_kwargs(sentence_transformer_cls)
         force_offline_env = self.local_files_only and "local_files_only" not in kwargs
         try:
-            return self._call_sentence_transformer(sentence_transformer_cls, kwargs, force_offline_env=force_offline_env)
+            return self._call_sentence_transformer(
+                sentence_transformer_cls,
+                kwargs,
+                model_name_or_path=model_name_or_path,
+                force_offline_env=force_offline_env,
+            )
         except TypeError as exc:
             if "local_files_only" not in str(exc) or "local_files_only" not in kwargs:
                 raise
@@ -135,6 +163,7 @@ class RAGEngine:
             return self._call_sentence_transformer(
                 sentence_transformer_cls,
                 retry_kwargs,
+                model_name_or_path=model_name_or_path,
                 force_offline_env=self.local_files_only,
             )
 
@@ -143,16 +172,18 @@ class RAGEngine:
         sentence_transformer_cls,
         kwargs: Dict[str, Any],
         *,
+        model_name_or_path: str | None = None,
         force_offline_env: bool = False,
     ):
+        model_reference = model_name_or_path or self.embedding_model_name
         if not force_offline_env:
-            return sentence_transformer_cls(self.embedding_model_name, **kwargs)
+            return sentence_transformer_cls(model_reference, **kwargs)
         previous_transformers_offline = os.environ.get("TRANSFORMERS_OFFLINE")
         previous_hf_offline = os.environ.get("HF_HUB_OFFLINE")
         os.environ["TRANSFORMERS_OFFLINE"] = "1"
         os.environ["HF_HUB_OFFLINE"] = "1"
         try:
-            return sentence_transformer_cls(self.embedding_model_name, **kwargs)
+            return sentence_transformer_cls(model_reference, **kwargs)
         finally:
             if previous_transformers_offline is None:
                 os.environ.pop("TRANSFORMERS_OFFLINE", None)
@@ -178,9 +209,13 @@ class RAGEngine:
 
         if self._embedder is None and not self._embedder_failed:
             try:
+                model_reference = self._resolve_embedding_model_reference()
                 from sentence_transformers import SentenceTransformer
 
-                self._embedder = self._build_sentence_transformer(SentenceTransformer)
+                self._embedder = self._build_sentence_transformer(
+                    SentenceTransformer,
+                    model_name_or_path=model_reference,
+                )
             except Exception:
                 self._embedder_failed = True
                 raise

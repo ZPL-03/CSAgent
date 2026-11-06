@@ -41,7 +41,11 @@ layup_templates:
 surrogate_coefficients:
   PBIPF:
     q_method: ASME_RD_1172
-    coefficient_basis: reference_shujuabd_ASMEQ_project_units
+    coefficient_basis: project_engineering_descriptor_units
+    descriptor_definition: "D1=lg(Q_MPa)t_mm/R_mm; D2=Q_MPa*D22/(D33-D12); D3=Q_MPa*Ir_permille*L_mm/A22"
+    imperfection_input: permille
+    imperfection_ratio_to_permille: 1000
+    standardization_note: "运行时使用工程描述符单位系数，输入特征不执行二次标准化。"
     d1: 204.149746
     d2: 0.00280336348
     d3: -31.1711936

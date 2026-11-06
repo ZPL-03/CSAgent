@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List
 
 from core.config_loader import load_app_config
+from core.fem_result_semantics import is_passed_design_check, verified_capacity_pressure
 from core.pressure_hull_profile import describe_geometry_text
 from core.task_contract import (
     describe_boundary_conditions,
@@ -42,10 +43,8 @@ def _material_name(payload: Dict[str, Any]) -> str:
 
 
 def _result_pressure(results: Dict[str, Any]) -> Any:
-    for key in ["ultimate_pressure_MPa", "failure_pressure_MPa", "collapse_pressure_MPa", "linear_buckling_pressure_MPa"]:
-        if results.get(key) is not None:
-            return results.get(key)
-    return ""
+    pressure = verified_capacity_pressure(results)
+    return "" if pressure is None else pressure
 
 
 def is_transferable_case(record: Dict[str, Any]) -> bool:
@@ -53,9 +52,7 @@ def is_transferable_case(record: Dict[str, Any]) -> bool:
     design = record.get("design", {})
     if not isinstance(results, dict) or not isinstance(design, dict) or not design:
         return False
-    if results.get("status") != "success":
-        return False
-    return is_pass_verdict(results.get("verdict") or record.get("verdict"))
+    return is_passed_design_check(results)
 
 
 def case_record_to_search_text(record: Dict[str, Any]) -> str:

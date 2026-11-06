@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 from typing import Callable, Dict, List
 
 from agents.base import BaseAgent
@@ -11,6 +12,7 @@ from agents.knowledge_agent import KnowledgeAgent
 from agents.report_gen import ReportGenAgent
 from agents.screener import ScreenerAgent
 from core.id_utils import format_candidate_id, next_candidate_index, reserve_candidate_ids, task_file_name
+from core.fem_input_contract import attach_design_revision, validate_fem_input_or_raise
 from core.io_utils import write_json
 from core.paths import IO_DIR, TASKS_DIR
 from core.task_contract import (
@@ -23,6 +25,7 @@ from core.task_contract import (
     task_payload_from_request,
 )
 from core.task_parser import TaskParser
+from core.pressure_hull_profile import expand_layup_for_fem
 
 
 class OrchestratorAgent(BaseAgent):
@@ -67,10 +70,28 @@ class OrchestratorAgent(BaseAgent):
         formal_candidate_id = formal_candidate_id or format_candidate_id(next_candidate_index())
         session_candidate_id = enriched_candidate.get("candidate_id")
         promoted = dict(enriched_candidate)
+        source_layup = deepcopy(enriched_candidate.get("layup"))
+        promoted["layup"] = expand_layup_for_fem(source_layup, promoted.get("geometry"))
+        provenance = dict(promoted.get("provenance") or {})
+        if source_layup is not None:
+            provenance.setdefault("source_layup", source_layup)
+        provenance["fem_input_layup"] = "explicit_physical_plies"
+        promoted["provenance"] = provenance
+        fem_readiness = dict(promoted.get("fem_readiness") or {})
+        fem_readiness.update(
+            {
+                "status": "ready_for_cylindrical_shell_screening",
+                "layup_expanded": True,
+                "input_contract": "explicit_physical_plies",
+            }
+        )
+        promoted["fem_readiness"] = fem_readiness
         promoted.pop("persistent_candidate_id", None)
         promoted["session_candidate_id"] = session_candidate_id
         promoted["candidate_id"] = formal_candidate_id
         promoted["display_name"] = formal_candidate_id
+        promoted = attach_design_revision(promoted)
+        validate_fem_input_or_raise(promoted)
         return promoted
 
     def prepare_candidates_for_fem(self, task: Dict, candidates: List[Dict]) -> List[Dict]:

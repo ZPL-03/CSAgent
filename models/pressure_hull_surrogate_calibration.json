@@ -1,8 +1,25 @@
 {
   "selected_model": "PBIPF_ASME_RD_1172",
-  "training_size": 5,
-  "bias_MPa": 6.892498,
-  "scale": 1.160336,
+  "training_size": 8,
+  "calibration_status": "rejected",
+  "calibration_method": "positive_scale_leave_one_out",
+  "bias_MPa": 0.0,
+  "scale": 1.0,
+  "candidate_scale": 2.60252,
+  "uncertainty_MPa": 158.825846,
+  "validation": {
+    "baseline": {
+      "mae_MPa": 96.200067,
+      "rmse_MPa": 158.825846,
+      "mape_pct": 36.470182
+    },
+    "leave_one_out_candidate": {
+      "mae_MPa": 79.924405,
+      "rmse_MPa": 117.605005,
+      "mape_pct": 103.377859
+    },
+    "acceptance_rule": "MAE、RMSE 和 MAPE 均严格优于未校准公式"
+  },
   "feature_order": [
     "length_mm",
     "radius_mm",

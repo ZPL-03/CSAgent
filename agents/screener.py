@@ -52,6 +52,7 @@ class ScreenerAgent(BaseAgent):
             updated["surrogate_ultimate_pressure_MPa"] = round(ultimate_pressure, 3)
             updated["surrogate_PBIPF_MPa"] = round(float(prediction["PBIPF_MPa"]), 3)
             updated["surrogate_uncertainty_MPa"] = round(uncertainty, 3)
+            updated["surrogate_calibration_status"] = prediction["calibration_status"]
             updated["asme_linear_buckling_pressure_MPa"] = round(
                 float(prediction["asme_linear_buckling_pressure_MPa"]), 3
             )
@@ -74,9 +75,10 @@ class ScreenerAgent(BaseAgent):
                 "surrogate_detail": prediction,
             }
             updated["screening_summary"] = (
-                f"代理预测极限压力={updated['surrogate_ultimate_pressure_MPa']} MPa，"
+                f"PBIPF 公式筛选估计={updated['surrogate_ultimate_pressure_MPa']} MPa，"
                 f"ASME RD-1172线性屈曲压力={updated['asme_linear_buckling_pressure_MPa']} MPa，"
-                f"PBIPF 预测极限压力为 {updated['surrogate_PBIPF_MPa']} MPa，"
+                f"经验不确定度={updated['surrogate_uncertainty_MPa']} MPa，"
+                f"校准状态={updated['surrogate_calibration_status']}，"
                 f"面密度={updated['surrogate_weight']} kg/m^2，"
                 f"按 {self.score_formula_text} 得分 {updated['rank_score']}。"
             )

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import pytest
 
+from agents.candidate_gen import CandidateGenAgent
 from agents.orchestrator import OrchestratorAgent
+from core.id_utils import format_temp_candidate_id
 from core.task_parser import TaskParser
 from workflow.event_store import WorkflowEventStore
 from workflow.runtime import DesignWorkflowRuntime
@@ -280,11 +282,21 @@ def test_workflow_runtime_batch_fem_uses_unique_formal_candidate_ids(monkeypatch
     store.create_run("RUN_BATCH", "批量有限元编号测试")
 
     task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
-    candidates = [
-        {"candidate_id": "TMP_10", "display_name": "TMP_10", "source": "DOE"},
-        {"candidate_id": "TMP_4", "display_name": "TMP_4", "source": "LLM"},
-        {"candidate_id": "TMP_9", "display_name": "TMP_9", "source": "CASE_TRANSFER"},
-    ]
+    candidates = CandidateGenAgent().doe_sampler.sample_candidates(
+        task,
+        n_samples=3,
+        start_index=1,
+        strict_solver_window=True,
+        id_factory=format_temp_candidate_id,
+    )
+    for candidate, candidate_id, source in zip(
+        candidates,
+        ["TMP_10", "TMP_4", "TMP_9"],
+        ["DOE", "LLM", "CASE_TRANSFER"],
+    ):
+        candidate["candidate_id"] = candidate_id
+        candidate["display_name"] = candidate_id
+        candidate["source"] = source
 
     payload = runtime._evaluate_candidates_with_queue({"task": task, "candidates": candidates})
 
@@ -297,6 +309,68 @@ def test_workflow_runtime_batch_fem_uses_unique_formal_candidate_ids(monkeypatch
     assert [item["formal_candidate_id"] for item in jobs] == ["C16", "C17", "C18"]
     assert [item["session_candidate_id"] for item in jobs] == ["TMP_10", "TMP_4", "TMP_9"]
     assert all(item["status"] == "success" for item in jobs)
+
+
+def test_external_fem_ready_candidates_use_the_same_queue_and_solver_path(tmp_path):
+    store = WorkflowEventStore(tmp_path / "workflow.sqlite3")
+    orchestrator = FakeOrchestrator()
+    runtime = DesignWorkflowRuntime(orchestrator=orchestrator, event_store=store)
+
+    result = runtime.evaluate_fem_ready_candidates(
+        {"task_id": "TASK_EXTERNAL"},
+        [{"candidate_id": "TMP_7", "source": "CASE_TRANSFER"}],
+        run_id="RUN_EXTERNAL",
+    )
+
+    assert result["run_id"] == "RUN_EXTERNAL"
+    assert result["fem_designs"][0]["session_candidate_id"] == "TMP_7"
+    assert result["results"][0]["status"] == "success"
+    assert result["knowledge_updates"][0]["case_id"] == "CASE_100"
+    jobs = runtime.simulation_queue.list_jobs("RUN_EXTERNAL")
+    assert len(jobs) == 1
+    assert jobs[0]["status"] == "success"
+    snapshot = store.load_snapshot("RUN_EXTERNAL")
+    assert snapshot["stage"] == "completed"
+    assert snapshot["knowledge_updates"][0]["case_id"] == "CASE_100"
+    event_types = [event["event_type"] for event in store.list_events("RUN_EXTERNAL")]
+    assert "external_fem_candidates_accepted" in event_types
+    assert "simulation_job_queued" in event_types
+    assert "simulation_job_completed" in event_types
+    assert "knowledge_update_completed" in event_types
+
+
+def test_workflow_runtime_records_failed_fem_result_as_failed_job(tmp_path):
+    store = WorkflowEventStore(tmp_path / "workflow.sqlite3")
+    orchestrator = FakeOrchestrator()
+
+    def failed_result(_task, candidate):
+        return {
+            "candidate_id": candidate["candidate_id"],
+            "session_candidate_id": candidate["session_candidate_id"],
+            "status": "failed",
+            "verdict": None,
+            "ultimate_pressure_MPa": None,
+            "error_type": "service_load_check_failed",
+            "error_log": "目标压力处首层失效校核未通过",
+        }
+
+    orchestrator.evaluate_prepared_candidate = failed_result
+    runtime = DesignWorkflowRuntime(orchestrator=orchestrator, event_store=store)
+    runtime._active_run_id = "RUN_FAILED_FEM"
+    store.create_run("RUN_FAILED_FEM", "失败结果队列状态测试")
+
+    payload = runtime._evaluate_candidates_with_queue(
+        {"task": {}, "candidates": [{"candidate_id": "TMP_1", "source": "DOE"}]}
+    )
+
+    assert payload["results"][0]["status"] == "failed"
+    jobs = runtime.simulation_queue.list_jobs("RUN_FAILED_FEM")
+    assert len(jobs) == 1
+    assert jobs[0]["status"] == "failed"
+    assert jobs[0]["result"]["error_type"] == "service_load_check_failed"
+    assert jobs[0]["formal_candidate_id"] == "C1"
+    event_types = [event["event_type"] for event in store.list_events("RUN_FAILED_FEM")]
+    assert "simulation_job_failed" in event_types
 
 
 def test_workflow_runtime_marks_failed_snapshot_and_run_status(tmp_path):

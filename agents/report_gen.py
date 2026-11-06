@@ -100,7 +100,14 @@ class ReportGenAgent(BaseAgent):
         design_targets = dict(task_payload.get("design_targets", {}))
         target_pressure = float(design_targets.get("ultimate_pressure_min_MPa") or 0.0)
         passed = [result for result in results if result.get("verdict") == "通过"]
-        best_pressure = max(results, key=lambda item: float(item.get("ultimate_pressure_MPa") or 0.0), default=None)
+        confirmed_ultimate_results = [
+            result for result in results if result.get("ultimate_pressure_MPa") is not None
+        ]
+        best_pressure = max(
+            confirmed_ultimate_results,
+            key=lambda item: float(item["ultimate_pressure_MPa"]),
+            default=None,
+        )
         lightest = min(results, key=lambda item: float(item.get("weight_kg_per_m2") or 1e9), default=None)
         return {
             "session_task_id": task.get("task_id"),
@@ -131,6 +138,11 @@ class ReportGenAgent(BaseAgent):
                     "weight_kg_per_m2": result.get("weight_kg_per_m2"),
                     "verdict": result.get("verdict"),
                     "failure_mode": result.get("failure_mode"),
+                    "target_pressure_checked_MPa": result.get("target_pressure_checked_MPa"),
+                    "target_hashin_index_max": result.get("target_hashin_index_max"),
+                    "design_check_status": result.get("design_check_status"),
+                    "design_verdict_basis": result.get("design_verdict_basis"),
+                    "capacity_assessment_status": result.get("capacity_assessment_status"),
                     "diagnosis_summary": result.get("diagnosis_summary"),
                 }
                 for result in results
@@ -142,16 +154,16 @@ class ReportGenAgent(BaseAgent):
         if summary["passed_count"] > 0:
             overall = (
                 f"本轮共完成 {summary['result_count']} 个样本校核，其中 {summary['passed_count']} 个满足"
-                f"极限压力不低于 {target:.3f} MPa 的目标。"
+                f"精确 {target:.3f} MPa 目标压力下的线性屈曲与首层失效联合判据。"
             )
         else:
             overall = (
                 f"本轮共完成 {summary['result_count']} 个样本校核，当前没有样本满足"
-                f"极限压力不低于 {target:.3f} MPa 的目标，需要继续迭代。"
+                f"精确 {target:.3f} MPa 目标压力下的线性屈曲与首层失效联合判据，需要继续迭代。"
             )
         compare = (
-            f"极限压力最高样本为 {summary.get('best_pressure_candidate') or '-'}，"
-            f"极限压力为 {summary.get('best_pressure_MPa') or '-'} MPa；"
+            f"已确认渐进损伤极限压力最高样本为 {summary.get('best_pressure_candidate') or '-'}，"
+            f"对应极限压力为 {summary.get('best_pressure_MPa') or '-'} MPa；"
             f"面密度最低样本为 {summary.get('lightest_candidate') or '-'}，"
             f"面密度为 {summary.get('lightest_weight_kg_per_m2') or '-'} kg/m^2。"
         )
@@ -747,7 +759,7 @@ class ReportGenAgent(BaseAgent):
             f"- 会话任务编号：`{task.get('task_id') or '-'}`",
             f"- 工况：{describe_load_conditions(task_payload['load_conditions'])}",
             f"- 极限压力目标：不低于 {task_payload['design_targets']['ultimate_pressure_min_MPa']} MPa",
-            f"- 候选来源比例：LLM / 案例迁移 / DOE 由任务配置和有效候选去重结果共同确定。",
+            "- 候选来源比例：LLM / 案例迁移 / DOE 由任务配置和有效候选去重结果共同确定。",
             "",
             "## 入选候选与正式编号",
         ]

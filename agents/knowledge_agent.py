@@ -8,6 +8,7 @@ from typing import Dict
 from agents.base import BaseAgent
 from core.case_memory import CaseMemoryIndex
 from core.config_loader import load_app_config
+from core.fem_result_semantics import is_passed_design_check, normalize_result_semantics, verified_capacity_pressure
 from core.id_utils import next_case_id
 from core.io_utils import write_json
 from core.paths import CASE_LIBRARY_DIR, CASES_DIR
@@ -51,6 +52,9 @@ class KnowledgeAgent(BaseAgent):
             "candidate_id": design.get("candidate_id"),
             "display_name": design.get("display_name") or design.get("candidate_id"),
             "source": design.get("source"),
+            "session_candidate_id": design.get("session_candidate_id"),
+            "design_revision_id": design.get("design_revision_id"),
+            "parent_design_revision_id": design.get("parent_design_revision_id"),
             "hull_type": design.get("hull_type", "CYLINDRICAL"),
             "geometry": dict(design.get("geometry", {})),
             "layup": dict(design.get("layup", {})),
@@ -59,9 +63,12 @@ class KnowledgeAgent(BaseAgent):
             "boundary_conditions": dict(normalize_boundary_conditions(design.get("boundary_conditions", {}))),
             "design_targets": dict(design.get("design_targets", {})),
             "rule_check": dict(design.get("rule_check", {})),
+            "provenance": dict(design.get("provenance", {})),
+            "fem_readiness": dict(design.get("fem_readiness", {})),
             "surrogate_ultimate_pressure_MPa": design.get("surrogate_ultimate_pressure_MPa"),
             "surrogate_PBIPF_MPa": design.get("surrogate_PBIPF_MPa"),
             "surrogate_uncertainty_MPa": design.get("surrogate_uncertainty_MPa"),
+            "surrogate_calibration_status": design.get("surrogate_calibration_status"),
             "asme_linear_buckling_pressure_MPa": design.get("asme_linear_buckling_pressure_MPa"),
             "linear_buckling_source": design.get("linear_buckling_source"),
             "surrogate_weight": design.get("surrogate_weight"),
@@ -69,9 +76,6 @@ class KnowledgeAgent(BaseAgent):
             "origin_summary": design.get("origin_summary", ""),
             "llm_output_excerpt": design.get("llm_output_excerpt"),
         }
-        session_candidate_id = str(design.get("session_candidate_id") or "").strip()
-        if session_candidate_id:
-            payload["session_candidate_id"] = session_candidate_id
         return payload
 
     def _sanitize_abaqus_results(self, abaqus_results: Dict) -> Dict:
@@ -86,6 +90,8 @@ class KnowledgeAgent(BaseAgent):
             "linear_buckling_pressure_MPa",
             "first_mode_eigenvalue",
             "postbuckling_pressure_MPa",
+            "geometric_limit_pressure_MPa",
+            "geometric_limit_pressure_observed_MPa",
             "postbuckling_reference_pressure_MPa",
             "postbuckling_last_pressure_MPa",
             "riks_lpf_max",
@@ -110,18 +116,55 @@ class KnowledgeAgent(BaseAgent):
             "mode_eigenvalues",
             "load_summary",
             "boundary_summary",
+            "boundary_condition_type",
+            "boundary_implementation",
             "diagnosis_summary",
             "analysis_type",
             "user_subroutine_used",
+            "progressive_damage_complete",
+            "design_check_status",
+            "design_verdict_basis",
+            "capacity_assessment_status",
+            "runtime_script_sha256",
+            "verification_scope",
+            "abaqus_job_status",
+            "riks_increment_count",
+            "riks_limit_point_observed",
+            "riks_limit_point_confirmed",
+            "riks_post_peak_drop_ratio",
+            "first_ply_failure_pressure_MPa",
+            "first_ply_failure_criterion",
+            "first_ply_failure_index",
+            "first_ply_failure_mode",
+            "first_ply_failure_element_label",
+            "first_ply_failure_section_point",
+            "first_ply_failure_pressure_lower_bound_MPa",
+            "first_ply_failure_pressure_upper_bound_MPa",
+            "service_abaqus_job_status",
+            "service_failure_criterion",
+            "service_pressure_check_status",
+            "service_pressure_checked_MPa",
+            "service_hashin_index_max",
+            "service_hashin_failure_mode",
+            "service_hashin_element_label",
+            "service_hashin_section_point",
+            "target_failure_criterion",
+            "target_abaqus_job_status",
+            "target_pressure_check_status",
+            "target_pressure_checked_MPa",
+            "target_hashin_index_max",
+            "target_hashin_failure_mode",
+            "target_hashin_element_label",
+            "target_hashin_section_point",
+            "service_odb",
+            "service_inp",
+            "target_odb",
+            "target_inp",
         ]
-        return {key: abaqus_results.get(key) for key in keys}
+        return normalize_result_semantics({key: abaqus_results.get(key) for key in keys})
 
     def _result_pressure(self, results: Dict) -> float | None:
-        for key in ["ultimate_pressure_MPa", "failure_pressure_MPa", "linear_buckling_pressure_MPa"]:
-            value = results.get(key)
-            if value is not None:
-                return float(value)
-        return None
+        return verified_capacity_pressure(results)
 
     def _build_record(self, task: Dict, design: Dict, abaqus_results: Dict) -> Dict:
         clean_task = self._sanitize_task(task)
@@ -156,7 +199,7 @@ class KnowledgeAgent(BaseAgent):
         return record
 
     def _should_store_record(self, abaqus_results: Dict) -> bool:
-        return abaqus_results.get("status") == "success" and abaqus_results.get("verdict") == "通过"
+        return is_passed_design_check(abaqus_results)
 
     def _case_memory_index(self) -> CaseMemoryIndex | None:
         if getattr(self, "_case_memory_unavailable", False):
@@ -201,8 +244,9 @@ class KnowledgeAgent(BaseAgent):
 
         summary = self.model_manager.train_from_records(records)
         self.emit(
-            "代理公式校准已更新："
+            "代理公式校准评估完成："
             f"样本数={summary['training_size']} | "
+            f"状态={summary['calibration_status']} | "
             f"bias={summary['bias_MPa']:.4f} MPa | "
             f"scale={summary['scale']:.4f}"
         )
@@ -220,7 +264,7 @@ class KnowledgeAgent(BaseAgent):
         else:
             self.emit(f"案例 {record['case_id']} 已归档到评估档案，未进入正式案例库")
 
-        retrain_summary = self._maybe_retrain_surrogate()
+        retrain_summary = self._maybe_retrain_surrogate() if self._should_store_record(record["abaqus_results"]) else None
         return {
             "status": "stored" if self._should_store_record(record["abaqus_results"]) else "archived_only",
             "case_id": record["case_id"],

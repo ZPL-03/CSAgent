@@ -308,6 +308,7 @@ def normalize_layup(raw_layup: Any, geometry: Dict[str, Any] | None = None) -> D
     count_0 = sum(1 for angle in sequence if abs(angle) < 1e-6)
     count_45 = sum(1 for angle in sequence if abs(abs(angle) - 45.0) < 1e-6)
     count_90 = sum(1 for angle in sequence if abs(abs(angle) - 90.0) < 1e-6)
+    total_thickness = _safe_float(geometry.get("thickness_mm"), 0.0)
     return {
         "template_name": template,
         "layup": text,
@@ -315,11 +316,102 @@ def normalize_layup(raw_layup: Any, geometry: Dict[str, Any] | None = None) -> D
         "alpha_deg": round(alpha, 3),
         "beta_deg": round(beta, 3),
         "ply_count": total,
+        "ply_thickness_mm": round(total_thickness / total, 6) if total_thickness > 0.0 else None,
         "angles_deg": [round(float(angle), 3) for angle in sequence],
+        "symmetric": sequence_is_symmetric(sequence),
+        "balanced": sequence_is_balanced(sequence),
         "skin_f0": round(count_0 / total, 3),
         "skin_f45": round(count_45 / total, 3),
         "skin_f90": round(count_90 / total, 3),
     }
+
+
+def sequence_is_balanced(sequence: List[float]) -> bool:
+    """按每个非 0/90 度角的正负层数判断均衡性。"""
+    values = [round(float(angle), 6) for angle in sequence]
+    magnitudes = {abs(angle) for angle in values if abs(angle) not in {0.0, 90.0}}
+    return all(values.count(magnitude) == values.count(-magnitude) for magnitude in magnitudes)
+
+
+def sequence_is_symmetric(sequence: List[float]) -> bool:
+    """判断逐层序列是否关于层合中面对称。"""
+    values = [round(float(angle), 6) for angle in sequence]
+    return values == list(reversed(values))
+
+
+def _format_explicit_angle(angle: float) -> str:
+    """把单层角度格式化为不含压缩记号的文本。"""
+    value = round(float(angle), 6)
+    if abs(value) < 1e-9:
+        return "0"
+    if value.is_integer():
+        return str(int(value))
+    return f"{value:.6f}".rstrip("0").rstrip(".")
+
+
+def render_explicit_layup(sequence: List[float]) -> str:
+    """按逐个物理层顺序渲染铺层文本。"""
+    return "[" + "/".join(_format_explicit_angle(angle) for angle in sequence) + "]"
+
+
+def expand_layup_for_fem(raw_layup: Any, geometry: Dict[str, Any] | None = None) -> Dict[str, Any]:
+    """把候选铺层统一为 Abaqus 输入所需的逐层显式表示。"""
+    geometry = geometry or {}
+    raw = dict(raw_layup) if isinstance(raw_layup, dict) else {"layup": str(raw_layup or "")}
+    explicit_text = all(
+        isinstance(raw.get(field), str)
+        and not re.search(r"±|\]s|_\d+", raw[field])
+        for field in ("layup", "skin_layup")
+    )
+    raw_angles = raw.get("angles_deg")
+    if explicit_text and isinstance(raw_angles, list) and raw_angles:
+        try:
+            angles = [round(float(angle), 3) for angle in raw_angles]
+        except (TypeError, ValueError):
+            angles = []
+        total_thickness = _safe_float(geometry.get("thickness_mm"), 0.0)
+        thickness = raw.get("ply_thickness_mm")
+        thickness_ok = False
+        try:
+            thickness_ok = total_thickness > 0.0 and abs(float(thickness) * len(angles) - total_thickness) <= 1e-5
+        except (TypeError, ValueError):
+            pass
+        if (
+            angles
+            and raw.get("ply_count") == len(angles)
+            and thickness_ok
+            and raw.get("balanced") is sequence_is_balanced(angles)
+            and raw.get("symmetric") is sequence_is_symmetric(angles)
+        ):
+            return raw
+    else:
+        angles = []
+
+    if not angles:
+        alpha = _safe_float(raw.get("alpha_deg"), _safe_float(geometry.get("alpha_deg"), 40.0))
+        beta = _safe_float(raw.get("beta_deg"), _safe_float(geometry.get("beta_deg"), 70.0))
+        text = str(raw.get("layup") or raw.get("skin_layup") or layup_pattern(alpha, beta, str(raw.get("template_name") or "BASE_90_AB")))
+        angles = [round(float(angle), 3) for angle in parse_layup_sequence(text, alpha, beta)]
+
+    total_thickness = _safe_float(geometry.get("thickness_mm"), 0.0)
+    count = max(len(angles), 1)
+    rendered = render_explicit_layup(angles)
+    updated = dict(raw)
+    updated.update(
+        {
+            "layup": rendered,
+            "skin_layup": rendered,
+            "ply_count": len(angles),
+            "angles_deg": angles,
+            "ply_thickness_mm": round(total_thickness / count, 6) if total_thickness > 0.0 else raw.get("ply_thickness_mm"),
+            "symmetric": sequence_is_symmetric(angles),
+            "balanced": sequence_is_balanced(angles),
+            "skin_f0": round(sum(1 for angle in angles if abs(angle) < 1e-6) / count, 3),
+            "skin_f45": round(sum(1 for angle in angles if abs(abs(angle) - 45.0) < 1e-6) / count, 3),
+            "skin_f90": round(sum(1 for angle in angles if abs(abs(angle) - 90.0) < 1e-6) / count, 3),
+        }
+    )
+    return updated
 
 
 def _qbar(angle_deg: float, material: Dict[str, Any]) -> List[List[float]]:

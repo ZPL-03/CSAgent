@@ -213,23 +213,92 @@ class DesignWorkflowRuntime:
                     {"job_id": job_id, "source": "SimulationQueue", "error": str(exc)},
                 )
                 raise
-            self.simulation_queue.mark_success(job_id, result)
-            self._emit_event(
-                "simulation_job_completed",
-                "FEM_AGENT",
-                f"有限元作业完成：{job_id}",
-                {
-                    "job_id": job_id,
-                    "source": "SimulationQueue",
-                    "candidate_id": result.get("candidate_id"),
-                    "session_candidate_id": result.get("session_candidate_id"),
-                    "status": result.get("status"),
-                    "verdict": result.get("verdict"),
-                    "ultimate_pressure_MPa": result.get("ultimate_pressure_MPa"),
-                },
-            )
+            result_status = str(result.get("status") or "").strip().lower()
+            event_payload = {
+                "job_id": job_id,
+                "source": "SimulationQueue",
+                "candidate_id": result.get("candidate_id"),
+                "session_candidate_id": result.get("session_candidate_id"),
+                "status": result.get("status"),
+                "verdict": result.get("verdict"),
+                "ultimate_pressure_MPa": result.get("ultimate_pressure_MPa"),
+                "error_type": result.get("error_type"),
+                "error_log": result.get("error_log"),
+            }
+            if result_status == "success":
+                self.simulation_queue.mark_success(job_id, result)
+                self._emit_event(
+                    "simulation_job_completed",
+                    "FEM_AGENT",
+                    f"有限元作业完成：{job_id}",
+                    event_payload,
+                )
+            else:
+                error_message = str(
+                    result.get("error_log")
+                    or result.get("error_type")
+                    or f"有限元返回非成功状态：{result.get('status')}"
+                )
+                self.simulation_queue.mark_failed(job_id, error_message, result)
+                self._emit_event(
+                    "simulation_job_failed",
+                    "FEM_AGENT",
+                    f"有限元作业失败：{job_id}：{error_message}",
+                    event_payload,
+                )
             results.append(result)
         return {"results": results, "fem_designs": fem_designs}
+
+    def evaluate_fem_ready_candidates(
+        self,
+        task: Dict[str, Any],
+        candidates: list[Dict[str, Any]],
+        *,
+        run_id: str | None = None,
+    ) -> Dict[str, Any]:
+        """让外部已验证候选复用正式编号、仿真队列和 Abaqus 求解链路。"""
+        if not candidates:
+            raise ValueError("FEM-ready 候选列表为空")
+        active_run_id = run_id or new_run_id()
+        previous_run_id = self._active_run_id
+        previous_stage = self._active_stage
+        if not self.event_store.has_run(active_run_id):
+            self.event_store.create_run(active_run_id, "CS_LLM FEM-ready 候选校核")
+        self._active_run_id = active_run_id
+        self._active_stage = "evaluate_candidates"
+        try:
+            self._emit_event(
+                "external_fem_candidates_accepted",
+                "ORCHESTRATOR",
+                f"已接收并校验 {len(candidates)} 个 FEM-ready 候选。",
+                {"candidate_count": len(candidates), "source": "CS_LLM"},
+            )
+            result = self._evaluate_candidates_with_queue({"task": task, "candidates": candidates})
+            knowledge_updates = self.orchestrator.persist_knowledge_records(
+                task,
+                result["fem_designs"],
+                result["results"],
+            )
+            self.event_store.save_snapshot(
+                active_run_id,
+                {
+                    "run_id": active_run_id,
+                    "task": task,
+                    "fem_designs": result["fem_designs"],
+                    "results": result["results"],
+                    "knowledge_updates": knowledge_updates,
+                    "stage": "completed",
+                    "pending_confirmation": None,
+                    "error": None,
+                },
+            )
+            return {"run_id": active_run_id, **result, "knowledge_updates": knowledge_updates}
+        except Exception:
+            self.event_store.update_run_status(active_run_id, "failed")
+            raise
+        finally:
+            self._active_run_id = previous_run_id
+            self._active_stage = previous_stage
 
     def _node(self, node_name: str, state: DesignWorkflowState, fn) -> Dict[str, Any]:
         run_id = state["run_id"]

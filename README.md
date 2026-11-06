@@ -21,7 +21,11 @@ CSAgent 多智能体智能设计平台面向复合材料外压圆柱耐压壳智
 - 流程参数：候选池总数和初筛保留数由自然语言明确指定
 - 候选来源初始比例：`LLM:案例迁移:DOE = 2:1:1`，实际来源统计以有效候选为准
 
-自然语言中明确给出的长度、半径、厚度、铺层角或缺陷比默认写入 `fixed_geometry`，作为候选生成和有限元输入必须满足的几何条件；只有字段附近出现“约、参考、附近、设计中心、左右”等参考语义时，对应字段才写入 `geometry_reference`，用于设计中心和几何包络。
+自然语言中明确给出的长度、半径、厚度、铺层角或缺陷比默认写入 `fixed_geometry`，作为候选生成和有限元输入必须满足的几何条件；只有字段附近出现“约、参考、附近、设计中心、左右”等参考语义时，对应字段才写入 `geometry_reference`，用于设计中心和几何包络。任务可直接给定外压，也可给定工作水深；水深按海水密度 `1025 kg/m³` 和重力加速度 `9.80665 m/s²` 换算表压。未单独给定极限压力目标时，目标采用当前服务外压，不使用固定 30 MPa 占位值。
+
+## LLM 后端
+
+`config/llm_config.yaml` 按顺序配置领域主模型和通用回退模型。领域主模型从本地 `.env` 读取 `LLM_PRIMARY_URL`、`LLM_PRIMARY_API_KEY` 和 `LLM_PRIMARY_MODEL_NAME`；通用回退模型读取 `URL`、`API_KEY` 和 `MODEL_NAME`。缺少完整参数的后端不会参与调用；主模型请求失败时按配置顺序尝试回退模型，并在运行事件中记录后端名称、模型、状态、耗时、`finish_reason` 和脱敏错误摘要。`.env` 不进入 Git，配置状态和审计输出不显示 URL、密钥、系统提示词或用户提示词正文。
 
 ## GUI 工作台
 
@@ -40,11 +44,11 @@ PyQt6 桌面端默认为简体中文界面，“设置”页支持切换为 Engl
 ```text
 P_PBIPF = d1 * lg(Q) * t / R
         + d2 * Q * D22 / (D33 - D12)
-        + d3 * Q * Ir * L / A22
+        + d3 * Q * Ir_permille * L / A22
         + d0
 ```
 
-其中 `Q` 为 ASME RD-1172 计算得到的线性屈曲压力。候选初筛阶段不调用 Abaqus；系统先用 `core/pressure_hull_profile.py` 计算 `asme_linear_buckling_pressure_MPa`，再作为 PBIPF 公式输入。公式系数位于 `config/param_ranges.yaml`，层合板刚度由 `core/pressure_hull_profile.py` 按经典层合板理论计算。
+其中 `Q` 为 ASME RD-1172 计算得到的线性屈曲压力，`Ir_permille` 为千分比缺陷值。候选合同中的 `imperfection_ratio` 以比例保存，例如 `0.005`；计算描述符时显式乘以 `1000` 转为 `5`。候选初筛阶段不调用 Abaqus；系统先用 `core/pressure_hull_profile.py` 计算 `asme_linear_buckling_pressure_MPa`，再作为 PBIPF 公式输入。公式系数和单位口径位于 `config/param_ranges.yaml`，层合板刚度由 `core/pressure_hull_profile.py` 按经典层合板理论计算。训练阶段的标准化只用于拟合输入，运行时使用工程描述符单位系数。
 
 ## 智能体
 
@@ -129,6 +133,10 @@ D:\anaconda3\envs\AGENT\python.exe scripts\build_initial_cases.py --reset --coun
 
 ## 有限元说明
 
-自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出。流程先执行单位外压线性屈曲分析并提取一阶模态云图，再以一阶模态缺陷进入 Static Riks 后屈曲分析，极限压力取最大 LPF 与基准外压的乘积。GUI 的工作台候选池、右侧实时视口和监控页 FEM 指标区读取候选几何、有限元结果和 `visualization_json`；右侧实时视口初始显示等待提示，候选生成后显示可旋转、缩放、平移的三维几何模型，有限元校核完成后可在几何模型和一阶模态云图之间切换。交互式 OpenGL 视图不可用时，界面使用与当前主题一致的 Matplotlib 静态工程预览显示候选几何或一阶模态云图。离线图注跟随界面语言，并在详情中展示模态数据路径、点面数量和可用性状态。
+自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出。进入 Abaqus 前，`core/fem_input_contract.py` 必须确认候选包含完整圆柱壳几何、显式逐层角度、材料参数、外压、边界、设计目标和稳定 `design_revision_id`；运行时脚本再次校验同一合同，不对缺失材料、铺层、几何或目标静默使用默认值。Riks 结果只有在 ODB 作业成功且载荷路径出现明确后峰下降时才确认几何极限点；观测最大 LPF、未收敛末帧或达到增量上限不能写成极限压力。已收敛帧的各铺层应力按二维 Hashin 公式计算首次铺层失效起始压力和目标压力处失效指数，并保留单元号、铺层积分点和控制失效模式；该结果是损伤起始证据，不是渐进损伤极限强度。未运行渐进损伤模型时，几何非线性极限点、首次铺层失效与材料极限强度分开记录，不生成材料强度通过结论。求解日志、状态文件、输入文件和 ODB 作为审计证据保留。失败重试改变厚度、缺陷或分析设置时生成新的 `design_revision_id` 并记录 `parent_design_revision_id`，有限元结果按实际修订号回写。材料库覆盖 `T700/Epoxy`、`T800G/5228`、`M40J/TDE-85` 和 `IM7-8552`。
+
+CS_LLM 的 FEM-ready 候选通过 `core/fem_candidate_transfer.py` 导入。导入器只接受完整 JSON 服务响应，复核合同版本、正式有限元表格 SHA256、候选数量和编号、每个 `design_revision_id`、候选来源、历史筛选角色、当前未求解状态、FEM 输入完整性和总体 `design_fingerprint`；Markdown 只用于展示，不参与机器输入。候选角色区分同几何历史基线、同几何探索和最近邻迁移探索，任何历史参考值都不能写成当前 Abaqus 通过结论。命令行入口为 `python scripts/import_csllm_fem_candidates.py <response.json>`，验证后的候选包写入 `data/io/`。`python scripts/run_csllm_fem_candidates.py <response.json> --candidate-id TMP_N` 将指定候选送入原有正式编号、仿真队列和 Abaqus 链路；求解完成后统一执行知识回流，保留 `design_revision_id`、源表行号、源表 SHA256、A/B/D 复算证据、边界实现和服务/目标压力 Hashin 证据。求解成功表示作业完成，设计是否通过由结果中的 `verdict` 和设计校核状态判定。
+
+流程先执行单位外压线性屈曲分析并提取一阶模态云图，再以一阶模态缺陷进入 Static Riks 后屈曲分析。Riks 最大 LPF 与基准外压的乘积只在结果合同确认后峰极限点后写入几何极限压力字段；渐进损伤未完成时，材料极限强度保持未知。当前模型只包含复合材料圆柱壳；金属封头、法兰和连接未显式建模时，结果只能用于圆柱壳子模型筛选，不能证明整机安全。GUI 的工作台候选池、右侧实时视口和监控页 FEM 指标区读取候选几何、有限元结果和 `visualization_json`；右侧实时视口初始显示等待提示，候选生成后显示可旋转、缩放、平移的三维几何模型，有限元校核完成后可在几何模型和一阶模态云图之间切换。交互式 OpenGL 视图不可用时，界面使用与当前主题一致的 Matplotlib 静态工程预览显示候选几何或一阶模态云图。离线图注跟随界面语言，并在详情中展示模态数据路径、点面数量和可用性状态。
 
 用户子程序通过 `config/app_config.yaml` 的 `abaqus.user_subroutine` 和 `abaqus.use_user_subroutine` 显式配置；默认关闭以避免本机编译环境阻断主流程。未找到 ABAQUS 命令时返回带诊断信息的失败结果，不伪造有限元通过。

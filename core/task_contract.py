@@ -149,7 +149,7 @@ def load_condition_payload(load_type: str, external_pressure_MPa: float = DEFAUL
     return {
         "type": normalized_type,
         "label": LOAD_CASE_LABELS[normalized_type],
-        "external_pressure_MPa": round(pressure, 3),
+        "external_pressure_MPa": round(pressure, 6),
     }
 
 
@@ -169,7 +169,28 @@ def normalize_load_conditions(load_conditions: Any) -> Dict[str, Any]:
             if load_conditions.get("external_pressure_MPa") is not None
             else load_conditions.get("pressure_MPa")
         )
-        return load_condition_payload(normalized_type, _safe_float(pressure, DEFAULT_EXTERNAL_PRESSURE_MPA))
+        normalized = load_condition_payload(
+            normalized_type,
+            _safe_float(pressure, DEFAULT_EXTERNAL_PRESSURE_MPA),
+        )
+        if load_conditions.get("service_depth_m") is not None:
+            normalized["service_depth_m"] = round(
+                max(_safe_float(load_conditions.get("service_depth_m"), 0.0), 0.0),
+                6,
+            )
+        if load_conditions.get("seawater_density_kg_per_m3") is not None:
+            normalized["seawater_density_kg_per_m3"] = round(
+                max(_safe_float(load_conditions.get("seawater_density_kg_per_m3"), 0.0), 0.0),
+                6,
+            )
+        if load_conditions.get("gravity_m_per_s2") is not None:
+            normalized["gravity_m_per_s2"] = round(
+                max(_safe_float(load_conditions.get("gravity_m_per_s2"), 0.0), 0.0),
+                8,
+            )
+        if load_conditions.get("pressure_basis"):
+            normalized["pressure_basis"] = str(load_conditions["pressure_basis"])
+        return normalized
 
     text = str(load_conditions or "").strip()
     import re

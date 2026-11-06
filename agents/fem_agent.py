@@ -4,12 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Dict
+from copy import deepcopy
 
 from jinja2 import Template
 
 from abaqus.job_utils import diagnose_failure, is_abaqus_available, read_tail_text, run_command, wait_for_result_file
 from agents.base import BaseAgent
 from core.config_loader import load_app_config
+from core.fem_input_contract import attach_design_revision, validate_fem_input_or_raise
 from core.io_utils import read_json, write_json
 from core.paths import ABAQUS_RUNS_DIR, ABAQUS_TEMPLATE_DIR, IO_DIR, ROOT_DIR, to_project_relative_path
 from core.schema_validator import validate_or_raise
@@ -22,10 +24,21 @@ class FEMAgent(BaseAgent):
         "abaqus_odb",
         "linear_buckling_odb",
         "postbuckling_odb",
+        "service_odb",
+        "target_odb",
         "abaqus_inp",
         "postbuckling_inp",
+        "service_inp",
+        "target_inp",
         "visualization_json",
         "artifact_dir",
+    }
+    non_retryable_error_types = {
+        "limit_point_not_confirmed",
+        "progressive_damage_not_configured",
+        "invalid_fem_input",
+        "service_load_solver_failed",
+        "target_load_solver_failed",
     }
 
     def __init__(self, progress_callback=None, config: Dict | None = None) -> None:
@@ -55,11 +68,11 @@ class FEMAgent(BaseAgent):
 
     def _cleanup_run_artifacts(self, candidate_id: str, keep_logs: bool = True) -> None:
         run_dir = self._run_dir(candidate_id)
-        removable = [".lck", ".023", ".com", ".jnl", ".sta", ".prt", ".sim", ".log", ".env", ".odb_f"]
+        removable = [".lck", ".023", ".com", ".jnl", ".prt", ".sim", ".env", ".odb_f"]
         if not keep_logs:
-            removable.extend([".msg", ".dat"])
+            removable.extend([".msg", ".dat", ".sta", ".log"])
 
-        for root_name in [candidate_id, f"{candidate_id}_post"]:
+        for root_name in [candidate_id, f"{candidate_id}_service", f"{candidate_id}_target", f"{candidate_id}_post"]:
             for suffix in removable:
                 path = run_dir / f"{root_name}{suffix}"
                 if path.exists():
@@ -94,6 +107,36 @@ class FEMAgent(BaseAgent):
             verdict = result.get("verdict", "未判定")
             linear_pressure = result.get("linear_buckling_pressure_MPa")
             ultimate_pressure = result.get("ultimate_pressure_MPa")
+            design_check_status = result.get("design_check_status")
+            service_status = result.get("service_pressure_check_status")
+            if design_check_status == "failed_at_service_pressure" or service_status == "failed":
+                service_pressure = result.get("service_pressure_checked_MPa")
+                service_index = result.get("service_hashin_index_max")
+                failure_mode = result.get("service_hashin_failure_mode") or result.get("failure_mode")
+                return (
+                    f"精确服务压力校核已完成，服务压力 {service_pressure} MPa，"
+                    f"线性屈曲压力 {linear_pressure} MPa，最大 Hashin 指数 {service_index}；"
+                    f"控制模式为 {failure_mode}，设计判定为“{verdict}”，"
+                    "容量分析因服务压力校核未通过而未运行。"
+                )
+            if design_check_status == "failed_at_design_target_pressure":
+                target_pressure = result.get("target_pressure_checked_MPa")
+                target_index = result.get("target_hashin_index_max")
+                return (
+                    f"精确目标压力校核已完成，目标压力 {target_pressure} MPa，"
+                    f"线性屈曲压力 {linear_pressure} MPa，最大 Hashin 指数 {target_index}；"
+                    f"控制模式为 {result.get('target_hashin_failure_mode') or result.get('failure_mode')}，"
+                    f"设计判定为“{verdict}”，容量分析因目标压力校核未通过而未运行。"
+                )
+            if design_check_status == "passed_at_design_target_pressure":
+                target_pressure = result.get("target_pressure_checked_MPa")
+                target_index = result.get("target_hashin_index_max")
+                capacity_status = result.get("capacity_assessment_status")
+                return (
+                    f"精确目标压力校核已完成，目标压力 {target_pressure} MPa，"
+                    f"线性屈曲压力 {linear_pressure} MPa，最大 Hashin 指数 {target_index}；"
+                    f"设计判定为“{verdict}”，容量分析状态为 {capacity_status}。"
+                )
             basis = result.get("ultimate_pressure_basis") or "有限元校核"
             reference_pressure = result.get("postbuckling_reference_pressure_MPa")
             lpf = result.get("riks_lpf_max")
@@ -114,6 +157,10 @@ class FEMAgent(BaseAgent):
             "geometry_issue": "几何装配阶段出现异常，建议检查半径、厚度和端部约束。",
             "convergence_fail": "非线性或特征值求解未稳定收敛，建议增大厚度、降低缺陷幅值或细化增量控制。",
             "pressure_negative": "求得负压力特征值，通常意味着载荷方向或边界设置需要复核。",
+            "limit_point_not_confirmed": "Riks 作业未在成功状态下形成明确后峰下降，观测最大 LPF 不能作为极限压力。",
+            "progressive_damage_not_configured": "当前运行未启用可执行的渐进损伤模型，不能给出材料极限强度结论。",
+            "service_load_solver_failed": "服务压力精确加载作业未完成，不能给出服务工况结论。",
+            "target_load_solver_failed": "设计目标压力精确加载作业未完成，不能给出目标工况结论。",
             "process_crash": "ABAQUS 进程异常退出，建议检查运行环境、日志和临时文件。",
             "abaqus_unavailable": "未找到 ABAQUS 命令，无法执行真实有限元求解。",
         }
@@ -126,38 +173,43 @@ class FEMAgent(BaseAgent):
                 annotated[key] = to_project_relative_path(annotated[key])
         annotated["load_summary"] = describe_load_conditions(candidate.get("load_conditions", {}))
         annotated["boundary_summary"] = describe_boundary_conditions(candidate.get("boundary_conditions", {}))
+        annotated["design_revision_id"] = candidate.get("design_revision_id")
+        annotated["parent_design_revision_id"] = candidate.get("parent_design_revision_id")
         annotated["diagnosis_summary"] = self._diagnosis_summary(annotated)
         return annotated
 
     def apply_adjustment(self, candidate: Dict, failure_type: str, attempt: int) -> Dict:
-        geometry = dict(candidate["geometry"])
+        adjusted = deepcopy(candidate)
+        parent_revision_id = str(candidate.get("design_revision_id") or "")
+        geometry = dict(adjusted["geometry"])
         adjustment: Dict[str, object] = {"attempt": attempt + 1, "failure_type": failure_type}
 
         if failure_type == "mesh_error":
             current_mesh_size = float(candidate.get("analysis", {}).get("mesh_size_mm", 0.0))
-            candidate.setdefault("analysis", {})
-            candidate["analysis"]["mesh_size_mm"] = round(max(current_mesh_size * 1.15, 6.0) if current_mesh_size else 8.0, 3)
+            adjusted.setdefault("analysis", {})
+            adjusted["analysis"]["mesh_size_mm"] = round(max(current_mesh_size * 1.15, 6.0) if current_mesh_size else 8.0, 3)
             adjustment["strategy"] = "增大壳体网格尺寸以绕开局部畸变"
         elif failure_type == "geometry_issue":
             geometry["thickness_mm"] = round(min(max(geometry["thickness_mm"] + 0.5, 5.0), 20.0), 3)
             geometry["imperfection_ratio"] = round(min(max(geometry["imperfection_ratio"], 0.001), 0.008), 6)
             adjustment["strategy"] = "提高壁厚并收敛到稳定缺陷区间"
         elif failure_type == "convergence_fail":
-            candidate.setdefault("analysis", {})
-            candidate["analysis"]["buckling_modes"] = int(candidate["analysis"].get("buckling_modes", 8)) + 4
+            adjusted.setdefault("analysis", {})
+            adjusted["analysis"]["buckling_modes"] = int(adjusted["analysis"].get("buckling_modes", 8)) + 4
             geometry["thickness_mm"] = round(min(geometry["thickness_mm"] + 0.8, 20.0), 3)
             geometry["imperfection_ratio"] = round(max(geometry["imperfection_ratio"] * 0.85, 0.001), 6)
             adjustment["strategy"] = "增加特征值搜索规模、提高壁厚并降低缺陷幅值"
         elif failure_type == "pressure_negative":
-            candidate.setdefault("analysis", {})
-            candidate["analysis"]["buckling_modes"] = max(int(candidate["analysis"].get("buckling_modes", 8)), 12) + 4
+            adjusted.setdefault("analysis", {})
+            adjusted["analysis"]["buckling_modes"] = max(int(adjusted["analysis"].get("buckling_modes", 8)), 12) + 4
             adjustment["strategy"] = "增加屈曲模态搜索数量并复核压力方向"
         else:
             adjustment["strategy"] = "清理临时文件后重试"
 
-        adjusted = dict(candidate)
         adjusted["geometry"] = geometry
         adjusted["last_adjustment"] = adjustment
+        adjusted = attach_design_revision(adjusted, parent_revision_id=parent_revision_id)
+        validate_fem_input_or_raise(adjusted)
         return adjusted
 
     def _empty_result_payload(self, candidate: Dict, status: str, error_type: str | None = None) -> Dict:
@@ -205,7 +257,7 @@ class FEMAgent(BaseAgent):
         ):
             result = self._annotate_result(candidate, read_json(result_path))
             write_json(result_path, result)
-            self._cleanup_run_artifacts(candidate_id, keep_logs=result["status"] != "success")
+            self._cleanup_run_artifacts(candidate_id, keep_logs=True)
             return result
 
         diagnosis = diagnose_failure(
@@ -238,6 +290,7 @@ class FEMAgent(BaseAgent):
 
     def run(self, candidate: Dict) -> Dict:
         validate_or_raise("candidate.schema.json", candidate)
+        validate_fem_input_or_raise(candidate)
         retries = int(self.abaqus_config["max_retries"])
         current = dict(candidate)
         current.setdefault("analysis", {})
@@ -268,6 +321,10 @@ class FEMAgent(BaseAgent):
 
             failure_type = result.get("error_type") or "failed"
             self.emit(f"{candidate_id} 失败类型：{failure_type}")
+            if failure_type in self.non_retryable_error_types:
+                final_result = self._annotate_result(current, dict(result))
+                validate_or_raise("abaqus_result.schema.json", final_result)
+                return final_result
             if attempt == retries - 1:
                 final_result = self._annotate_result(current, dict(result))
                 final_result["status"] = "max_retries_exceeded"

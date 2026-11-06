@@ -58,6 +58,10 @@ abaqus/build_*.py
 !data/abaqus_runs/**/*_mode1.json
 data/abaqus_runs/**/*.fil
 data/abaqus_runs/**/candidate_input.json
+data/abaqus_runs/**/*.dat
+data/abaqus_runs/**/*.msg
+data/abaqus_runs/**/*.sta
+data/abaqus_runs/**/*.log
 
 # 日志
 *.log

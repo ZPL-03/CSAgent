@@ -115,16 +115,20 @@ class SimulationJobQueue:
                 ),
             )
 
-    def mark_failed(self, job_id: str, error_message: str) -> None:
+    def mark_failed(self, job_id: str, error_message: str, result: Dict[str, Any] | None = None) -> None:
         now = utc_now_iso()
+        formal_candidate_id = str((result or {}).get("candidate_id") or "") or None
+        result_json = json.dumps(result, ensure_ascii=False, default=str) if result is not None else None
         with self._connect() as conn:
             conn.execute(
                 """
                 UPDATE simulation_jobs
-                SET status = ?, error_message = ?, finished_at = ?, updated_at = ?
+                SET status = ?, formal_candidate_id = COALESCE(?, formal_candidate_id),
+                    result_json = COALESCE(?, result_json), error_message = ?,
+                    finished_at = ?, updated_at = ?
                 WHERE job_id = ?
                 """,
-                ("failed", error_message, now, now, job_id),
+                ("failed", formal_candidate_id, result_json, error_message, now, now, job_id),
             )
 
     def list_jobs(self, run_id: str | None = None) -> List[Dict[str, Any]]:

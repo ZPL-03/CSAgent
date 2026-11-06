@@ -37,3 +37,16 @@ M40J_TDE_85:
   Yc_MPa: 196
   S_MPa: 61.1
   notes: 扩展材料体系
+IM7_8552:
+  display_name: IM7-8552
+  density_kg_per_m3: 1582
+  E1_GPa: 161.0
+  E2_GPa: 11.4
+  G12_GPa: 5.17
+  nu12: 0.32
+  Xt_MPa: 2806
+  Xc_MPa: 1690
+  Yt_MPa: 60
+  Yc_MPa: 185
+  S_MPa: 90
+  notes: 正式有限元表格材料体系

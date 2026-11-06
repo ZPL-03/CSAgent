@@ -720,11 +720,21 @@ def test_knowledge_persistence_rejects_cross_session_result_with_same_formal_id(
 def test_orchestrator_run_uses_batch_fem_promotion(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = TaskParser().parse_instruction("外压 30 MPa，生成 6 个候选，初筛保留 3 个候选")
-    candidates = [
-        {"candidate_id": "TMP_10", "display_name": "TMP_10", "source": "DOE"},
-        {"candidate_id": "TMP_4", "display_name": "TMP_4", "source": "LLM"},
-        {"candidate_id": "TMP_9", "display_name": "TMP_9", "source": "CASE_TRANSFER"},
-    ]
+    candidates = CandidateGenAgent().doe_sampler.sample_candidates(
+        task,
+        n_samples=3,
+        start_index=1,
+        strict_solver_window=True,
+        id_factory=format_temp_candidate_id,
+    )
+    for candidate, candidate_id, source in zip(
+        candidates,
+        ["TMP_10", "TMP_4", "TMP_9"],
+        ["DOE", "LLM", "CASE_TRANSFER"],
+    ):
+        candidate["candidate_id"] = candidate_id
+        candidate["display_name"] = candidate_id
+        candidate["source"] = source
     orchestrator = OrchestratorAgent.__new__(OrchestratorAgent)
     orchestrator.emit = lambda *_args, **_kwargs: None
     orchestrator.parse_instruction = lambda *_args, **_kwargs: task
@@ -801,6 +811,57 @@ def test_knowledge_case_record_keeps_only_real_task_trace(monkeypatch):
     assert traced_record["task_id"] == task_record["task_id"]
 
 
+def test_knowledge_record_keeps_exact_fem_verification_evidence() -> None:
+    agent = KnowledgeAgent.__new__(KnowledgeAgent)
+    evidence = {
+        "candidate_id": "C9",
+        "status": "success",
+        "retry_count": 0,
+        "verdict": "不通过",
+        "design_check_status": "failed_at_service_pressure",
+        "service_pressure_check_status": "failed",
+        "service_pressure_checked_MPa": 50.259081,
+        "service_hashin_index_max": 1.53507021,
+        "service_hashin_failure_mode": "matrix_tension",
+        "boundary_implementation": "两端边线采用 Encastre 等效约束",
+        "verification_scope": "composite_cylindrical_shell_submodel",
+        "runtime_script_sha256": "a" * 64,
+    }
+
+    sanitized = agent._sanitize_abaqus_results(evidence)
+
+    assert sanitized["design_check_status"] == "failed_at_service_pressure"
+    assert sanitized["service_pressure_checked_MPa"] == 50.259081
+    assert sanitized["service_hashin_index_max"] == 1.53507021
+    assert sanitized["boundary_implementation"] == "两端边线采用 Encastre 等效约束"
+    assert sanitized["verification_scope"] == "composite_cylindrical_shell_submodel"
+    assert sanitized["runtime_script_sha256"] == "a" * 64
+
+
+def test_knowledge_design_keeps_external_fem_provenance() -> None:
+    agent = KnowledgeAgent.__new__(KnowledgeAgent)
+    design = {
+        "candidate_id": "C9",
+        "session_candidate_id": "TMP_1",
+        "design_revision_id": "DR_" + "b" * 64,
+        "parent_design_revision_id": None,
+        "provenance": {
+            "source_row_number": 3730,
+            "source_sha256": "c" * 64,
+            "source_laminate_stiffness_validation": {"status": "recomputed_from_explicit_sequence"},
+        },
+        "fem_readiness": {"status": "ready_for_cylindrical_shell_screening"},
+    }
+
+    sanitized = agent._sanitize_design(design)
+
+    assert sanitized["session_candidate_id"] == "TMP_1"
+    assert sanitized["design_revision_id"] == "DR_" + "b" * 64
+    assert sanitized["provenance"]["source_row_number"] == 3730
+    assert sanitized["provenance"]["source_sha256"] == "c" * 64
+    assert sanitized["fem_readiness"]["status"] == "ready_for_cylindrical_shell_screening"
+
+
 def test_rag_engine_matches_installed_sentence_transformer_signature(tmp_path):
     class LegacySentenceTransformer:
         def __init__(self, model_name_or_path=None, cache_folder=None):
@@ -819,6 +880,45 @@ def test_rag_engine_matches_installed_sentence_transformer_signature(tmp_path):
 
     assert legacy_kwargs == {"cache_folder": str(tmp_path)}
     assert modern_kwargs == {"cache_folder": str(tmp_path), "local_files_only": True}
+
+
+def test_rag_engine_resolves_local_snapshot_without_network(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    calls = []
+
+    def snapshot_download(**kwargs):
+        calls.append(kwargs)
+        return str(tmp_path / "snapshots" / "model")
+
+    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(snapshot_download=snapshot_download))
+    engine = RAGEngine.__new__(RAGEngine)
+    engine.embedding_model_name = "BAAI/bge-m3"
+    engine.embedding_cache_dir = tmp_path / "cache"
+    engine.local_files_only = True
+
+    resolved = engine._resolve_embedding_model_reference()
+
+    assert resolved == str(tmp_path / "snapshots" / "model")
+    assert calls == [
+        {
+            "repo_id": "BAAI/bge-m3",
+            "cache_dir": str(tmp_path / "cache"),
+            "local_files_only": True,
+        }
+    ]
+
+
+def test_rag_engine_uses_explicit_local_model_directory(tmp_path):
+    model_dir = tmp_path / "model"
+    model_dir.mkdir()
+    engine = RAGEngine.__new__(RAGEngine)
+    engine.embedding_model_name = str(model_dir)
+    engine.embedding_cache_dir = tmp_path / "cache"
+    engine.local_files_only = True
+
+    assert engine._resolve_embedding_model_reference() == str(model_dir.resolve())
 
 
 def test_rag_engine_retries_without_local_files_only_when_adapter_rejects_it(tmp_path, monkeypatch):

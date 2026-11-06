@@ -9,7 +9,6 @@ from core.config_loader import load_material_db
 from core.id_utils import next_task_id
 from core.schema_validator import validate_or_raise
 from core.task_contract import (
-    DEFAULT_DESIGN_TARGETS,
     DEFAULT_GEOMETRY_ENVELOPE,
     DEFAULT_LAYUP_CONSTRAINTS,
     build_task_request_record,
@@ -21,6 +20,10 @@ from core.task_contract import (
     normalize_task_payload,
     task_payload_from_request,
 )
+
+
+DEFAULT_SEAWATER_DENSITY_KG_PER_M3 = 1025.0
+DEFAULT_GRAVITY_M_PER_S2 = 9.80665
 
 
 class TaskParser:
@@ -68,6 +71,18 @@ class TaskParser:
                 return value
         return None
 
+    def _service_depth_value(self, text: str) -> float | None:
+        patterns = [
+            r"(?:水深|下潜深度|工作深度|设计深度)\s*(?:为|是|=|:|：|达到|约)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:m|米)(?!m)",
+            r"([0-9]+(?:\.[0-9]+)?)\s*(?:m|米)(?:水深|下潜深度|工作深度|设计深度)",
+            r"(?:service\s+depth|water\s+depth|diving\s+depth)\s*(?:=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*m\b",
+        ]
+        for pattern in patterns:
+            value = self._extract_float(pattern, text)
+            if value is not None:
+                return value
+        return None
+
     def _extract_application(self, text: str) -> str:
         if "潜器" in text or "水下" in text or "深海" in text:
             return "水下航行器复合材料耐压壳"
@@ -77,9 +92,24 @@ class TaskParser:
 
     def _extract_load_conditions(self, text: str) -> Dict[str, Any]:
         pressure = self._external_pressure_value(text)
-        if pressure is None:
-            raise ValueError("任务缺少外部静水压力，请在自然语言需求中明确指定。")
-        return normalize_load_conditions({"type": "external_pressure", "external_pressure_MPa": pressure})
+        if pressure is not None:
+            return normalize_load_conditions({"type": "external_pressure", "external_pressure_MPa": pressure})
+        service_depth = self._service_depth_value(text)
+        if service_depth is None:
+            raise ValueError("任务缺少外部静水压力或工作水深，请在自然语言需求中明确指定。")
+        pressure = DEFAULT_SEAWATER_DENSITY_KG_PER_M3 * DEFAULT_GRAVITY_M_PER_S2 * service_depth / 1_000_000.0
+        normalized = normalize_load_conditions(
+            {"type": "external_pressure", "external_pressure_MPa": pressure}
+        )
+        normalized.update(
+            {
+                "service_depth_m": round(service_depth, 6),
+                "seawater_density_kg_per_m3": DEFAULT_SEAWATER_DENSITY_KG_PER_M3,
+                "gravity_m_per_s2": DEFAULT_GRAVITY_M_PER_S2,
+                "pressure_basis": "rho_g_h_gauge_differential",
+            }
+        )
+        return normalized
 
     def _extract_boundary_conditions(self, text: str) -> Dict[str, Any]:
         return normalize_boundary_conditions(text)
@@ -220,11 +250,11 @@ class TaskParser:
             return "最大极限压力", True
         return objective, False
 
-    def _extract_design_targets(self, text: str) -> Dict[str, Any]:
+    def _extract_design_targets(self, text: str, service_pressure_MPa: float) -> Dict[str, Any]:
         pressure_value = self._ultimate_pressure_target_value(text)
         objective, _objective_specified = self._objective_from_text(text)
         return {
-            "ultimate_pressure_min_MPa": pressure_value or DEFAULT_DESIGN_TARGETS["ultimate_pressure_min_MPa"],
+            "ultimate_pressure_min_MPa": pressure_value or service_pressure_MPa,
             "primary_objective": objective,
         }
 
@@ -296,6 +326,21 @@ class TaskParser:
                 "type": "external_pressure",
                 "external_pressure_MPa": pressure,
             }
+        else:
+            service_depth = self._service_depth_value(text)
+            if service_depth is not None:
+                facts["load_conditions"] = {
+                    "type": "external_pressure",
+                    "service_depth_m": service_depth,
+                    "external_pressure_MPa": round(
+                        DEFAULT_SEAWATER_DENSITY_KG_PER_M3
+                        * DEFAULT_GRAVITY_M_PER_S2
+                        * service_depth
+                        / 1_000_000.0,
+                        6,
+                    ),
+                    "pressure_basis": "rho_g_h_gauge_differential",
+                }
 
         boundary = self._user_boundary_conditions(text)
         if boundary is not None:
@@ -336,9 +381,10 @@ class TaskParser:
 
     def _rule_hints(self, text: str) -> Dict[str, Any]:
         material, is_user_specified = self._extract_material(text)
+        load_conditions = self._extract_load_conditions(text)
         hints = {
             "application": self._extract_application(text),
-            "load_conditions": self._extract_load_conditions(text),
+            "load_conditions": load_conditions,
             "boundary_conditions": self._extract_boundary_conditions(text),
             "geometry_envelope": self._extract_geometry_envelope(text),
             "candidate_generation_preferences": self._extract_candidate_generation_preferences(text),
@@ -360,7 +406,10 @@ class TaskParser:
             },
             "layup_constraints": dict(DEFAULT_LAYUP_CONSTRAINTS),
             "hull_type": "CYLINDRICAL",
-            "design_targets": self._extract_design_targets(text),
+            "design_targets": self._extract_design_targets(
+                text,
+                float(load_conditions["external_pressure_MPa"]),
+            ),
         }
         hints["user_input_facts"] = self._extract_user_input_facts(text, hints)
         return hints

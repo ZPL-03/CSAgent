@@ -4,6 +4,7 @@ import json
 import re
 from pathlib import Path
 
+from core.fem_result_semantics import required_fem_artifact_fields, result_semantic_errors, verified_capacity_pressure
 from core.paths import CASES_DIR, resolve_project_path
 from core.schema_validator import validate_or_raise
 from gui.render_utils import mode_shape_payload_status
@@ -40,13 +41,15 @@ def test_case_library_numbering_and_fem_artifacts_are_consistent() -> None:
         assert design.get("candidate_id") == candidate_id
         assert design.get("display_name") == candidate_id
         assert result.get("candidate_id") == candidate_id
-        assert result.get("status") == "success"
-        assert isinstance(result.get("ultimate_pressure_MPa"), (int, float))
+        assert result.get("status") in {"success", "failed", "max_retries_exceeded"}
+        assert not result_semantic_errors(result)
+        capacity_pressure = verified_capacity_pressure(result)
+        if capacity_pressure is not None:
+            assert capacity_pressure > 0
         assert isinstance(result.get("linear_buckling_pressure_MPa"), (int, float))
-        assert result["ultimate_pressure_MPa"] > 0
         assert result["linear_buckling_pressure_MPa"] > 0
 
-        for key in ["abaqus_inp", "linear_buckling_odb", "postbuckling_odb", "abaqus_odb", "visualization_json"]:
+        for key in required_fem_artifact_fields(result):
             artifact = result.get(key)
             assert artifact, f"{path.name} 缺少 {key}"
             artifact_path = resolve_project_path(artifact)

@@ -26,8 +26,9 @@ if hasattr(sys.stderr, "reconfigure"):
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.paths import resolve_project_path
-from core.schema_validator import validate_or_raise
+from core.fem_result_semantics import required_fem_artifact_fields, result_semantic_errors  # noqa: E402
+from core.paths import resolve_project_path  # noqa: E402
+from core.schema_validator import validate_or_raise  # noqa: E402
 
 
 def _join(*parts: str) -> str:
@@ -1030,13 +1031,9 @@ class ReleaseAudit:
                 errors.append(f"{path.name}: design 身份不一致")
             if result.get("candidate_id") != expected_candidate:
                 errors.append(f"{path.name}: abaqus_results.candidate_id={result.get('candidate_id')}")
-            for artifact_key in [
-                "abaqus_inp",
-                "linear_buckling_odb",
-                "postbuckling_odb",
-                "abaqus_odb",
-                "visualization_json",
-            ]:
+            for semantic_error in result_semantic_errors(result):
+                errors.append(f"{path.name}: {semantic_error}")
+            for artifact_key in required_fem_artifact_fields(result):
                 artifact_path = resolve_project_path(result.get(artifact_key))
                 if artifact_path is None or not artifact_path.is_file():
                     errors.append(f"{path.name}: {artifact_key} 文件不存在")

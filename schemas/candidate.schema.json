@@ -12,6 +12,7 @@
     "layup"
   ],
   "properties": {
+    "contract_version": {"type": "string"},
     "candidate_id": {
       "type": "string",
       "pattern": "^(C[0-9]+|TMP_[0-9]+)$"
@@ -126,7 +127,31 @@
     "selection_reason": {"type": ["string", "null"]},
     "display_name": {"type": "string", "minLength": 1},
     "session_candidate_id": {"type": "string", "pattern": "^TMP_[0-9]+$"},
-    "persistent_candidate_id": {"type": "string", "minLength": 1}
+    "persistent_candidate_id": {"type": "string", "minLength": 1},
+    "design_revision_id": {"type": "string", "pattern": "^DR_[a-f0-9]{64}$"},
+    "parent_design_revision_id": {"type": "string", "pattern": "^DR_[a-f0-9]{64}$"},
+    "analysis": {"type": "object"},
+    "provenance": {"type": "object"},
+    "screening": {
+      "type": "object",
+      "properties": {
+        "candidate_role": {
+          "type": "string",
+          "enum": [
+            "historically_screened_baseline",
+            "exact_geometry_exploration",
+            "nearest_neighbor_transfer_exploration"
+          ]
+        },
+        "historical_reference_comparison": {"type": "string"},
+        "historical_reference_meets_target_at_source_geometry": {"type": "boolean"},
+        "current_abaqus_status": {"const": "not_run"},
+        "current_design_verdict": {"const": "pending"},
+        "claim_boundary": {"type": "string"}
+      },
+      "additionalProperties": true
+    },
+    "fem_readiness": {"type": "object"}
   },
   "additionalProperties": true
 }
