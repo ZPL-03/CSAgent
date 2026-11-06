@@ -910,6 +910,32 @@ def test_rag_engine_resolves_local_snapshot_without_network(tmp_path, monkeypatc
     ]
 
 
+def test_rag_engine_finds_existing_default_huggingface_snapshot(tmp_path, monkeypatch):
+    import sys
+    from types import SimpleNamespace
+
+    cache_root = tmp_path / "hf" / "hub"
+    snapshot = cache_root / "models--BAAI--bge-m3" / "snapshots" / "local"
+    snapshot.mkdir(parents=True)
+    (snapshot / "config.json").write_text("{}", encoding="utf-8")
+    (snapshot / "modules.json").write_text("[]", encoding="utf-8")
+    (snapshot / "1_Pooling").mkdir()
+    (snapshot / "1_Pooling" / "config.json").write_text("{}", encoding="utf-8")
+    (snapshot / "model.safetensors").write_bytes(b"model")
+
+    def snapshot_download(**_kwargs):
+        raise OSError("项目缓存中没有模型")
+
+    monkeypatch.setenv("HF_HUB_CACHE", str(cache_root))
+    monkeypatch.setitem(sys.modules, "huggingface_hub", SimpleNamespace(snapshot_download=snapshot_download))
+    engine = RAGEngine.__new__(RAGEngine)
+    engine.embedding_model_name = "BAAI/bge-m3"
+    engine.embedding_cache_dir = tmp_path / "project-cache"
+    engine.local_files_only = True
+
+    assert engine._resolve_embedding_model_reference() == str(snapshot.resolve())
+
+
 def test_rag_engine_uses_explicit_local_model_directory(tmp_path):
     model_dir = tmp_path / "model"
     model_dir.mkdir()

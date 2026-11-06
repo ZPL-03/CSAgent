@@ -140,10 +140,48 @@ class RAGEngine:
                 )
             )
         except Exception as exc:
+            cached_snapshot = self._find_local_huggingface_snapshot()
+            if cached_snapshot is not None:
+                return str(cached_snapshot)
             raise RuntimeError(
                 f"本地嵌入模型不可用：{self.embedding_model_name}；"
                 f"缓存目录：{self.embedding_cache_dir}"
             ) from exc
+
+    def _find_local_huggingface_snapshot(self) -> Path | None:
+        """查找当前机器已有的 Hugging Face 本地模型快照，不触发下载。"""
+        if "/" not in self.embedding_model_name or "\\" in self.embedding_model_name:
+            return None
+        repo_cache_name = f"models--{self.embedding_model_name.replace('/', '--')}"
+
+        cache_roots: list[Path] = [self.embedding_cache_dir]
+        for env_name in ("HF_HUB_CACHE", "HF_HOME"):
+            value = os.getenv(env_name, "").strip()
+            if value:
+                root = Path(value).expanduser()
+                cache_roots.append(root / "hub" if env_name == "HF_HOME" else root)
+        cache_roots.append(Path.home() / ".cache" / "huggingface" / "hub")
+
+        candidates: list[Path] = []
+        for cache_root in cache_roots:
+            snapshots_dir = cache_root / repo_cache_name / "snapshots"
+            if not snapshots_dir.is_dir():
+                continue
+            for snapshot in snapshots_dir.iterdir():
+                if not snapshot.is_dir():
+                    continue
+                if (
+                    (snapshot / "config.json").is_file()
+                    and (snapshot / "modules.json").is_file()
+                    and (snapshot / "1_Pooling" / "config.json").is_file()
+                    and any(
+                        (snapshot / name).is_file() for name in ("model.safetensors", "pytorch_model.bin")
+                    )
+                ):
+                    candidates.append(snapshot)
+        if not candidates:
+            return None
+        return max(candidates, key=lambda path: path.stat().st_mtime)
 
     def _build_sentence_transformer(self, sentence_transformer_cls, model_name_or_path: str | None = None):
         kwargs = self._sentence_transformer_kwargs(sentence_transformer_cls)
