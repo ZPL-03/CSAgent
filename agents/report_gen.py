@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 import unicodedata
+from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List
 from xml.sax.saxutils import escape
@@ -53,6 +54,10 @@ class ReportGenAgent(BaseAgent):
             "beta_deg": geometry.get("beta_deg"),
             "imperfection_ratio": geometry.get("imperfection_ratio"),
             "layup": layup.get("layup"),
+            "layup_template": layup.get("template_name"),
+            "ply_count": layup.get("ply_count"),
+            "balanced": layup.get("balanced"),
+            "symmetric": layup.get("symmetric"),
             "rationale": candidate.get("rationale"),
             "screening_summary": candidate.get("screening_summary"),
             "selection_reason": candidate.get("selection_reason"),
@@ -129,7 +134,9 @@ class ReportGenAgent(BaseAgent):
             "results": [
                 {
                     "candidate_id": result.get("candidate_id"),
+                    "session_candidate_id": result.get("session_candidate_id"),
                     "display_name": result.get("display_name"),
+                    "status": result.get("status"),
                     "ultimate_pressure_MPa": result.get("ultimate_pressure_MPa"),
                     "linear_buckling_pressure_MPa": result.get("linear_buckling_pressure_MPa"),
                     "ultimate_pressure_basis": result.get("ultimate_pressure_basis"),
@@ -140,6 +147,20 @@ class ReportGenAgent(BaseAgent):
                     "failure_mode": result.get("failure_mode"),
                     "target_pressure_checked_MPa": result.get("target_pressure_checked_MPa"),
                     "target_hashin_index_max": result.get("target_hashin_index_max"),
+                    "target_pressure_check_status": result.get("target_pressure_check_status"),
+                    "service_pressure_checked_MPa": result.get("service_pressure_checked_MPa"),
+                    "service_hashin_index_max": result.get("service_hashin_index_max"),
+                    "service_pressure_check_status": result.get("service_pressure_check_status"),
+                    "riks_increment_count": result.get("riks_increment_count"),
+                    "riks_limit_point_confirmed": result.get("riks_limit_point_confirmed"),
+                    "progressive_damage_complete": result.get("progressive_damage_complete"),
+                    "progressive_damage_model": result.get("progressive_damage_model"),
+                    "damage_state_maxima": result.get("damage_state_maxima"),
+                    "damage_observed": result.get("damage_observed"),
+                    "target_stress_coverage": result.get("target_stress_coverage"),
+                    "service_stress_coverage": result.get("service_stress_coverage"),
+                    "riks_termination_reason": result.get("riks_termination_reason"),
+                    "verification_scope": result.get("verification_scope"),
                     "design_check_status": result.get("design_check_status"),
                     "design_verdict_basis": result.get("design_verdict_basis"),
                     "capacity_assessment_status": result.get("capacity_assessment_status"),
@@ -194,17 +215,11 @@ class ReportGenAgent(BaseAgent):
         results = summary.get("results") or []
         materials = sorted({str(item.get("material")) for item in candidates if item.get("material")})
         layups = [str(item.get("layup")) for item in candidates if item.get("layup")]
-        angles = [
-            f"±{item.get('alpha_deg')}/±{item.get('beta_deg')}"
-            for item in candidates
-            if item.get("alpha_deg") is not None and item.get("beta_deg") is not None
-        ]
         passed = [item for item in results if item.get("verdict") == "通过"]
         failed = [item for item in results if item.get("verdict") and item.get("verdict") != "通过"]
         result_notes = [str(item.get("diagnosis_summary")) for item in results if item.get("diagnosis_summary")]
 
         material_text = "、".join(materials) if materials else "当前结构化数据未提供材料体系"
-        angle_text = "、".join(angles[:5]) if angles else "当前结构化数据未提供铺层角"
         layup_text = "；".join(layups[:3]) if layups else "当前结构化数据未提供铺层表达式"
         verdict_text = (
             f"有限元校核中通过 {len(passed)} 个、未通过 {len(failed)} 个。"
@@ -219,7 +234,7 @@ class ReportGenAgent(BaseAgent):
                 f"- 候选材料体系为 {material_text}。圆柱耐压壳可按纤维缠绕或预浸带铺放思路组织制造评审，重点检查铺层角、壁厚和端部约束区域的成型连续性。\n"
                 "- 报告中的制造建议不引入新的工艺参数；具体张力、固化制度和检验阈值需要由后续工艺文件或试验件确认。",
                 "### 铺层与材料原因\n"
-                f"- 入选候选的主要角度组合为 {angle_text}，铺层表达式包括 {layup_text}。这些字段来自候选结构化数据，可用于解释环向刚度、轴向刚度和屈曲稳定性的折中关系。\n"
+                f"- 入选候选的铺层表达式包括 {layup_text}。实际铺层角与顺序以求解输入中的逐层记录为准，可用于解释环向刚度、轴向刚度和屈曲稳定性的折中关系。\n"
                 "- 若后续目标转向更低面密度，应优先比较同一材料体系下的角度组合与厚度变化，避免把材料替换和几何减薄同时混在一次迭代里。",
                 "### 缺陷与质量控制\n"
                 "- 外压圆柱壳对初始几何缺陷敏感，缺陷幅值会影响非线性屈曲和极限压力判断。建议把圆度、壁厚均匀性、铺层角偏差和分层缺陷作为制造质量控制的核心检查项。\n"
@@ -230,66 +245,7 @@ class ReportGenAgent(BaseAgent):
             ]
         )
 
-    def _qualitative_text(self, value: Any) -> str:
-        text = str(value or "").strip()
-        if not text:
-            return ""
-        material_codes = sorted(self._material_codes(text))
-        placeholders: Dict[str, str] = {}
-        for index, code in enumerate(material_codes):
-            placeholder = f"__MAT_CODE_{chr(65 + index)}__"
-            placeholders[placeholder] = code
-            text = re.sub(re.escape(code), placeholder, text, flags=re.IGNORECASE)
-
-        text = re.sub(r"\b(?:CASE|TMP|CAND|C)\s*[_-]?\d+\b", "候选", text, flags=re.IGNORECASE)
-        text = re.sub(
-            r"[-+]?[0-9]+(?:\.[0-9]+)?\s*(?:MPa|mm|kg\s*/\s*m\^?2|kg/m²|kg/m2|%|‰|deg|°|LPF|GPa)",
-            "已记录指标",
-            text,
-            flags=re.IGNORECASE,
-        )
-        text = re.sub(r"[-+]?[0-9]+(?:\.[0-9]+)?", "", text)
-        text = re.sub(r"\s+", " ", text).strip()
-
-        for placeholder, code in placeholders.items():
-            text = text.replace(placeholder, code)
-        return text
-
-    def _layup_qualitative_description(self, layup: Any) -> str:
-        text = str(layup or "")
-        if not text:
-            return "当前结构化数据未提供铺层表达式"
-        if "90" in text:
-            return "含外侧直角约束层的均衡正负角铺层"
-        if "±" in text or "+/-" in text:
-            return "均衡正负角铺层"
-        return "结构化候选提供的复合材料铺层"
-
     def _build_llm_explanation_payload(self, summary: Dict[str, Any]) -> Dict[str, Any]:
-        candidates = []
-        for candidate in summary.get("screened_candidates", []):
-            candidates.append(
-                {
-                    "source": candidate.get("source"),
-                    "material": candidate.get("material"),
-                    "layup_family": self._layup_qualitative_description(candidate.get("layup")),
-                    "rationale": self._qualitative_text(candidate.get("rationale")),
-                    "screening_summary": self._qualitative_text(candidate.get("screening_summary")),
-                    "selection_reason": self._qualitative_text(candidate.get("selection_reason")),
-                }
-            )
-
-        results = []
-        for result in summary.get("results", []):
-            results.append(
-                {
-                    "verdict": result.get("verdict"),
-                    "failure_mode": result.get("failure_mode"),
-                    "ultimate_pressure_basis": self._qualitative_text(result.get("ultimate_pressure_basis")),
-                    "diagnosis_summary": self._qualitative_text(result.get("diagnosis_summary")),
-                }
-            )
-
         passed_count = int(summary.get("passed_count") or 0)
         result_count = int(summary.get("result_count") or 0)
         if result_count <= 0:
@@ -304,13 +260,30 @@ class ReportGenAgent(BaseAgent):
         return {
             "task": {
                 "application": summary.get("application"),
-                "load_case": "外部静水压力",
-                "boundary_conditions": self._qualitative_text(summary.get("boundary_conditions")),
+                "load_case": summary.get("load_conditions"),
+                "boundary_conditions": summary.get("boundary_conditions"),
+                "ultimate_pressure_min_MPa": summary.get("ultimate_pressure_min_MPa"),
                 "primary_objective": summary.get("primary_objective"),
             },
-            "screened_candidates": candidates,
-            "results": results,
-            "aggregate": {"overall": overall},
+            "screened_candidates": [dict(candidate) for candidate in summary.get("screened_candidates", [])],
+            "results": [{key: value for key, value in result.items() if key != "design_verdict_basis"}
+                        for result in summary.get("results", [])],
+            "aggregate": {"overall": overall, "result_count": result_count, "passed_count": passed_count},
+            "interpretation_constraints": [
+                "数值由报告模板输出；解释不复述数值不代表原始数据缺失。",
+                "只有缺失或为null的字段才能描述为未提供，不得把已完成的校核描述为尚未执行。",
+                "目标压力通过不等于已确认极限承载力；Riks未确认极限点时不能用线性屈曲压力替代。",
+                "各候选铺层分别读取，不得把一份候选的外侧直角层推广到所有候选。",
+                "没有试验或性能字段支持时，不比较材料韧性、固化残余应力和层间损伤性能。",
+                "progressive_damage_complete为true表示容量分析包含场变量损伤退化，不能写成没有渐进损伤。",
+                "目标压力的弹性起始失效检查与含损伤的Riks容量分析属于不同阶段，不得混淆范围。",
+                "post_peak_drop_20_percent表示峰后受控终止，不是异常中断，也不能说作业没有终止或全部正常结束。",
+                "symmetric或balanced为false表示该属性不满足，不表示铺层或属性数据缺失。",
+                "铺层模板名称不决定对称性，必须读取screened_candidates中的symmetric与balanced布尔属性。",
+                "制造工艺尚未指定；只能提出工艺评审建议，不能写成候选已经采用某种工艺。",
+                "面密度和承载力分别描述，不在没有效率定义或试验时推断质量效率、刚度优劣或缺陷可接受性。",
+                "未显式建模的范围为金属封头、法兰、连接及层间分层；试验认证未执行。",
+            ],
         }
 
     def _numeric_tokens(self, text: str) -> List[float]:
@@ -322,18 +295,15 @@ class ReportGenAgent(BaseAgent):
                 continue
         return values
 
-    def _engineering_numeric_tokens(self, text: str) -> List[float]:
-        values: List[float] = []
+    def _engineering_numeric_texts(self, text: str) -> List[str]:
         pattern = (
             r"([-+]?[0-9]+(?:\.[0-9]+)?)\s*"
             r"(?:MPa|mm|kg\s*/\s*m\^?2|kg/m²|kg/m2|%|‰|deg|°|LPF|GPa)"
         )
-        for match in re.finditer(pattern, text, flags=re.IGNORECASE):
-            try:
-                values.append(float(match.group(1)))
-            except ValueError:
-                continue
-        return values
+        return [match.group(1) for match in re.finditer(pattern, text, flags=re.IGNORECASE)]
+
+    def _engineering_numeric_tokens(self, text: str) -> List[float]:
+        return [float(value) for value in self._engineering_numeric_texts(text)]
 
     def _llm_text_uses_only_known_numbers(self, text: str, payload: Dict[str, Any]) -> bool:
         serialized_payload = json.dumps(payload, ensure_ascii=False, default=str)
@@ -342,8 +312,11 @@ class ReportGenAgent(BaseAgent):
         )
         if not allowed_values:
             return not self._engineering_numeric_tokens(text)
-        for value in self._engineering_numeric_tokens(text):
-            if not any(abs(value - allowed) <= max(1e-6, abs(allowed) * 1e-6) for allowed in allowed_values):
+        for token in self._engineering_numeric_texts(text):
+            value = Decimal(token)
+            # 仅允许显示精度内的舍入误差，保留尾随零所表达的小数位约束。
+            rounding_bound = Decimal(1).scaleb(value.as_tuple().exponent) / 2
+            if not any(abs(value - Decimal(str(allowed))) <= rounding_bound for allowed in allowed_values):
                 return False
         return True
 
@@ -367,6 +340,58 @@ class ReportGenAgent(BaseAgent):
         forbidden_structure_terms = ["加强筋", "加筋", "夹芯", "金属衬套"]
         if any(term in text for term in forbidden_structure_terms):
             raise ValueError("LLM 报告解释包含当前设计变量域之外的结构型式")
+        candidates = payload.get("screened_candidates") or []
+        if candidates and all(candidate.get("symmetric") is False for candidate in candidates):
+            if re.search(r"(?:采用|属于|代表|具有|为|是)[^。；，,\n]{0,8}(?<!非)对称铺层", text):
+                raise ValueError("候选均为非对称铺层，解释不能断言采用对称铺层")
+        if "质量效率" in text:
+            raise ValueError("未定义质量效率指标，不能把较低面密度等同于较高质量效率")
+        if re.search(r"已(?:经)?[^。；\n]{0,12}(?:考虑缺陷敏感性|完成缺陷敏感性分析)", text):
+            raise ValueError("单一初始缺陷工况不构成已完成缺陷敏感性分析")
+        if any(result.get("riks_termination_reason") == "post_peak_drop_20_percent"
+               for result in payload.get("results") or []):
+            if "未报告校核终止" in text or "作业均正常完成" in text:
+                raise ValueError("峰后受控终止不能描述为作业未终止或均正常完成")
+
+    def _normalize_llm_math(self, text: str) -> str:
+        from pylatexenc.latex2text import LatexNodes2Text
+        from pylatexenc.latexwalker import LatexMathNode, LatexWalker, LatexWalkerParseError
+
+        marker = re.compile(r"(?<!\\)(?:\${1,2}|\\\(|\\\[)")
+        converter = LatexNodes2Text()
+        walker = LatexWalker(text, tolerant_parsing=False)
+        parts: List[str] = []
+        offset = 0
+        while match := marker.search(text, offset):
+            try:
+                nodes, _, length = walker.get_latex_nodes(pos=match.start(), read_max_nodes=1)
+            except LatexWalkerParseError as exc:
+                raise ValueError("报告数学表达式未闭合或无法解析") from exc
+            if len(nodes) != 1 or not isinstance(nodes[0], LatexMathNode):
+                raise ValueError("报告数学表达式无法识别")
+            math_node = nodes[0]
+
+            def check_supported(node) -> None:
+                macro = getattr(node, "macroname", None)
+                if macro and converter.latex_context.get_macro_spec(macro) is None:
+                    raise ValueError(f"报告数学命令不支持转换：{macro}")
+                environment = getattr(node, "environmentname", None)
+                if environment and converter.latex_context.get_environment_spec(environment) is None:
+                    raise ValueError(f"报告数学环境不支持转换：{environment}")
+                children = list(getattr(node, "nodelist", None) or [])
+                arguments = getattr(getattr(node, "nodeargd", None), "argnlist", None) or []
+                for child in [*children, *arguments]:
+                    if child is not None:
+                        check_supported(child)
+
+            check_supported(math_node)
+            converted = converter.nodelist_to_text(math_node.nodelist).strip()
+            if not converted:
+                raise ValueError("报告数学表达式转换结果为空")
+            parts.extend([text[offset:match.start()], converted])
+            offset = match.start() + length
+        parts.append(text[offset:])
+        return "".join(parts)
 
     def _strip_llm_reasoning_blocks(self, text: str) -> str:
         cleaned = str(text or "")
@@ -395,10 +420,6 @@ class ReportGenAgent(BaseAgent):
         known_codes = self._material_codes(json.dumps(payload, ensure_ascii=False, default=str))
         forbidden_structure_terms = ["加强筋", "加筋", "夹芯", "金属衬套"]
         cleaned_lines: List[str] = []
-        measurement_pattern = (
-            r"[-+]?[0-9]+(?:\.[0-9]+)?\s*"
-            r"(?:MPa|mm|kg\s*/\s*m\^?2|kg/m²|kg/m2|%|‰|deg|°|LPF|GPa)"
-        )
         for raw_line in text.splitlines():
             line = raw_line.strip()
             if not line:
@@ -410,7 +431,6 @@ class ReportGenAgent(BaseAgent):
             if not line_codes.issubset(known_codes):
                 continue
             line = re.sub(r"^\s*[0-9]+[.、]\s*", "", line)
-            line = re.sub(measurement_pattern, "已记录指标", line, flags=re.IGNORECASE)
             cleaned_lines.append(line)
         cleaned = "\n".join(cleaned_lines).strip()
         return cleaned
@@ -426,9 +446,13 @@ class ReportGenAgent(BaseAgent):
             "优化建议只保留材料、铺层、厚度、缺陷质量控制、有限元和试验复核，不保留新增结构型式建议。"
             "保留制造工艺适配性、铺层/材料原因、缺陷与质量控制、有限元结果解读、后续验证建议五类定性内容。"
             "输出 Markdown，只使用三级标题和短横线项目；不要输出表格、JSON、编号列表或代码块。"
+            "必须按结构化事实纠正范围和缺失性陈述；已完成的场变量损伤分析不能说成未提供或未执行。"
+            "不输出 LaTeX 数学标记。"
+            "解释只给出有条件的复核建议，不断言制造工艺已确定，也不推断铺层对称性、质量效率或刚度优劣。"
         )
         user_prompt = (
             f"允许保留的材料牌号：{', '.join(known_material_codes) if known_material_codes else '无'}\n\n"
+            f"结构化事实 JSON：{json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
             "请清理以下报告解释文本：\n"
             f"{text}"
         )
@@ -439,7 +463,7 @@ class ReportGenAgent(BaseAgent):
             json_mode=False,
         ).strip()
         self.emit_llm_trace(self.llm_backend, {"purpose": "report_explanation_sanitize"})
-        return self._strip_llm_reasoning_blocks(answer)
+        return self._normalize_llm_math(self._strip_llm_reasoning_blocks(answer))
 
     def _render_llm_engineering_explanation(self, summary: Dict[str, Any]) -> str:
         if self.llm_backend is None:
@@ -447,20 +471,23 @@ class ReportGenAgent(BaseAgent):
         payload = self._build_llm_explanation_payload(summary)
         system_prompt = (
             "你是复合材料外压圆柱耐压壳设计报告解释助手。"
-            "只能基于用户提供的 JSON 定性结构化数据撰写中文工程解释。"
+            "只能基于用户提供的 JSON 结构化事实撰写中文工程解释。"
             "不得新增候选编号、数值、材料名、工况或有限元结论；不得改写 verdict、压力、面密度和排序。"
             "可以从复合材料圆柱壳常用制造评审角度讨论纤维缠绕、预浸带铺放、固化、圆度控制和无损检测，"
             "但不能把 JSON 中没有的设备、厂家、具体张力、固化温度、检验阈值或替代材料牌号写成事实。"
             "优化建议限定在当前候选变量域内，只讨论材料、铺层、厚度、缺陷质量控制、有限元和试验复核，"
             "不要引入加强筋、夹芯、金属衬套或其他未在输入中出现的结构型式。"
             "数值事实已经由报告模板输出，解释段禁止出现数字、角度、单位、阈值和候选编号，只做定性解释。"
+            "解释只给出有条件的制造和验证建议，不断言候选已经采用某种工艺，"
+            "不从模板名称推断对称性，不推断质量效率、初始刚度优劣或制造缺陷已被验收。"
+            "必须遵循 interpretation_constraints；不复述数据不代表缺少数据，不重复建议执行已经完成的相同校核。"
             "输出 Markdown，只使用三级标题和短横线项目；不要输出表格、JSON、编号列表或代码块。"
         )
         user_prompt = (
             "请生成报告中的“工程解释与制造建议”段落，必须覆盖：制造工艺适配性、铺层/材料原因、缺陷与质量控制、"
             "有限元结果解读、后续验证建议。只做定性解释，不要复述 JSON 中的数字，不要给出新的数字、阈值、候选编号或替代材料牌号；"
             "如果结构化数据缺少某项，请明确说明当前结构化数据未提供。\n\n"
-            f"结构化定性数据 JSON：\n{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}"
+            f"结构化事实 JSON：\n{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}"
         )
         answer = self.llm_backend.chat(
             system_prompt,
@@ -471,7 +498,7 @@ class ReportGenAgent(BaseAgent):
         self.emit_llm_trace(self.llm_backend, {"purpose": "report_engineering_explanation"})
         if not answer:
             return ""
-        answer = self._strip_llm_reasoning_blocks(answer)
+        answer = self._normalize_llm_math(self._strip_llm_reasoning_blocks(answer))
         if not answer:
             return ""
         try:
@@ -522,6 +549,10 @@ class ReportGenAgent(BaseAgent):
                 if llm_text:
                     self._last_llm_explanation_used = True
                     return llm_text
+            except ValueError as exc:
+                self.emit_event("report_explanation_rejected",
+                                f"总体报告解释未通过事实或格式校验，已使用结构化说明：{exc}",
+                                {"report_kind": "overall", "reason": str(exc)})
             except Exception as exc:
                 self.emit_llm_trace(self.llm_backend, {"purpose": "report_engineering_explanation", "failed": True})
                 self.emit(f"报告 LLM 工程解释生成失败，已使用确定性解释：{exc}")
@@ -567,13 +598,14 @@ class ReportGenAgent(BaseAgent):
             "只基于结构化 JSON 事实，为指定报告类型写一段中文工程说明。"
             "禁止新增候选编号、数值、单位、材料牌号、工况、设备参数或结构型式。"
             "数值事实由模板输出，解释段只做定性归纳。"
+            "必须遵循 interpretation_constraints；不得把已提供的数值说成缺失，也不得把已执行的校核说成尚未执行。"
             "输出 Markdown 短横线条目，不输出表格、JSON 或代码块。"
         )
         user_prompt = (
             f"报告类型：{purpose}\n"
             "说明内容需要覆盖该报告类型对应的用途、可追溯性和后续复核建议。"
             "如果结构化数据缺少某项事实，只能说明当前结构化数据未提供。\n\n"
-            f"结构化定性数据 JSON：\n{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}"
+            f"结构化事实 JSON：\n{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}"
         )
         try:
             answer = self.llm_backend.chat(
@@ -585,7 +617,7 @@ class ReportGenAgent(BaseAgent):
             self.emit_llm_trace(self.llm_backend, {"purpose": f"report_{report_kind}_explanation"})
             if not answer:
                 return fallback
-            answer = self._strip_llm_reasoning_blocks(answer)
+            answer = self._normalize_llm_math(self._strip_llm_reasoning_blocks(answer))
             if not answer:
                 return fallback
             try:
@@ -595,6 +627,11 @@ class ReportGenAgent(BaseAgent):
                 self._validate_llm_engineering_text(answer, payload)
             self._last_llm_explanation_used = True
             return self._postprocess_engineering_explanation(answer)
+        except ValueError as exc:
+            self.emit_event("report_explanation_rejected",
+                            f"{purpose}解释未通过事实或格式校验，已使用结构化说明：{exc}",
+                            {"report_kind": report_kind, "reason": str(exc)})
+            return fallback
         except Exception as exc:
             if self.llm_backend is not None:
                 self.emit_llm_trace(self.llm_backend, {"purpose": f"report_{report_kind}_explanation", "failed": True})
@@ -722,6 +759,7 @@ class ReportGenAgent(BaseAgent):
                 "",
                 f"- 通过样本：{len(passed)} / {len(results)}",
                 "- 有限元结果由 FEM_AGENT 写入结果记录，报告生成智能体只读取并归纳，不改写压力、编号和结论。",
+                "- 模型范围：复合材料圆柱壳；金属封头、法兰、连接、层间分层和试验认证不在校核范围内。",
             ]
         )
         for result in results:
@@ -740,6 +778,10 @@ class ReportGenAgent(BaseAgent):
                     f"- 失效模式：{self._failure_mode_text(result.get('failure_mode'))}",
                     f"- 校核结论：{result.get('verdict') or '-'}",
                     f"- 诊断摘要：{result.get('diagnosis_summary') or '-'}",
+                    f"- 目标压力应力覆盖：{self._field_text(result.get('target_stress_coverage'))}",
+                    f"- 损伤模型：{result.get('progressive_damage_model') or '未执行或未形成证据'}",
+                    f"- 损伤状态变量：{self._field_text(result.get('damage_state_maxima'))}",
+                    f"- 后峰终止依据：{result.get('riks_termination_reason') or '-'}",
                     f"- 云图或模态数据：{result.get('visualization_json') or '-'}",
                 ]
             )
@@ -832,7 +874,7 @@ class ReportGenAgent(BaseAgent):
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.cidfonts import UnicodeCIDFont
         from reportlab.pdfbase.ttfonts import TTFont
-        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer
+        from reportlab.platypus import Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
 
         return {
             "TA_LEFT": TA_LEFT,
@@ -845,6 +887,8 @@ class ReportGenAgent(BaseAgent):
             "Paragraph": Paragraph,
             "SimpleDocTemplate": SimpleDocTemplate,
             "Spacer": Spacer,
+            "Table": Table,
+            "TableStyle": TableStyle,
         }
 
     def _register_font(self) -> str:
@@ -924,41 +968,68 @@ class ReportGenAgent(BaseAgent):
         }
 
     def _paragraph_text_for_pdf(self, text: str) -> str:
-        normalized = text.replace("\t", "    ").strip()
-        return escape(normalized)
+        from markdown_it import MarkdownIt
+        tokens = MarkdownIt().parseInline(text.replace("\t", "    ").strip())
+        return self._pdf_inline_text(tokens[0].children or []) if tokens else ""
+
+    def _pdf_inline_text(self, tokens) -> str:
+        return "".join(
+            "<br/>" if token.type == "hardbreak" else " " if token.type == "softbreak"
+            else escape(token.content) if token.type in {"text", "code_inline", "html_inline"} else ""
+            for token in tokens
+        )
 
     def _build_pdf_story(self, markdown_text: str, font_name: str) -> List[object]:
         rl = self._reportlab()
         styles = self._pdf_styles(font_name)
         story: List[object] = []
-
-        for raw_line in markdown_text.splitlines():
-            stripped = raw_line.strip()
-            if not stripped:
-                if story:
-                    story.append(rl["Spacer"](1, 6))
-                continue
-
-            if stripped.startswith("# "):
-                story.append(rl["Paragraph"](self._paragraph_text_for_pdf(stripped[2:]), styles["title"]))
-                continue
-            if stripped.startswith("## "):
-                story.append(rl["Paragraph"](self._paragraph_text_for_pdf(stripped[3:]), styles["heading2"]))
-                continue
-            if stripped.startswith("### "):
-                story.append(rl["Paragraph"](self._paragraph_text_for_pdf(stripped[4:]), styles["heading3"]))
-                continue
-            if stripped.startswith("- "):
-                story.append(
-                    rl["Paragraph"](
-                        self._paragraph_text_for_pdf(stripped[2:]),
-                        styles["bullet"],
-                        bulletText="•",
-                    )
-                )
-                continue
-
-            story.append(rl["Paragraph"](self._paragraph_text_for_pdf(stripped), styles["body"]))
+        from markdown_it import MarkdownIt
+        tokens = MarkdownIt("commonmark").enable("table").parse(markdown_text)
+        heading = None
+        list_depth = 0
+        table_rows = None
+        row = None
+        for token in tokens:
+            if token.type == "heading_open":
+                heading = "title" if token.tag == "h1" else "heading2" if token.tag == "h2" else "heading3"
+            elif token.type == "heading_close":
+                heading = None
+            elif token.type in {"bullet_list_open", "ordered_list_open"}:
+                list_depth += 1
+            elif token.type in {"bullet_list_close", "ordered_list_close"}:
+                list_depth -= 1
+            elif token.type == "table_open":
+                table_rows = []
+            elif token.type == "tr_open":
+                row = []
+            elif token.type == "tr_close":
+                table_rows.append(row)
+                row = None
+            elif token.type == "table_close":
+                if table_rows:
+                    columns = max(len(row) for row in table_rows)
+                    table = rl["Table"](table_rows, colWidths=[(rl["A4"][0] - 80) / columns] * columns,
+                                        repeatRows=1, hAlign="LEFT")
+                    table.setStyle(rl["TableStyle"]([
+                        ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                        ("LINEBELOW", (0, 0), (-1, 0), 0.6, "#888888"),
+                        ("LEFTPADDING", (0, 0), (-1, -1), 4),
+                        ("RIGHTPADDING", (0, 0), (-1, -1), 4),
+                        ("TOPPADDING", (0, 0), (-1, -1), 5),
+                        ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
+                    ]))
+                    story.extend([table, rl["Spacer"](1, 6)])
+                table_rows = None
+            elif token.type == "inline":
+                text = self._pdf_inline_text(token.children or [])
+                style = styles[heading or ("bullet" if list_depth else "body")]
+                paragraph = rl["Paragraph"](text, style, bulletText="•" if list_depth and row is None else None)
+                if row is not None:
+                    row.append(paragraph)
+                else:
+                    story.append(paragraph)
+            elif token.type in {"fence", "code_block"}:
+                story.append(rl["Paragraph"](escape(token.content).replace("\n", "<br/>"), styles["body"]))
 
         if not story:
             story.append(rl["Paragraph"]("CSAgent 耐压壳设计报告内容为空。", styles["body"]))
@@ -1019,18 +1090,24 @@ class ReportGenAgent(BaseAgent):
         selected_keys = list(self.REPORT_ARTIFACTS) if report_kind == "all" else [report_kind]
 
         selected_texts: Dict[str, str] = {}
+        selected_llm_usage: Dict[str, bool] = {}
         base_markdown_text: str | None = None
         if "overall" in selected_keys:
             base_markdown_text = self._render_markdown(task, results, candidates)
+            selected_llm_usage["overall"] = self._last_llm_explanation_used
             selected_texts["overall"] = base_markdown_text.replace(
                 "# CSAgent 耐压壳设计报告",
                 "# CSAgent 总体设计报告",
                 1,
             )
         if "fem" in selected_keys:
+            self._last_llm_explanation_used = False
             selected_texts["fem"] = self._render_fem_report_markdown(task, results, candidates)
+            selected_llm_usage["fem"] = self._last_llm_explanation_used
         if "design_solution" in selected_keys:
+            self._last_llm_explanation_used = False
             selected_texts["design_solution"] = self._render_design_solution_markdown(task, candidates, results)
+            selected_llm_usage["design_solution"] = self._last_llm_explanation_used
 
         markdown_text = selected_texts.get("overall") or next(iter(selected_texts.values()), "")
         markdown_path = output_dir / "latest_report.md"
@@ -1050,6 +1127,7 @@ class ReportGenAgent(BaseAgent):
                 "pdf_path": str(artifact_pdf_path),
                 "title": title,
                 "report_kind": key,
+                "llm_explanation_used": selected_llm_usage[key],
             }
             text = selected_texts[key]
             generated = self._write_markdown_pdf_pair(
@@ -1078,7 +1156,7 @@ class ReportGenAgent(BaseAgent):
             "markdown_path": str(markdown_path),
             "pdf_path": str(pdf_path) if pdf_generated else None,
             "content": markdown_text,
-            "llm_explanation_used": self._last_llm_explanation_used,
+            "llm_explanation_used": any(selected_llm_usage.values()),
             "report_kind": report_kind,
             "output_dir": str(output_dir),
             "report_outputs": report_outputs,

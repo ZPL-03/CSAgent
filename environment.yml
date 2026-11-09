@@ -46,6 +46,8 @@ dependencies:
       - docling==2.93.0
       - "mineru[pipeline]==3.1.11"
       - reportlab==4.4.10
+      - markdown-it-py>=3,<5
+      - pylatexenc==2.10
       - joblib==1.5.3
       - pytest==8.4.2
       - fastapi

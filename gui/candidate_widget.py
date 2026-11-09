@@ -5,7 +5,7 @@ from __future__ import annotations
 from html import escape
 from typing import Iterable
 
-from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtCore import QSignalBlocker, Qt, pyqtSignal
 from PyQt6.QtGui import QColor
 from PyQt6.QtWidgets import (
     QFrame,
@@ -273,6 +273,7 @@ class CandidateWidget(QWidget):
         return f"<h4>{title}</h4><p>{body}</p>"
 
     def update_candidates(self, candidates: Iterable[dict], results_by_session_id: dict[str, dict] | None = None) -> None:
+        selection_blocker = QSignalBlocker(self.table)
         self.candidates = list(candidates)
         if results_by_session_id is not None:
             self.results_by_session_id = dict(results_by_session_id)
@@ -331,6 +332,10 @@ class CandidateWidget(QWidget):
         else:
             self.detail_browser.setHtml(self._empty_detail_html())
             self.audit_browser.setHtml(self._generation_audit_html({}))
+        selection_blocker.unblock()
+        if self.candidates:
+            # 行号不变时 Qt 不发选择信号，详情和预览仍须使用完整刷新的数据。
+            self._refresh_detail()
         self._sync_detail_pages()
 
     def reset_view(self) -> None:

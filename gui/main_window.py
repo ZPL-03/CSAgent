@@ -19,7 +19,7 @@ if str(PROJECT_ROOT) not in sys.path:
 UI_LAYOUT_VERSION = 25
 
 from PyQt6 import sip
-from PyQt6.QtCore import QObject, QRectF, QSettings, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
+from PyQt6.QtCore import QObject, QRectF, QSettings, QSignalBlocker, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
 from PyQt6.QtGui import QColor, QCloseEvent, QDesktopServices, QIcon, QPainter, QPen, QPixmap
 from PyQt6.QtWidgets import (
     QApplication,
@@ -2560,7 +2560,7 @@ class MainWindow(QMainWindow):
         passed_count = sum(1 for result in self.session.results_by_session_id.values() if result.get("verdict") == "通过")
         candidate_pool_target = requested_candidate_pool_size(self.session.task) if self.session.task else 0
         requested_top_k = requested_screen_top_k(self.session.task) if self.session.task else 0
-        stage_display = self._display_stage(self.session.stage or "idle")
+        stage_display = self._display_stage(self._current_ui_stage())
         pending_label_zh = "待初筛" if self.session.stage == "awaiting_screen_confirmation" else "待 FEM"
         pending_label_en = "Pending Screening" if self.session.stage == "awaiting_screen_confirmation" else "Pending FEM"
         def metric_html(label: str, value: str) -> str:
@@ -2601,6 +2601,11 @@ class MainWindow(QMainWindow):
             )
             self.pass_card.setText(metric_html("通过", str(passed_count)))
         self._update_runtime_panel()
+
+    def _current_ui_stage(self) -> str:
+        if self.worker_thread is not None and self.runtime_stage_text and not self.runtime_stage_text.startswith("wait_"):
+            return self.runtime_stage_text
+        return self.session.stage or "idle"
 
     def _display_stage(self, stage: str | None) -> str:
         value = str(stage or "idle")
@@ -2752,7 +2757,7 @@ class MainWindow(QMainWindow):
             self.runtime_stage_text = (
                 runtime_stage if runtime_stage.endswith("_failed") else f"{runtime_stage}_failed"
             ) if runtime_stage else runtime_type
-        self._update_runtime_panel()
+        self._update_overview_cards()
 
     def _runtime_event_visible_in_chat(self, runtime_type: str) -> bool:
         return (
@@ -2817,7 +2822,7 @@ class MainWindow(QMainWindow):
             self.queue_label.setText(
                 self.locale.text("queue.progress", percent=percent)
                 + "\n"
-                + self.locale.text("queue.stage", stage=self._display_stage(self.session.stage or "idle"))
+                + self.locale.text("queue.stage", stage=self._display_stage(self._current_ui_stage()))
             )
         else:
             self.queue_label.setText(self.locale.text("queue.idle"))
@@ -2837,10 +2842,12 @@ class MainWindow(QMainWindow):
         run_id = self.session.workflow_run_id or self.locale.text("audit.no_run")
         audit_lines = [
             self.locale.text("audit.run", run_id=run_id),
-            self.locale.text("audit.stage", stage=self._display_stage(self.session.stage or "idle")),
+            self.locale.text("audit.stage", stage=self._display_stage(self._current_ui_stage())),
             self.locale.text(
                 "audit.confirmation",
-                confirmation=self._display_confirmation_gate(self.session.pending_confirmation),
+                confirmation=self._display_confirmation_gate(
+                    None if self.worker_thread is not None else self.session.pending_confirmation
+                ),
             ),
             self.locale.text(
                 "audit.artifacts",
@@ -2851,7 +2858,7 @@ class MainWindow(QMainWindow):
             ),
         ]
         self.run_audit_label.setText("\n".join(audit_lines))
-        active_stage = self._display_stage(self.runtime_stage_text or self.session.stage)
+        active_stage = self._display_stage(self._current_ui_stage())
         if self.session.task or self.runtime_stage_text:
             stage_prefix = (
                 self.locale.text("agent.failed")
@@ -2872,7 +2879,22 @@ class MainWindow(QMainWindow):
 
     def _run_action(self, action: str, payload: dict, status_text: str) -> None:
         self.runtime_agent_states = {}
-        self.runtime_stage_text = ""
+        runtime_stages = {
+            "conversation_start": "parsing",
+            "generate": "generate_candidates",
+            "screen": "screen_candidates",
+            "evaluate": "evaluate_candidates",
+            "report": "generate_report",
+        }
+        if action == "conversation_continue":
+            gate = payload["state"].pending_confirmation
+            self.runtime_stage_text = {
+                "screen_candidates": "screen_candidates",
+                "fem_evaluation": "evaluate_candidates",
+                "export_report": "generate_report",
+            }.get(gate, "")
+        else:
+            self.runtime_stage_text = runtime_stages.get(action, "")
         self._set_busy(True, status_text)
         self.worker_thread = QThread(self)
         worker_payload = dict(payload)
@@ -2891,6 +2913,7 @@ class MainWindow(QMainWindow):
         self.worker_thread.finished.connect(self._clear_worker_refs)
         self.worker_thread.finished.connect(lambda: self._set_busy(False, self.locale.text("status.ready_next")))
         self.worker_thread.start()
+        self._update_overview_cards()
 
     def _clear_worker_refs(self) -> None:
         self.worker = None
@@ -3013,7 +3036,7 @@ class MainWindow(QMainWindow):
             self._live_visual_mode = "geometry"
         if self.session.display_candidates and not self._selected_live_candidate:
             self._selected_live_candidate = self.session.display_candidates[0]
-        self.workbench_candidate_widget.update_candidates(self.session.display_candidates, self.session.results_by_session_id)
+        self._update_candidate_pool()
         self.result_trace_widget.update_trace(
             self.session.display_candidates,
             self.session.results_by_session_id,
@@ -3030,8 +3053,15 @@ class MainWindow(QMainWindow):
         self._update_overview_cards()
         self._sync_status_label_with_session()
 
-    def _refresh_design_views(self) -> None:
+    def _update_candidate_pool(self) -> None:
+        selection_blocker = QSignalBlocker(self.workbench_candidate_widget)
         self.workbench_candidate_widget.update_candidates(self.session.display_candidates, self.session.results_by_session_id)
+        selected = self.workbench_candidate_widget.selected_candidates()
+        self._selected_live_candidate = dict(selected[0]) if selected else None
+        selection_blocker.unblock()
+
+    def _refresh_design_views(self) -> None:
+        self._update_candidate_pool()
         self.result_trace_widget.update_trace(
             self.session.display_candidates,
             self.session.results_by_session_id,
@@ -3086,6 +3116,7 @@ class MainWindow(QMainWindow):
                 }
                 if candidate_key_set & result_keys:
                     return result
+            return None
         results = list(results_by_key.values())
         return results[-1] if results else None
 
@@ -3696,6 +3727,18 @@ class MainWindow(QMainWindow):
 
         elif action == "report":
             self.session.report = payload["report"]
+            run_id = self.session.workflow_run_id
+            if run_id and self.workflow_event_store.has_run(run_id):
+                snapshot = self.workflow_event_store.load_snapshot(run_id)
+                snapshot["report"] = self.session.report
+                self.workflow_event_store.save_snapshot(run_id, snapshot)
+                self.workflow_event_store.append_event(WorkflowEvent(
+                    run_id=run_id, event_type="report_regenerated", agent="REPORT_GEN",
+                    message="阶段报告已生成并写入会话快照", payload={
+                        "report_kind": self.session.report.get("report_kind"),
+                        "generated_output_keys": self.session.report.get("generated_output_keys", []),
+                    },
+                ))
             self._apply_session(self.session)
             self.chat_widget.add_message(
                 "SYSTEM",

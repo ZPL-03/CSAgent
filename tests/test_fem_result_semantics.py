@@ -9,6 +9,7 @@ from core.fem_result_semantics import (
     verified_capacity_pressure,
 )
 from core.config_loader import load_param_ranges
+from core.case_retriever import CaseRetriever
 from core.surrogate_model import SurrogateModelManager, _pbipf_descriptors, record_to_training_sample
 
 
@@ -58,6 +59,18 @@ def test_failed_result_cannot_be_a_pass_or_capacity_sample():
     assert normalized["linear_buckling_pressure_MPa"] == 120.0
 
 
+def test_case_retrieval_requires_complete_submodel_stress_coverage():
+    record = {"design": {"candidate_id": "C1"}, "abaqus_results": {
+        "status": "success", "verdict": "通过",
+        "verification_scope": "composite_cylindrical_shell_submodel",
+        "target_stress_coverage": {"status": "incomplete"},
+    }}
+    retriever = CaseRetriever(use_vector_index=False)
+    assert not retriever._is_transferable(record)
+    record["abaqus_results"]["target_stress_coverage"]["status"] = "complete"
+    assert retriever._is_transferable(record)
+
+
 def test_linear_buckling_pressure_is_not_capacity_training_target():
     results = {
         "status": "success",
@@ -79,6 +92,18 @@ def test_verified_capacity_pressure_accepts_completed_capacity_evidence():
 
     assert is_passed_design_check(results)
     assert verified_capacity_pressure(results) == 80.0
+
+
+def test_shell_pass_and_capacity_require_full_ply_and_damage_evidence():
+    result = {"status": "success", "verdict": "通过", "ultimate_pressure_MPa": 80.0,
+              "verification_scope": "composite_cylindrical_shell_submodel"}
+    assert not is_passed_design_check(result)
+    assert verified_capacity_pressure(result) is None
+    result["target_stress_coverage"] = {"status": "complete"}
+    assert is_passed_design_check(result)
+    assert verified_capacity_pressure(result) is None
+    result.update(progressive_damage_complete=True, damage_state_output_complete=True, riks_limit_point_confirmed=True)
+    assert verified_capacity_pressure(result) == 80.0
 
 
 def test_training_record_loader_excludes_target_only_and_failed_results(tmp_path):

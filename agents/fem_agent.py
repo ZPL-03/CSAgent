@@ -5,10 +5,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Dict
 from copy import deepcopy
+import shutil
+import hashlib
 
 from jinja2 import Template
 
-from abaqus.job_utils import diagnose_failure, is_abaqus_available, read_tail_text, run_command, wait_for_result_file
+from abaqus.job_utils import compiler_environment, diagnose_failure, is_abaqus_available, read_tail_text, run_command, wait_for_result_file
 from agents.base import BaseAgent
 from core.config_loader import load_app_config
 from core.fem_input_contract import attach_design_revision, validate_fem_input_or_raise
@@ -32,6 +34,8 @@ class FEMAgent(BaseAgent):
         "target_inp",
         "visualization_json",
         "artifact_dir",
+        "user_subroutine_path",
+        "material_strength_include",
     }
     non_retryable_error_types = {
         "limit_point_not_confirmed",
@@ -39,6 +43,8 @@ class FEMAgent(BaseAgent):
         "invalid_fem_input",
         "service_load_solver_failed",
         "target_load_solver_failed",
+        "subroutine_compilation_failed",
+        "capacity_solver_failed",
     }
 
     def __init__(self, progress_callback=None, config: Dict | None = None) -> None:
@@ -92,14 +98,29 @@ class FEMAgent(BaseAgent):
     def generate_script(self, candidate: Dict) -> Path:
         template_path = ABAQUS_TEMPLATE_DIR / "pressure_hull_analysis.py.j2"
         template = Template(template_path.read_text(encoding="utf-8"))
+        run_dir = self._run_dir(candidate["candidate_id"])
+        subroutine_path = ROOT_DIR / self.abaqus_config.get("user_subroutine", "")
+        if candidate.get("analysis", {}).get("use_user_subroutine"):
+            staged_subroutine = run_dir / subroutine_path.name
+            shutil.copyfile(subroutine_path, staged_subroutine)
+            subroutine_path = staged_subroutine
         script_content = template.render(
             project_root=str(ROOT_DIR),
             input_json=str(self._input_path(candidate["candidate_id"])),
             result_json=str(self._result_path(candidate["candidate_id"])),
-            user_subroutine=str(ROOT_DIR / self.abaqus_config.get("user_subroutine", "")),
+            user_subroutine=str(subroutine_path),
         )
         script_path = self._script_path(candidate["candidate_id"])
         script_path.write_text(script_content, encoding="utf-8")
+        if candidate.get("analysis", {}).get("use_user_subroutine"):
+            material = candidate["material_system"]
+            strengths = {"XC": material["Xc_MPa"], "XT": material["Xt_MPa"],
+                         "YC": material["Yc_MPa"], "YT": material["Yt_MPa"], "S12": material["S_MPa"]}
+            lines = ["      DOUBLE PRECISION XC,XT,YC,YT,S12"]
+            lines.extend(f"      PARAMETER ({key}={float(value):.12E})".replace("E+", "D+").replace("E-", "D-")
+                         for key, value in strengths.items())
+            (run_dir / "pressure_hull_strength.inc").write_text(
+                "\n".join(lines) + "\n", encoding="utf-8")
         return script_path
 
     def _diagnosis_summary(self, result: Dict) -> str:
@@ -163,11 +184,23 @@ class FEMAgent(BaseAgent):
             "target_load_solver_failed": "设计目标压力精确加载作业未完成，不能给出目标工况结论。",
             "process_crash": "ABAQUS 进程异常退出，建议检查运行环境、日志和临时文件。",
             "abaqus_unavailable": "未找到 ABAQUS 命令，无法执行真实有限元求解。",
+            "subroutine_compilation_failed": "用户子程序编译或链接失败，请检查该作业的 .log 和材料强度文件；不调整几何重试。",
+            "capacity_solver_failed": "容量作业未生成可读结果，请检查该作业的 .log、.dat 和 .msg。",
         }
         return mapping.get(error_type, "求解未完成，建议检查日志后重试。")
 
     def _annotate_result(self, candidate: Dict, result: Dict) -> Dict:
         annotated = dict(result)
+        if candidate.get("analysis", {}).get("use_user_subroutine"):
+            source = self._run_dir(candidate["candidate_id"]) / Path(self.abaqus_config["user_subroutine"]).name
+            include = source.parent / "pressure_hull_strength.inc"
+            for path, key in ((source, "user_subroutine"), (include, "material_strength")):
+                if path.is_file():
+                    annotated[key + "_sha256"] = hashlib.sha256(path.read_bytes()).hexdigest()
+            annotated["user_subroutine_path"] = str(source)
+            annotated["material_strength_include"] = str(include)
+            if annotated.get("user_subroutine_used"):
+                annotated["progressive_damage_model"] = "irreversible_stress_triggered_field_degradation"
         for key in self.artifact_path_keys:
             if annotated.get(key):
                 annotated[key] = to_project_relative_path(annotated[key])
@@ -247,6 +280,7 @@ class FEMAgent(BaseAgent):
             command,
             workdir=run_dir,
             timeout=self.abaqus_config["job_timeout_seconds"],
+            environment=compiler_environment() if candidate.get("analysis", {}).get("use_user_subroutine") else None,
         )
         self.emit(f"{candidate_id} ABAQUS 作业完成，返回码 {return_code}")
 
@@ -292,9 +326,15 @@ class FEMAgent(BaseAgent):
         validate_or_raise("candidate.schema.json", candidate)
         validate_fem_input_or_raise(candidate)
         retries = int(self.abaqus_config["max_retries"])
-        current = dict(candidate)
+        current = deepcopy(candidate)
         current.setdefault("analysis", {})
         current["analysis"].setdefault("use_user_subroutine", bool(self.abaqus_config.get("use_user_subroutine", False)))
+        current["analysis"]["solver_command"] = self.abaqus_config["command"]
+        current = attach_design_revision(current)
+        if current["analysis"]["use_user_subroutine"]:
+            subroutine = self.abaqus_config.get("user_subroutine")
+            if not subroutine or not (ROOT_DIR / subroutine).is_file():
+                raise ValueError("已启用用户子程序，但 Fortran 文件不存在")
         candidate_id = current["candidate_id"]
         result_path = self._result_path(candidate_id)
         run_dir = self._run_dir(candidate_id)

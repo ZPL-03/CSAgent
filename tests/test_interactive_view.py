@@ -17,6 +17,24 @@ def _app() -> QApplication:
     return app
 
 
+def test_mode_scalar_bar_fits_inside_viewport_and_matches_theme() -> None:
+    app = _app()
+    widget = InteractivePlotWidget("empty")
+    try:
+        for theme, color in (("dark", "#e5edf7"), ("light", "#172033")):
+            widget.set_theme(theme)
+            args = widget._mode_scalar_bar_args()
+            assert args["vertical"] is False
+            assert args["position_x"] > 0
+            assert args["position_y"] > 0
+            assert args["position_x"] + args["width"] < 1
+            assert args["position_y"] + args["height"] < 1
+            assert args["color"] == color
+    finally:
+        widget.close()
+        app.processEvents()
+
+
 def test_interactive_plot_widget_uses_static_candidate_fallback_in_offscreen() -> None:
     app = _app()
     widget = InteractivePlotWidget("empty")

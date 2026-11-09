@@ -108,3 +108,40 @@ def test_candidate_widget_metrics_span_above_table_and_detail() -> None:
     finally:
         widget.close()
         app.processEvents()
+
+
+def test_candidate_widget_refreshes_detail_and_preview_after_reordering() -> None:
+    app = _app()
+    widget = CandidateWidget()
+    first = _candidate()
+    second = {**_candidate(), "candidate_id": "TMP_2", "display_name": "TMP_2"}
+    selected: list[dict] = []
+    try:
+        widget.update_candidates([first, second])
+        widget.candidateSelected.connect(selected.append)
+        widget.update_candidates([second, first])
+
+        assert widget.selected_candidates()[0]["candidate_id"] == "TMP_2"
+        assert widget.detail_browser.toPlainText().startswith("TMP_2")
+        assert [item["candidate_id"] for item in selected] == ["TMP_2"]
+    finally:
+        widget.close()
+        app.processEvents()
+
+
+def test_candidate_widget_refreshes_selected_result_without_row_change() -> None:
+    app = _app()
+    widget = CandidateWidget()
+    candidate = _candidate()
+    try:
+        widget.update_candidates([candidate])
+        widget.update_candidates(
+            [candidate],
+            {"TMP_1": {"candidate_id": "C68", "status": "success", "verdict": "通过"}},
+        )
+
+        assert "C68" in widget.detail_browser.toPlainText()
+        assert "通过" in widget.detail_browser.toPlainText()
+    finally:
+        widget.close()
+        app.processEvents()

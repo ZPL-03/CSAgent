@@ -1090,6 +1090,30 @@ def test_report_falls_back_to_structured_engineering_explanation(monkeypatch):
     assert agent._last_llm_explanation_used is False
 
 
+def test_report_tracks_llm_usage_per_artifact(monkeypatch, tmp_path):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, results, candidates = _report_sample()
+    agent = ReportGenAgent()
+
+    def overall(*args):
+        agent._last_llm_explanation_used = True
+        return "# CSAgent 耐压壳设计报告\n\n工程说明。"
+
+    def deterministic(*args):
+        return "# 结构化报告\n\n工程事实。"
+
+    monkeypatch.setattr(agent, "_render_markdown", overall)
+    monkeypatch.setattr(agent, "_render_fem_report_markdown", deterministic)
+    monkeypatch.setattr(agent, "_render_design_solution_markdown", deterministic)
+    report = agent.run({"task": task, "results": results, "candidates": candidates,
+                        "report_kind": "all", "output_dir": str(tmp_path)})
+
+    assert report["llm_explanation_used"] is True
+    assert report["report_outputs"]["overall"]["llm_explanation_used"] is True
+    assert report["report_outputs"]["fem"]["llm_explanation_used"] is False
+    assert report["report_outputs"]["design_solution"]["llm_explanation_used"] is False
+
+
 def test_report_all_generates_overall_fem_and_solution_artifacts(monkeypatch, tmp_path):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task, results, candidates = _report_sample()
@@ -1185,6 +1209,143 @@ def test_report_uses_llm_only_for_grounded_engineering_explanation(monkeypatch):
     assert "缠绕和铺放可制造性评审" in markdown
     assert "PBIPF 公式初筛通过" in markdown
     assert agent._last_llm_explanation_used is True
+
+
+@pytest.mark.parametrize("kind", ["overall", "fem", "design_solution"])
+def test_report_accepts_convertible_math_without_llm_retry(monkeypatch, kind):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, results, candidates = _report_sample()
+    agent = ReportGenAgent()
+
+    class MathBackend:
+        max_tokens = 1800
+        calls = 0
+
+        def chat(self, *args, **kwargs):
+            self.calls += 1
+            return r"- 复核 $T700/Epoxy$ 的铺层与 \(P_{ult}\) 路径，保留 **ODB** 证据。"
+
+    agent.llm_backend = MathBackend()
+    summary = agent._build_structured_summary(task, results, candidates)
+    if kind == "overall":
+        text = agent._render_engineering_explanation(summary)
+    else:
+        text = agent._render_report_artifact_explanation(kind, summary)
+    assert "T700/Epoxy" in text and "P_ult" in text
+    assert "**ODB**" in text
+    assert "$" not in text and r"\(" not in text
+    assert agent.llm_backend.calls == 1
+    assert agent._last_llm_explanation_used is True
+
+
+def test_math_conversion_preserves_markdown_and_factual_validation(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    agent = ReportGenAgent()
+    text = "### 说明\n- 20% 文本保留。" + r"$$P_{ult}=15\,\mathrm{MPa}$$" + "\n" + r"\[\alpha=45^\circ\]"
+    converted = agent._normalize_llm_math(text)
+    assert converted.startswith("### 说明\n- 20% 文本保留。")
+    assert "15 MPa" in converted and "45" in converted
+    assert "$" not in converted and r"\[" not in converted
+    invalid = agent._normalize_llm_math(r"- 要求 $9999\,\mathrm{MPa}$。")
+    with pytest.raises(ValueError, match="之外的数值"):
+        agent._validate_llm_engineering_text(invalid, {"target_pressure_MPa": 15})
+    invalid_material = agent._normalize_llm_math(r"- 使用 $T999/Epoxy$。")
+    with pytest.raises(ValueError, match="之外的材料"):
+        agent._validate_llm_engineering_text(invalid_material, {"material": "T700/Epoxy"})
+    with pytest.raises(ValueError, match="未闭合"):
+        agent._normalize_llm_math("- 未闭合 $P_ult")
+    with pytest.raises(ValueError, match="不支持转换"):
+        agent._normalize_llm_math(r"- $\unsupportedcommand{P}$")
+
+
+def test_report_rejection_is_not_reported_as_solver_or_connection_failure(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, results, candidates = _report_sample()
+    events = []
+    agent = ReportGenAgent(progress_callback=lambda *args: events.append(args))
+
+    class UnsupportedFactBackend:
+        max_tokens = 1800
+
+        def chat(self, *args, **kwargs):
+            return r"- 增加 $9999\,\mathrm{MPa}$ 要求。"
+
+    agent.llm_backend = UnsupportedFactBackend()
+    agent._render_report_artifact_explanation("fem", agent._build_structured_summary(task, results, candidates))
+
+    assert not agent._last_llm_explanation_used
+    rejection = [event[2] for event in events if event[2]["event_type"] == "report_explanation_rejected"]
+    assert len(rejection) == 1
+    assert rejection[0]["payload"]["report_kind"] == "fem"
+    assert "之外的数值" in rejection[0]["payload"]["reason"]
+    assert "生成失败" not in rejection[0]["message"]
+
+
+def test_report_rejects_observed_unsupported_engineering_claims(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    agent = ReportGenAgent()
+    payload = {"screened_candidates": [{"symmetric": False}, {"symmetric": False}]}
+    for claim in ("部分候选采用对称铺层。", "较轻候选质量效率更优。", "当前已考虑缺陷敏感性。"):
+        with pytest.raises(ValueError):
+            agent._validate_llm_engineering_text(claim, payload)
+    agent._validate_llm_engineering_text("候选采用非对称铺层，应开展缺陷敏感性分析。", payload)
+
+
+def test_report_line_cleanup_preserves_measurements_without_placeholders(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    agent = ReportGenAgent()
+    text = "- 检查 15 MPa 工况。\n- 不引入加强筋。"
+    cleaned = agent._deterministic_clean_llm_engineering_text(text, {})
+    assert cleaned == "- 检查 15 MPa 工况。"
+    assert "已记录指标" not in cleaned
+
+
+def test_report_respects_controlled_termination(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    agent = ReportGenAgent()
+    payload = {"results": [{"riks_termination_reason": "post_peak_drop_20_percent"}]}
+    for claim in ("两组候选均未报告校核终止。", "作业均正常完成。"):
+        with pytest.raises(ValueError, match="受控终止"):
+            agent._validate_llm_engineering_text(claim, payload)
+    agent._validate_llm_engineering_text("峰后受控终止，不是异常中断。", payload)
+
+
+def test_report_llm_context_preserves_numeric_facts_and_completed_analysis_scope(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, results, candidates = _report_sample()
+    candidates[0]["selection_reason"] = "score = 1.00 × P_ult - 0.12 × 面密度"
+    candidates[0]["layup"].update(symmetric=False, balanced=True)
+    results[0].update(
+        service_pressure_checked_MPa=30.0,
+        service_hashin_index_max=0.55,
+        service_pressure_check_status="passed",
+        target_pressure_checked_MPa=35.0,
+        target_hashin_index_max=0.70,
+        target_pressure_check_status="passed",
+        riks_increment_count=221,
+        riks_limit_point_confirmed=False,
+        progressive_damage_complete=False,
+        ultimate_pressure_MPa=None,
+        capacity_assessment_status="geometric_limit_not_reached_within_riks_path",
+    )
+    agent = ReportGenAgent()
+    summary = agent._build_structured_summary(task, results, candidates)
+    payload = agent._build_llm_explanation_payload(summary)
+
+    assert "30.0 MPa" in payload["task"]["load_case"]
+    assert payload["task"]["ultimate_pressure_min_MPa"] == 35.0
+    assert payload["screened_candidates"][0]["length_mm"] == 500.0
+    assert payload["screened_candidates"][0]["layup"] == candidates[0]["layup"]["layup"]
+    assert payload["screened_candidates"][0]["selection_reason"] == candidates[0]["selection_reason"]
+    assert payload["screened_candidates"][0]["symmetric"] is False
+    assert payload["screened_candidates"][0]["balanced"] is True
+    assert payload["results"][0]["session_candidate_id"] == "TMP_1"
+    assert payload["results"][0]["service_hashin_index_max"] == 0.55
+    assert payload["results"][0]["target_hashin_index_max"] == 0.70
+    assert payload["results"][0]["riks_increment_count"] == 221
+    assert payload["results"][0]["riks_limit_point_confirmed"] is False
+    assert payload["results"][0]["ultimate_pressure_MPa"] is None
+    assert payload["interpretation_constraints"]
 
 
 def test_report_postprocess_removes_duplicate_heading_and_mixed_verdict_text(monkeypatch):
@@ -1322,3 +1483,45 @@ def test_report_cleans_llm_explanation_before_using_it(monkeypatch):
     assert "T800" not in markdown
     assert backend.calls == 2
     assert agent._last_llm_explanation_used is True
+
+
+def test_report_numeric_validation_accepts_rounding_at_display_precision(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    agent = ReportGenAgent()
+    payload = {"ultimate_pressure_MPa": 77.845959, "other_pressure_MPa": 42.313629}
+    agent._validate_llm_engineering_text("压力为 77.846 MPa 和 42.314 MPa。", payload)
+    agent._validate_llm_engineering_text("压力为 77.845959 MPa。", payload)
+    for text in ("压力为 77.847 MPa。", "压力为 42.315 MPa。", "压力为 77.84600 MPa。"):
+        with pytest.raises(ValueError, match="之外的数值"):
+            agent._validate_llm_engineering_text(text, payload)
+
+
+def test_report_fallback_uses_explicit_layup_not_unused_angle_parameters(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    agent = ReportGenAgent()
+    text = agent._render_deterministic_engineering_explanation({
+        "screened_candidates": [{"alpha_deg": 65.233, "beta_deg": 60.581,
+                                  "layup": "[90/45/-45/0]", "material": "T700/Epoxy"}],
+    })
+    assert "[90/45/-45/0]" in text
+    assert "65.233" not in text
+    assert "60.581" not in text
+
+
+def test_pdf_renderer_uses_native_table_and_plain_inline_text(monkeypatch, tmp_path):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    agent = ReportGenAgent()
+    text = "# 校核结果\n\n| 样本 | 压力 |\n| --- | --- |\n| `C1` | **15 MPa** |\n\n- 已完成求解。\n"
+    font = agent._register_font()
+    story = agent._build_pdf_story(text, font)
+    from reportlab.platypus import Table
+    assert sum(isinstance(item, Table) for item in story) == 1
+    assert agent._paragraph_text_for_pdf("`C1` **完成**") == "C1 完成"
+    path = tmp_path / "report.pdf"
+    agent._write_pdf(text, path)
+    import fitz
+    with fitz.open(path) as pdf:
+        content = "".join(page.get_text() for page in pdf)
+    assert "15 MPa" in content
+    assert "---" not in content
+    assert "**" not in content

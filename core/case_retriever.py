@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List
 
-from core.case_memory import CaseMemoryIndex, is_pass_verdict
+from core.case_memory import CaseMemoryIndex, is_transferable_case
 from core.config_loader import load_app_config
 from core.io_utils import read_json
 from core.paths import CASE_LIBRARY_DIR, CASES_DIR
@@ -17,10 +17,6 @@ class RetrievedCase:
     score: float
     match_level: int = 0
     vector_rank: int | None = None
-
-
-def _is_pass_verdict(value: object) -> bool:
-    return is_pass_verdict(value)
 
 
 class CaseRetriever:
@@ -95,14 +91,7 @@ class CaseRetriever:
         return isinstance(design, dict) and bool(design)
 
     def _is_transferable(self, record: Dict) -> bool:
-        results = record.get("abaqus_results", {})
-        if not isinstance(results, dict):
-            return False
-        if results.get("status") != "success":
-            return False
-        if not _is_pass_verdict(results.get("verdict") or record.get("verdict")):
-            return False
-        return self._has_design(record)
+        return is_transferable_case(record)
 
     def _material_name(self, payload: Dict) -> str:
         material = payload.get("material_system", {})

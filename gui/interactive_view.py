@@ -7,7 +7,7 @@ import os
 from typing import Dict
 
 from PyQt6.QtCore import QEvent, QTimer, Qt
-from PyQt6.QtGui import QPixmap
+from PyQt6.QtGui import QColor, QPixmap
 from PyQt6.QtWidgets import QLabel, QStackedLayout, QVBoxLayout, QWidget
 
 from core.pressure_hull_profile import default_geometry
@@ -85,6 +85,10 @@ class InteractivePlotWidget(QWidget):
         if self.plotter is not None:
             try:
                 self.plotter.set_background(self._plot_background())
+                color = QColor(self._plot_foreground()).getRgbF()[:3]
+                for scalar_bar in self.plotter.scalar_bars.values():
+                    scalar_bar.GetLabelTextProperty().SetColor(*color)
+                    scalar_bar.GetTitleTextProperty().SetColor(*color)
                 self.plotter.render()
             except Exception:
                 pass
@@ -95,6 +99,24 @@ class InteractivePlotWidget(QWidget):
 
     def _plot_background(self) -> str:
         return "#f8fbff" if self.theme == "light" else "#101821"
+
+    def _plot_foreground(self) -> str:
+        return "#172033" if self.theme == "light" else "#e5edf7"
+
+    def _mode_scalar_bar_args(self) -> dict:
+        return {
+            "title": "Mode |U|",
+            "vertical": False,
+            "position_x": 0.18,
+            "position_y": 0.025,
+            "height": 0.12,
+            "width": 0.64,
+            "color": self._plot_foreground(),
+            "n_labels": 3,
+            "fmt": "%.2f",
+            "title_font_size": 10,
+            "label_font_size": 9,
+        }
 
     def _ensure_plotter(self) -> bool:
         if self.plotter is not None:
@@ -521,14 +543,7 @@ class InteractivePlotWidget(QWidget):
             cmap="viridis",
             show_edges=False,
             smooth_shading=True,
-            scalar_bar_args={
-                "title": scalar_name or "ModeMagnitude",
-                "vertical": True,
-                "position_x": 0.88,
-                "position_y": 0.16,
-                "height": 0.68,
-                "width": 0.07,
-            },
+            scalar_bar_args=self._mode_scalar_bar_args(),
         )
         self._scene_bounds = self._mesh_bounds(mesh)
         self._apply_default_camera(1.0, self._scene_bounds)

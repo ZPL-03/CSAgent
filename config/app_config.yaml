@@ -24,8 +24,8 @@ abaqus:
   max_retries: 3
   job_timeout_seconds: 3600
   poll_interval_seconds: 5
-  user_subroutine: ""
-  use_user_subroutine: false
+  user_subroutine: abaqus/subroutines/zhangusdfld.for
+  use_user_subroutine: true
   cleanup_patterns:
     - "*.lck"
     - "*.023"

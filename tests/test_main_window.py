@@ -5,6 +5,7 @@ import csv
 import json
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
@@ -218,6 +219,71 @@ def test_live_visual_toggle_prefers_selected_candidate_result(monkeypatch) -> No
         app.processEvents()
 
 
+def test_candidate_pool_refresh_keeps_table_detail_and_live_selection_consistent(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        first = _candidate("TMP_1")
+        second = _candidate("TMP_2")
+        window.session.candidates = [first, second]
+        window._update_candidate_pool()
+        window._live_visual_mode = "fem"
+        window.session.candidates = [second, first]
+        window._update_candidate_pool()
+
+        assert window.workbench_candidate_widget.selected_candidates()[0]["candidate_id"] == "TMP_2"
+        assert window.workbench_candidate_widget.detail_browser.toPlainText().startswith("TMP_2")
+        assert window._selected_live_candidate["candidate_id"] == "TMP_2"
+        assert window._live_visual_mode == "fem"
+        assert window._pending_live_candidate is None
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_uncomputed_candidate_does_not_display_another_candidates_fem_result(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window._selected_live_candidate = _candidate("TMP_2")
+        window.session.results_by_session_id = {
+            "TMP_1": {"candidate_id": "C1", "session_candidate_id": "TMP_1", "status": "success"}
+        }
+
+        assert window._latest_live_result() is None
+        window._sync_live_visual_toggle_button()
+        assert window.live_visual_toggle_button.isEnabled() is False
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_runtime_stage_is_displayed_while_waiting_snapshot_is_being_executed(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window.session.task = TaskParser().parse_instruction("外压30 MPa，生成8个候选，初筛保留3个")
+        window.session.stage = "awaiting_fem_confirmation"
+        window.session.pending_confirmation = "fem_evaluation"
+        window.worker_thread = object()
+        window._handle_runtime_state_event("node_started", "evaluate_candidates", "FEM_AGENT")
+
+        assert "有限元校核中" in window.stage_card.text()
+        assert "有限元校核中" in window.queue_label.text()
+        assert "有限元校核中" in window.run_audit_label.text()
+        assert "有限元校核确认" not in window.run_audit_label.text()
+        window.worker_thread = None
+        window._update_overview_cards()
+        assert "FEM确认" in window.stage_card.text()
+    finally:
+        window.worker_thread = None
+        window.close()
+        app.processEvents()
+
+
 def test_design_solution_report_uses_candidates_before_fem(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
@@ -301,6 +367,42 @@ def test_report_completion_updates_session_and_open_button(monkeypatch, tmp_path
     finally:
         window.close()
         app.processEvents()
+
+
+def test_report_completion_persists_only_report_in_existing_snapshot(tmp_path) -> None:
+    store = WorkflowEventStore(tmp_path / "workflow.sqlite3")
+    run_id = "RUN_REPORT"
+    snapshot = {
+        "stage": "awaiting_fem_confirmation",
+        "pending_confirmation": "fem_evaluation",
+        "task": {"task_id": "TASK_REPORT"},
+        "candidates": [_candidate("TMP_1")],
+        "report": {"content": "旧报告"},
+    }
+    store.create_run(run_id, "报告快照测试")
+    store.save_snapshot(run_id, snapshot)
+    report = {"content": "有效报告", "report_kind": "design_solution",
+              "generated_output_keys": ["design_solution"]}
+    applied = []
+    messages = []
+    window = SimpleNamespace(
+        session=PipelineSession(workflow_run_id=run_id),
+        workflow_event_store=store,
+        _apply_session=applied.append,
+        chat_widget=SimpleNamespace(add_message=lambda *args: messages.append(args)),
+        _update_button_states=lambda: None,
+    )
+
+    MainWindow._handle_finished(window, "report", {"report": report})
+
+    assert store.load_snapshot(run_id) == {**snapshot, "report": report}
+    assert store.list_runs()[0]["status"] == "waiting"
+    assert applied == [window.session]
+    assert messages
+    events = store.list_events(run_id)
+    assert len(events) == 1
+    assert events[0]["event_type"] == "report_regenerated"
+    assert events[0]["payload"]["generated_output_keys"] == ["design_solution"]
 
 
 def test_session_data_export_writes_json_and_trace_csv(monkeypatch, tmp_path) -> None:

@@ -1,0 +1,11 @@
+abaqus/subroutines/zhangusdfld.for -text
+data/abaqus_runs/C68/* -text
+data/abaqus_runs/C69/* -text
+data/abaqus_runs/C70/* -text
+data/abaqus_runs/C71/* -text
+data/abaqus_runs/C72/* -text
+data/abaqus_runs/C68/*.odb filter=lfs diff=lfs merge=lfs -text
+data/abaqus_runs/C69/*.odb filter=lfs diff=lfs merge=lfs -text
+data/abaqus_runs/C70/*.odb filter=lfs diff=lfs merge=lfs -text
+data/abaqus_runs/C71/*.odb filter=lfs diff=lfs merge=lfs -text
+data/abaqus_runs/C72/*.odb filter=lfs diff=lfs merge=lfs -text

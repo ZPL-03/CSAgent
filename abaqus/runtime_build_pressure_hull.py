@@ -417,29 +417,104 @@ def imperfection_amplitude_mm(geometry):
 
 
 def enable_field_degradation(model, material_name, material):
-    try:
-        base = (material["E1"], material["E2"], material["nu12"], material["G12"], material["G12"], material["G12"] * 0.8)
-        weak_matrix = (material["E1"], material["E2"] * 0.1, 0.0, material["G12"], material["G12"], material["G12"] * 0.08)
-        weak_shear = (material["E1"], material["E2"] * 0.1, 0.0, material["G12"] * 0.1, material["G12"] * 0.1, material["G12"] * 0.08)
-        weak_fiber = (material["E1"] * 0.14, material["E2"] * 0.1, 0.0, material["G12"] * 0.1, material["G12"] * 0.1, material["G12"] * 0.08)
-        model.materials[material_name].elastic.setValues(
-            dependencies=3,
-            table=(
-                base + (0.0, 0.0, 0.0),
-                weak_matrix + (1.0, 0.0, 0.0),
-                weak_shear + (0.0, 1.0, 0.0),
-                weak_shear + (1.0, 1.0, 0.0),
-                weak_fiber + (0.0, 0.0, 1.0),
-                weak_fiber + (1.0, 0.0, 1.0),
-                weak_fiber + (0.0, 1.0, 1.0),
-                weak_fiber + (1.0, 1.0, 1.0),
-            ),
+    base = (material["E1"], material["E2"], material["nu12"], material["G12"], material["G12"], material["G12"] * 0.8)
+    weak_matrix = (material["E1"], material["E2"] * 0.1, 0.0, material["G12"], material["G12"], material["G12"] * 0.8)
+    weak_shear = (material["E1"], material["E2"] * 0.1, 0.0, material["G12"] * 0.1, material["G12"] * 0.1, material["G12"] * 0.08)
+    weak_fiber = (material["E1"] * 0.14, material["E2"] * 0.1, 0.0, material["G12"] * 0.1, material["G12"] * 0.1, material["G12"] * 0.08)
+    model.materials[material_name].elastic.setValues(
+        dependencies=3,
+        table=(base + (0.0, 0.0, 0.0), weak_matrix + (1.0, 0.0, 0.0),
+               weak_shear + (0.0, 1.0, 0.0), weak_shear + (1.0, 1.0, 0.0),
+               weak_fiber + (0.0, 0.0, 1.0), weak_fiber + (1.0, 0.0, 1.0),
+               weak_fiber + (0.0, 1.0, 1.0), weak_fiber + (1.0, 1.0, 1.0)),
+    )
+    model.materials[material_name].Depvar(n=3)
+    model.materials[material_name].UserDefinedField()
+    return True
+
+
+def configure_ply_stress_output(model, ply_count, damage=False):
+    """失效校核必须输出每层的全部三个厚度积分点。"""
+    variables = ("S", "U", "RF", "SDV", "FV") if damage else ("S", "U", "RF")
+    model.fieldOutputRequests["F-Output-1"].setValues(
+        variables=variables, sectionPoints=tuple(range(1, 3 * int(ply_count) + 1)),
+    )
+
+
+def ply_stress_coverage(frame, ply_count):
+    """逐单元积分位置检查厚度积分点，不以全局点号并集代替覆盖证明。"""
+    expected = set(range(1, 3 * int(ply_count) + 1))
+    positions = {}
+    for value in frame.fieldOutputs["S"].values:
+        key = (getattr(value.instance, "name", ""), value.elementLabel, value.integrationPoint)
+        positions.setdefault(key, set()).add(value.sectionPoint.number)
+    incomplete = sum(1 for points in positions.values() if points != expected)
+    return {"status": "complete" if positions and not incomplete else "incomplete",
+            "expected_section_points": len(expected), "checked_element_positions": len(positions),
+            "incomplete_element_positions": incomplete}
+
+
+def damage_state_evidence(frame):
+    maxima = {}
+    for index in (1, 2, 3):
+        name = "SDV%d" % index
+        if name in frame.fieldOutputs:
+            values = frame.fieldOutputs[name].values
+            if values:
+                maxima[name] = max(float(value.data) for value in values)
+    return {"damage_state_output_complete": len(maxima) == 3,
+            "damage_state_maxima": maxima, "damage_observed": any(value > 0.0 for value in maxima.values())}
+
+
+def riks_status_curve(text):
+    """读取 Standard 状态表中已收敛 Riks 增量的 LPF。"""
+    increments = {}
+    for line in text.splitlines():
+        columns = line.split()
+        if len(columns) >= 9 and columns[-1] == "R" and all(value.isdigit() for value in columns[:3]):
+            increments[int(columns[1])] = float(columns[6])
+    return [(increment, increments[increment]) for increment in sorted(increments)]
+
+
+def run_riks_job(job, command):
+    """独立进程监测后峰，不受无界面 submit 的同步等待影响。"""
+    import subprocess
+    import time
+    stop_path = job.name + ".monitor.stop"
+    result_path = job.name + ".monitor.json"
+    for path in (stop_path, result_path):
+        if os.path.isfile(path):
+            os.remove(path)
+    script = os.path.join(os.path.dirname(os.path.abspath(__file__)), "riks_monitor.py")
+    with open(job.name + ".monitor.log", "w") as log:
+        worker = subprocess.Popen(
+            ["cmd.exe", "/c", command, "python", script, job.name, command],
+            stdout=log, stderr=subprocess.STDOUT,
+            creationflags=0x08000000 if os.name == "nt" else 0,
         )
-        model.materials[material_name].Depvar(n=3)
-        model.materials[material_name].UserDefinedField()
-        return True
-    except Exception:
-        return False
+        try:
+            job.submit(consistencyChecking=False)
+            job.waitForCompletion()
+        finally:
+            with open(stop_path, "w") as marker:
+                marker.write("finished")
+            deadline = time.time() + 30.0
+            while worker.poll() is None and time.time() < deadline:
+                time.sleep(0.1)
+            if worker.poll() is None:
+                worker.terminate()
+                worker.wait()
+                raise RuntimeError("后峰监测进程未结束")
+    try:
+        if worker.returncode != 0 or not os.path.isfile(result_path):
+            raise RuntimeError("后峰监测进程失败，请检查 " + job.name + ".monitor.log")
+        outcome = read_json(result_path)
+        if outcome.get("error"):
+            raise RuntimeError(outcome["error"])
+        return outcome
+    finally:
+        if os.path.isfile(stop_path):
+            os.remove(stop_path)
 
 
 def extract_lpf_history(session, odb):
@@ -479,7 +554,8 @@ def odb_job_status(odb):
         return "JOB_STATUS_UNKNOWN"
 
 
-def classify_riks_limit_point(lpf_pairs, job_status, minimum_post_peak_points=3, minimum_drop_ratio=0.005):
+def classify_riks_limit_point(lpf_pairs, job_status, minimum_post_peak_points=3, minimum_drop_ratio=0.005,
+                              controlled_post_peak_stop=False):
     """只有成功作业且存在明确后峰下降时才确认 Riks 极限点。"""
     normalized = [(float(item[0]), float(item[1])) for item in (lpf_pairs or [])]
     successful = str(job_status) == "JOB_STATUS_COMPLETED_SUCCESSFULLY"
@@ -503,8 +579,8 @@ def classify_riks_limit_point(lpf_pairs, job_status, minimum_post_peak_points=3,
     return {
         "job_completed_successfully": successful,
         "limit_point_observed": observed,
-        "limit_point_confirmed": successful and observed,
-        "increment_count": len(normalized),
+        "limit_point_confirmed": observed and (successful or bool(controlled_post_peak_stop)),
+        "increment_count": sum(1 for arc, _ in normalized if arc > 0.0),
         "max_index": max_index,
         "post_peak_drop_ratio": drop_ratio,
     }
@@ -562,7 +638,7 @@ def max_hashin_index_from_frame(frame, material):
     return maximum
 
 
-def riks_first_ply_evidence(step, lpf_pairs, reference_pressure, material):
+def riks_first_ply_evidence(step, lpf_pairs, reference_pressure, material, ply_count=None):
     """从已收敛的单调加载包络提取首层失效和目标压力证据。"""
     pairs = [(float(item[0]), float(item[1])) for item in (lpf_pairs or [])]
     evidence = {
@@ -591,6 +667,8 @@ def riks_first_ply_evidence(step, lpf_pairs, reference_pressure, material):
         maximum = max_hashin_index_from_frame(frame, material)
         if maximum is None:
             continue
+        if ply_count is not None and ply_stress_coverage(frame, ply_count)["status"] != "complete":
+            raise ValueError("Riks 厚度积分点输出不完整，不能判定首层失效")
         if evidence["first_ply_failure_pressure_upper_bound_MPa"] is None and maximum["failure_index"] >= 1.0:
             evidence.update({
                 "first_ply_failure_pressure_lower_bound_MPa": (
@@ -608,7 +686,7 @@ def riks_first_ply_evidence(step, lpf_pairs, reference_pressure, material):
     return evidence
 
 
-def exact_load_evidence(odb, checked_pressure, material, linear_pressure):
+def exact_load_evidence(odb, checked_pressure, material, linear_pressure, ply_count=None):
     """从精确压力非线性作业提取收敛、屈曲和首层失效判定。"""
     job_status = odb_job_status(odb)
     evidence = {
@@ -630,6 +708,12 @@ def exact_load_evidence(odb, checked_pressure, material, linear_pressure):
         return evidence
     if not completed or maximum is None:
         return evidence
+    if ply_count is not None:
+        coverage = ply_stress_coverage(frame, ply_count)
+        evidence["stress_coverage"] = coverage
+        if coverage["status"] != "complete":
+            evidence["pressure_check_status"] = "incomplete_output"
+            return evidence
     hashin_passed = maximum["failure_index"] < 1.0
     buckling_passed = float(linear_pressure) > float(checked_pressure)
     evidence.update({
@@ -647,16 +731,16 @@ def prefixed_load_evidence(evidence, prefix):
     return {prefix + key: value for key, value in evidence.items()}
 
 
-def service_load_evidence(odb, checked_pressure, material, linear_pressure):
+def service_load_evidence(odb, checked_pressure, material, linear_pressure, ply_count=None):
     return prefixed_load_evidence(
-        exact_load_evidence(odb, checked_pressure, material, linear_pressure),
+        exact_load_evidence(odb, checked_pressure, material, linear_pressure, ply_count),
         "service_",
     )
 
 
-def target_load_evidence(odb, checked_pressure, material, linear_pressure):
+def target_load_evidence(odb, checked_pressure, material, linear_pressure, ply_count=None):
     return prefixed_load_evidence(
-        exact_load_evidence(odb, checked_pressure, material, linear_pressure),
+        exact_load_evidence(odb, checked_pressure, material, linear_pressure, ply_count),
         "target_",
     )
 
@@ -701,6 +785,7 @@ def build_and_run(candidate, result_json, user_subroutine):
     )
     import mesh
     import regionToolset
+    import step
 
     candidate_id = str(candidate.get("candidate_id") or "CPH")
     mesh_size = safe_float((candidate.get("analysis") or {}).get("mesh_size_mm"), max(min(length / 30.0, radius / 5.0), 4.0))
@@ -785,10 +870,7 @@ def build_and_run(candidate, result_json, user_subroutine):
     assembly = model.rootAssembly
     instance = assembly.Instance(name="CompositeHull-1", part=part, dependent=ON)
     model.BuckleStep(name="Step-1", previous="Initial", numEigen=8, vectors=12, maxIterations=300)
-    try:
-        model.fieldOutputRequests["F-Output-1"].setValues(variables=("S", "E", "U", "RF"))
-    except Exception:
-        pass
+    model.fieldOutputRequests["F-Output-1"].setValues(variables=("U",))
 
     pressure_region = regionToolset.Region(side1Faces=instance.faces[:])
     model.Pressure(name="ExternalPressure", createStepName="Step-1", region=pressure_region, magnitude=1.0)
@@ -892,10 +974,7 @@ def build_and_run(candidate, result_json, user_subroutine):
             maxInc=0.1,
             nlgeom=ON,
         )
-        try:
-            check_model.fieldOutputRequests["F-Output-1"].setValues(variables=("S", "E", "U", "RF"))
-        except Exception:
-            pass
+        configure_ply_stress_output(check_model, len(angles))
         check_instance = check_model.rootAssembly.instances["CompositeHull-1"]
         check_region = regionToolset.Region(side1Faces=check_instance.faces[:])
         check_model.Pressure(
@@ -974,10 +1053,10 @@ def build_and_run(candidate, result_json, user_subroutine):
             service_extra,
         )
     service_odb = session.openOdb(name=service_odb_path)
-    service_evidence = service_load_evidence(service_odb, service_pressure, material, linear_pressure)
+    service_evidence = service_load_evidence(service_odb, service_pressure, material, linear_pressure, len(angles))
     service_odb.close()
     service_extra.update(service_evidence)
-    if service_evidence["service_pressure_check_status"] == "solver_failed":
+    if service_evidence["service_pressure_check_status"] not in {"passed", "failed"}:
         reason = (
             "服务压力精确加载作业状态为 %s，未形成可判定的最终收敛帧。" % (
                 service_evidence.get("service_abaqus_job_status"),
@@ -1035,7 +1114,7 @@ def build_and_run(candidate, result_json, user_subroutine):
                 service_extra,
             )
         target_odb = session.openOdb(name=target_run["odb_path"])
-        target_evidence = target_load_evidence(target_odb, target_pressure, material, linear_pressure)
+        target_evidence = target_load_evidence(target_odb, target_pressure, material, linear_pressure, len(angles))
         target_odb.close()
 
     service_extra.update({
@@ -1043,7 +1122,7 @@ def build_and_run(candidate, result_json, user_subroutine):
         "target_inp": target_run["inp_path"],
     })
     service_extra.update(target_evidence)
-    if target_evidence["target_pressure_check_status"] == "solver_failed":
+    if target_evidence["target_pressure_check_status"] not in {"passed", "failed"}:
         return result_shell(
             candidate,
             result_json,
@@ -1094,17 +1173,12 @@ def build_and_run(candidate, result_json, user_subroutine):
     post_model.StaticRiksStep(
         name="Step-1",
         previous="Initial",
-        maxNumInc=220,
+        maxNumInc=300,
         initialArcInc=0.01,
         minArcInc=1.0e-10,
         maxArcInc=0.1,
         nlgeom=ON,
     )
-    try:
-        post_model.fieldOutputRequests["F-Output-1"].setValues(variables=("S", "E", "U", "RF"))
-    except Exception:
-        pass
-
     post_instance = post_model.rootAssembly.instances["CompositeHull-1"]
     post_pressure_region = regionToolset.Region(side1Faces=post_instance.faces[:])
     post_model.Pressure(
@@ -1117,8 +1191,11 @@ def build_and_run(candidate, result_json, user_subroutine):
     analysis_settings = candidate.get("analysis") or {}
     subroutine_path = str(user_subroutine or "")
     use_subroutine = bool(analysis_settings.get("use_user_subroutine")) and bool(subroutine_path and os.path.exists(subroutine_path))
+    if analysis_settings.get("use_user_subroutine") and not use_subroutine:
+        raise ValueError("已要求损伤分析，但用户子程序路径无效")
     if use_subroutine:
         enable_field_degradation(post_model, "Composite", material)
+    configure_ply_stress_output(post_model, len(angles), damage=use_subroutine)
 
     insert_keyword(
         post_model,
@@ -1149,8 +1226,7 @@ def build_and_run(candidate, result_json, user_subroutine):
         post_job.writeInput(consistencyChecking=OFF)
     except Exception:
         pass
-    post_job.submit(consistencyChecking=OFF)
-    post_job.waitForCompletion()
+    stop_state = run_riks_job(post_job, analysis_settings.get("solver_command") or "abaqus")
 
     post_odb_path = os.path.abspath(post_job_id + ".odb")
     linear_extra = dict(service_extra)
@@ -1167,12 +1243,18 @@ def build_and_run(candidate, result_json, user_subroutine):
         "artifact_dir": os.getcwd(),
     })
     if not os.path.exists(post_odb_path):
+        log_path = post_job_id + ".log"
+        log_text = ""
+        if os.path.isfile(log_path):
+            with open(log_path, "r") as stream:
+                log_text = stream.read()[-6000:]
+        compilation_failed = "error #" in log_text.lower() or "problem during compilation" in log_text.lower()
         return result_shell(
             candidate,
             result_json,
             "failed",
-            "convergence_fail",
-            "后屈曲 Riks 作业未生成 ODB 文件",
+            "subroutine_compilation_failed" if compilation_failed else "capacity_solver_failed",
+            {"reason": "后屈曲 Riks 作业未生成 ODB 文件", "solver_log": log_text},
             linear_extra,
         )
 
@@ -1190,7 +1272,8 @@ def build_and_run(candidate, result_json, user_subroutine):
             linear_extra,
         )
 
-    riks_classification = classify_riks_limit_point(lpf_pairs, post_job_status)
+    riks_classification = classify_riks_limit_point(
+        lpf_pairs, post_job_status, controlled_post_peak_stop=stop_state["controlled"])
     max_time, max_lpf = max(lpf_pairs, key=lambda item: item[1])
     last_time, last_lpf = lpf_pairs[-1]
     observed_max_pressure = float(max_lpf) * reference_pressure
@@ -1200,7 +1283,11 @@ def build_and_run(candidate, result_json, user_subroutine):
         lpf_pairs,
         reference_pressure,
         material,
+        len(angles),
     )
+    damage_evidence = damage_state_evidence(post_odb.steps["Step-1"].frames[-1]) if use_subroutine else {}
+    linear_extra.update(damage_evidence)
+    linear_extra["riks_termination_reason"] = "post_peak_drop_20_percent" if stop_state["controlled"] else "solver_termination"
     linear_extra.update({
         "postbuckling_odb": post_odb_path,
         "postbuckling_inp": os.path.abspath(post_job_id + ".inp") if os.path.exists(post_job_id + ".inp") else None,
@@ -1257,9 +1344,12 @@ def build_and_run(candidate, result_json, user_subroutine):
     post_odb.close()
 
     geometric_limit_pressure = observed_max_pressure
-    progressive_damage_complete = bool(use_subroutine)
+    progressive_damage_complete = bool(use_subroutine and damage_evidence.get("damage_state_output_complete"))
     ultimate_pressure = geometric_limit_pressure if progressive_damage_complete else None
-    failure_mode = "渐进损伤极限点" if progressive_damage_complete else "几何非线性极限点"
+    failure_mode = (
+        "场变量损伤与几何非线性极限点" if progressive_damage_complete and damage_evidence.get("damage_observed")
+        else "几何失稳控制（损伤模型已启用）" if progressive_damage_complete else "几何非线性极限点"
+    )
     verdict = "通过"
     if progressive_damage_complete:
         verdict = "通过" if ultimate_pressure >= target_pressure else "不通过"
@@ -1283,7 +1373,7 @@ def build_and_run(candidate, result_json, user_subroutine):
         "riks_time_last": round(float(last_time), 8),
         "imperfection_amplitude_mm": round(imperfection_amplitude, 9),
         "ultimate_pressure_basis": (
-            "渐进损伤 Static Riks 已确认后峰极限点"
+            "含场变量刚度退化的 Static Riks 已确认后峰极限点"
             if progressive_damage_complete else None
         ),
         "geometric_limit_pressure_basis": "一阶屈曲模态缺陷 Static Riks 已确认后峰极限点",
@@ -1315,9 +1405,15 @@ def build_and_run(candidate, result_json, user_subroutine):
         "riks_post_peak_drop_ratio": round(float(riks_classification["post_peak_drop_ratio"]), 8),
         "target_odb": target_run["odb_path"],
         "target_inp": target_run["inp_path"],
+        "service_odb": service_run["odb_path"],
+        "service_inp": service_run["inp_path"],
+        "boundary_condition_type": boundary_type,
+        "boundary_implementation": boundary_implementation(boundary_type),
         "runtime_script_sha256": runtime_script_sha256(candidate_id),
     }
     payload.update(first_ply_evidence)
+    payload.update(damage_evidence)
+    payload["riks_termination_reason"] = linear_extra["riks_termination_reason"]
     payload.update(service_evidence)
     payload.update(target_evidence)
     write_json(result_json, payload)

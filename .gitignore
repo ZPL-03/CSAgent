@@ -30,6 +30,8 @@ data/results/fem_verification_report.*
 data/results/recommended_design_solution.*
 data/results/batch_summary_*.json
 data/results/natural_language_acceptance_*.json
+data/results/session_export_*.json
+data/results/session_trace_*.csv
 data/runtime/
 knowledge/chroma_db/
 knowledge/runtime/
@@ -62,6 +64,7 @@ data/abaqus_runs/**/*.dat
 data/abaqus_runs/**/*.msg
 data/abaqus_runs/**/*.sta
 data/abaqus_runs/**/*.log
+data/abaqus_runs/**/*.exception
 
 # 日志
 *.log

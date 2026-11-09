@@ -33,7 +33,10 @@ def is_successful_result(results: Dict[str, Any]) -> bool:
 
 def is_passed_design_check(results: Dict[str, Any]) -> bool:
     """返回当前验证范围内的设计目标校核是否通过。"""
-    return is_successful_result(results) and str(results.get("verdict") or "").strip() == "通过"
+    passed = is_successful_result(results) and str(results.get("verdict") or "").strip() == "通过"
+    if results.get("verification_scope") == "composite_cylindrical_shell_submodel":
+        return passed and (results.get("target_stress_coverage") or {}).get("status") == "complete"
+    return passed
 
 
 def result_semantic_errors(results: Dict[str, Any]) -> Tuple[str, ...]:
@@ -79,6 +82,12 @@ def normalize_result_semantics(results: Dict[str, Any]) -> Dict[str, Any]:
 def verified_capacity_pressure(results: Dict[str, Any]) -> float | None:
     """返回已完成求解给出的容量压力，不用线性屈曲值替代容量证据。"""
     if not is_successful_result(results):
+        return None
+    if results.get("verification_scope") == "composite_cylindrical_shell_submodel" and not (
+        results.get("progressive_damage_complete") and results.get("damage_state_output_complete")
+        and results.get("riks_limit_point_confirmed")
+        and (results.get("target_stress_coverage") or {}).get("status") == "complete"
+    ):
         return None
     for field in CAPACITY_PRESSURE_FIELDS:
         value = results.get(field)

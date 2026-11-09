@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import os
 import subprocess
 import time
 from pathlib import Path
@@ -13,7 +14,32 @@ def is_abaqus_available(command: str = "abaqus") -> bool:
     return shutil.which(command) is not None
 
 
-def run_command(command: Iterable[str], workdir: Path, timeout: int | None = None) -> Tuple[int, str, str]:
+def compiler_environment() -> dict[str, str]:
+    """仅为求解子进程加载 oneAPI 与 MSVC，不更改系统或 GUI 环境。"""
+    if shutil.which("ifort") and shutil.which("link"):
+        return dict(os.environ)
+    root = os.environ.get("ONEAPI_ROOT", "")
+    script = Path(root) / "setvars.bat" if root else None
+    if script is None or not script.is_file():
+        raise RuntimeError("未找到 Intel Fortran 编译环境，请配置 ONEAPI_ROOT 或从编译器命令行启动平台")
+    completed = subprocess.run(
+        f'call "{script}" intel64 --force >nul 2>&1 && set', shell=True,
+        capture_output=True, text=True, encoding="mbcs", errors="strict", timeout=60,
+    )
+    if completed.returncode:
+        raise RuntimeError("oneAPI 编译环境初始化失败")
+    environment = dict(os.environ)
+    for line in completed.stdout.splitlines():
+        key, separator, value = line.partition("=")
+        if separator and key and not key.startswith("="):
+            environment[key] = value
+    if not shutil.which("ifort", path=environment.get("Path") or environment.get("PATH")):
+        raise RuntimeError("oneAPI 环境中没有 ifort，无法编译 Abaqus/Standard 子程序")
+    return environment
+
+
+def run_command(command: Iterable[str], workdir: Path, timeout: int | None = None,
+                environment: dict[str, str] | None = None) -> Tuple[int, str, str]:
     command_list = list(command)
     executable = shutil.which(command_list[0]) or command_list[0]
     if str(executable).lower().endswith((".bat", ".cmd")):
@@ -29,6 +55,7 @@ def run_command(command: Iterable[str], workdir: Path, timeout: int | None = Non
         timeout=timeout,
         encoding="utf-8",
         errors="replace",
+        env=environment,
     )
     return process.returncode, process.stdout, process.stderr
 
