@@ -773,7 +773,8 @@ def test_knowledge_widget_runs_real_ingestion_pipeline(monkeypatch, tmp_path) ->
         app.processEvents()
 
         assert widget._ingest_thread is None
-        assert widget.store_pill.text == "合并 RAG 51794 块"
+        expected_count = widget.ingestion_service.status()["rag_chunk_count"]
+        assert widget.store_pill.text == f"合并 RAG {expected_count} 块"
         assert widget.rag_pill.text.startswith("RAG ")
         assert widget.vector_pill.text.startswith("Vector ")
         assert widget.kg_pill.text.startswith("KG ")

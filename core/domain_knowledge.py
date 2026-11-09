@@ -594,6 +594,32 @@ class KnowledgeGraphRetriever:
         return results[:top_k]
 
 
+def merge_knowledge_status(retrieval: dict[str, Any], ingestion: dict[str, Any]) -> dict[str, Any]:
+    """合并检索可用性与增量入库状态，入库流水线保持独立事实。"""
+    merged = {**retrieval, **ingestion}
+    builtin_ready = bool(retrieval.get("builtin_vector_ready"))
+    runtime_ready = bool(ingestion.get("vector_ready"))
+    builtin_count = int(retrieval.get("builtin_vector_chunk_count") or 0)
+    runtime_count = int(ingestion.get("vector_chunk_count") or 0)
+    statuses = {str(retrieval.get("builtin_vector_status") or "pending"), str(ingestion.get("vector_status") or "pending")}
+    ready = builtin_ready or runtime_ready
+    backend = str(ingestion.get("vector_backend") or "unavailable")
+    if builtin_ready:
+        backend = "builtin_bge_m3" + (f" + {backend}" if runtime_ready else "")
+    merged.update(
+        vector_ready=ready,
+        vector_chunk_count=builtin_count + runtime_count,
+        runtime_vector_chunk_count=runtime_count,
+        runtime_vector_status=ingestion.get("vector_status", "pending"),
+        runtime_vector_backend=ingestion.get("vector_backend", "unavailable"),
+        vector_status="warning" if statuses & {"warning", "failed"} else "success" if ready else "pending",
+        vector_message=f"内置向量 {builtin_count:,} / 用户增量 {runtime_count:,}",
+        vector_backend=backend,
+        vector_detail=f"内置：{retrieval.get('builtin_vector_status', 'pending')}；用户增量：{ingestion.get('vector_status', 'pending')}。{ingestion.get('vector_detail') or ''}",
+    )
+    return merged
+
+
 class DomainKnowledgeBase:
     """面向 CSAgent 的项目知识库/知识图谱运行时入口。"""
 
@@ -641,11 +667,22 @@ class DomainKnowledgeBase:
             max_snippet_chars=max_snippet_chars,
         )
         self.vector_top_k_multiplier = max(1, vector_top_k_multiplier)
+        from core.builtin_knowledge import BuiltinKnowledgeIndex
+
+        index_value = knowledge_config.get("builtin_retrieval_index_path")
+        index_path = _as_path(index_value) if index_value else builtin_dir / "rag" / "retrieval_index.sqlite"
+        self.builtin_index = (
+            BuiltinKnowledgeIndex(index_path, engine=self.vector.engine,
+                                  dense_enabled=bool(knowledge_config.get("builtin_dense_enabled", vector_enabled)))
+            if builtin_enabled and (index_value or index_path.exists()) else None
+        )
+        if self.builtin_index is not None:
+            self.rag.builtin_chunks_paths = []
         self.kg = KnowledgeGraphRetriever(kg_dir, builtin_kg_dirs=builtin_kg_dirs)
 
     @property
     def is_ready(self) -> bool:
-        return self.enabled and (self.rag.is_ready or self.vector.is_ready)
+        return self.enabled and (self.builtin_index is not None or self.rag.is_ready or self.vector.is_ready)
 
     def _retrieve_chunks(self, query: str, top_k: int) -> list[dict[str, Any]]:
         keyword_chunks = self.rag.search(query, top_k=top_k) if self.rag.is_ready else []
@@ -654,8 +691,12 @@ class DomainKnowledgeBase:
             if self.vector.is_ready
             else []
         )
+        builtin_chunks = self.builtin_index.search(query, top_k) if self.builtin_index is not None else []
+        ranked_chunks = []
+        for group in (builtin_chunks, keyword_chunks, vector_chunks):
+            ranked_chunks.extend({**chunk, "score": 61.0 / (60 + rank)} for rank, chunk in enumerate(group, 1))
         merged: dict[str, dict[str, Any]] = {}
-        for chunk in [*keyword_chunks, *vector_chunks]:
+        for chunk in ranked_chunks:
             source_key = _normalize_source_key(
                 chunk.get("source_url"),
                 chunk.get("doi"),
@@ -688,7 +729,8 @@ class DomainKnowledgeBase:
             current["retrieval_sources"] = sorted(sources)
             if not current.get("text") and chunk.get("text"):
                 current["text"] = chunk.get("text")
-        return sorted(merged.values(), key=lambda item: float(item.get("score") or 0.0), reverse=True)[:top_k]
+        result = sorted(merged.values(), key=lambda item: float(item.get("score") or 0.0), reverse=True)[:top_k]
+        return [{**item, "text": trim_text(item.get("text"), self.rag.max_snippet_chars)} for item in result]
 
     def task_query_text(self, task: Dict[str, Any]) -> str:
         task_payload = task_payload_from_request(task)
@@ -817,6 +859,14 @@ class DomainKnowledgeBase:
             and (self.builtin_kg_dir / "entities.jsonl").exists()
             and builtin_relation_path.exists()
         )
+        runtime_vectors = self.vector.engine.count() if self.vector.engine is not None else 0
+        builtin_vectors_ready = self.builtin_index is not None and self.builtin_index.vector_ready
+        builtin_vectors = self.builtin_index.count if builtin_vectors_ready else 0
+        vector_ready = bool(builtin_vectors_ready or self.vector.is_ready)
+        vector_status = "success" if vector_ready else str(manifest.get("vector_status") or "pending")
+        if self.builtin_index is not None and self.builtin_index.dense_enabled and not builtin_vectors_ready:
+            vector_status = "warning"
+        builtin_manifest = _load_json(self.builtin_manifest_path)
         return {
             "enabled": self.enabled,
             "ready": self.is_ready,
@@ -834,12 +884,20 @@ class DomainKnowledgeBase:
             "builtin_rag_chunk_count": builtin_counts["rag_chunks"],
             "builtin_kg_entity_count": builtin_counts["entities"],
             "builtin_kg_relation_count": builtin_counts["relations"],
+            "builtin_generated_at": builtin_manifest.get("generated_at"),
+            "builtin_source_count": int((builtin_manifest.get("record_counts") or {}).get("sources") or 0),
+            "builtin_index_ready": self.builtin_index is not None,
+            "builtin_vector_ready": builtin_vectors_ready,
+            "builtin_vector_status": "success" if builtin_vectors_ready else "warning" if self.builtin_index is not None and self.builtin_index.dense_enabled else "pending",
+            "builtin_vector_chunk_count": builtin_vectors,
+            "runtime_vector_chunk_count": runtime_vectors,
             "runtime_document_count": int(manifest.get("document_count", 0) or 0),
             "runtime_rag_chunk_count": runtime_rag_count,
             "runtime_kg_entity_count": runtime_entity_count,
             "runtime_kg_relation_count": runtime_relation_count,
-            "vector_ready": self.vector.is_ready,
-            "vector_chunk_count": self.vector.engine.count() if self.vector.engine is not None else 0,
+            "vector_ready": vector_ready,
+            "vector_chunk_count": builtin_vectors + runtime_vectors,
+            "vector_status": vector_status,
             "store_type": manifest.get("store_type", "project_runtime_knowledge"),
             "document_count": int(manifest.get("document_count", 0) or 0),
             "rag_chunk_count": runtime_rag_count + builtin_counts["rag_chunks"],

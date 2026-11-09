@@ -1,0 +1,162 @@
+{
+  "package": "csllm",
+  "generated_at": "2026-11-01T20:10:26.143094+00:00",
+  "source_files": {
+    "rag_chunks": "dataset/processed/rag/rag_chunks.jsonl",
+    "rag_retrieval_index": "dataset/processed/rag/retrieval_index.sqlite",
+    "rag_retrieval_embeddings": "dataset/processed/rag/retrieval_embeddings.npy",
+    "rag_retrieval_evaluation": "dataset/processed/rag/retrieval_evaluation.json",
+    "source_metadata": "dataset/processed/source_registry/source_metadata.jsonl",
+    "relations": "dataset/processed/kg/relations.jsonl",
+    "entities": "dataset/processed/kg/entities.jsonl",
+    "kg_stats": "dataset/processed/kg/kg_stats.json"
+  },
+  "record_counts": {
+    "rag_chunks": 173228,
+    "relations": 250606,
+    "entities": 2219,
+    "sources": 1931
+  },
+  "schemas": {
+    "rag_chunks": [
+      "chunk_id",
+      "chunk_fingerprint",
+      "content_hash",
+      "record_id",
+      "source_id",
+      "title",
+      "document_title",
+      "section_title",
+      "retrieval_unit",
+      "chunk_level",
+      "parent_document_id",
+      "parent_section_id",
+      "sequence_index",
+      "sequence_count",
+      "previous_chunk_id",
+      "next_chunk_id",
+      "title_path",
+      "section_path",
+      "doi",
+      "source_url",
+      "year",
+      "venue",
+      "source_type",
+      "chunk_type",
+      "block_types",
+      "block_ids",
+      "formula_ids",
+      "recovered_from_unreliable_table",
+      "filtered_table_row_count",
+      "page_start",
+      "page_end",
+      "parse_quality_score",
+      "load_case_tag",
+      "physics_quantities_mentioned",
+      "contains_explicit_formula",
+      "formula_validity",
+      "table_structure_status",
+      "design_platform_scope",
+      "content_markdown",
+      "content_plain"
+    ],
+    "relations": [
+      "source_type",
+      "source",
+      "relation",
+      "target",
+      "target_type",
+      "record_id",
+      "evidence_chunk_id",
+      "evidence_chunk_fingerprint",
+      "evidence_source_id",
+      "evidence_document_title",
+      "evidence_source_url",
+      "evidence_doi",
+      "page_start",
+      "page_end",
+      "section_path"
+    ],
+    "source_metadata": [
+      "record_id",
+      "source_id",
+      "source_origin",
+      "source_type",
+      "parser_group",
+      "data_type",
+      "file_name",
+      "file_path",
+      "sha1",
+      "document_title",
+      "title_source",
+      "doi",
+      "source_url",
+      "year",
+      "venue",
+      "parse_status",
+      "parse_quality_score"
+    ]
+  },
+  "files": [
+    {
+      "path": "runtime/rag_chunks.compact.jsonl.gz",
+      "bytes": 98616263,
+      "sha256": "6074c737c5232d01b0ad9cae33436e2f4b40645640fbdc7d645632dcc401f6d8",
+      "records": 173228
+    },
+    {
+      "path": "runtime/relations.compact.jsonl.gz",
+      "bytes": 7101667,
+      "sha256": "a94bbcd3b47e078caeedcefca6868b142cd4673a253fde89214d45bac5b0d62c",
+      "records": 250606
+    },
+    {
+      "path": "runtime/retrieval_index.sqlite",
+      "bytes": 1164300288,
+      "sha256": "b543f6f68422e7f3f83e4cea1b838864b8a4c86345448c6ac4c33c5f5cb49f9c",
+      "records": 173228
+    },
+    {
+      "path": "runtime/retrieval_embeddings.npy",
+      "bytes": 709542016,
+      "sha256": "1202646c599281431cf7ea7d623d621c6c050b85d24cfcd67949063ea97910b7",
+      "records": 173228
+    },
+    {
+      "path": "provenance/source_metadata.compact.jsonl.gz",
+      "bytes": 257322,
+      "sha256": "a07735fcbe67eeb6f8bb54d9ee73a2fd19091d839af7197e089ff699f8925473",
+      "records": 1931
+    },
+    {
+      "path": "provenance/retrieval_evaluation.json",
+      "bytes": 233929,
+      "sha256": "df3476fb4d29b1a65951807a245689b95fca38c4462dfa0c4f462d064113f3fb",
+      "records": null
+    },
+    {
+      "path": "kg/entities.jsonl",
+      "bytes": 1707489,
+      "sha256": "fcad193d4a7fabf66cb1240b2467f21321ee05ad954ab072bc4ed0384477198b",
+      "records": 2219
+    },
+    {
+      "path": "kg/kg_stats.json",
+      "bytes": 10081,
+      "sha256": "0d37297f966ced23d5053933716abfd7001d6ac077d9343e8b25af094acf8d57",
+      "records": null
+    },
+    {
+      "path": "provenance/README.md",
+      "bytes": 741,
+      "sha256": "fe379aa9750f61a39c01ebc231ce9733d8d1f49b20e36935929a514498e811b5",
+      "records": null
+    },
+    {
+      "path": "provenance/file_manifest.jsonl",
+      "bytes": 1349,
+      "sha256": "802ed07de890bc29e78f27d16317d9f36f46365fad1789e9f8e31538d8144747",
+      "records": 9
+    }
+  ]
+}

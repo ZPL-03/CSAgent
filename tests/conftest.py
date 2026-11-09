@@ -37,3 +37,4 @@ def isolated_task_records(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setattr(surrogate, "MODELS_DIR", tmp_path / "models")
     monkeypatch.setattr(rag, "CHROMA_DIR", tmp_path / "chroma")
     monkeypatch.setitem(load_app_config()["project_knowledge"], "vector_chroma_dir", str(tmp_path / "chroma"))
+    monkeypatch.setitem(load_app_config()["project_knowledge"], "builtin_dense_enabled", False)

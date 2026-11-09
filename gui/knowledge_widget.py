@@ -34,7 +34,7 @@ from PyQt6.QtWidgets import (
 )
 
 from core.case_memory import CaseMemoryIndex
-from core.domain_knowledge import DomainKnowledgeBase
+from core.domain_knowledge import DomainKnowledgeBase, merge_knowledge_status
 from core.knowledge_ingestion import KnowledgeIngestionService, SUPPORTED_QT_FILE_FILTER
 from core.paths import ABAQUS_RUNS_DIR, CASES_DIR, CASE_LIBRARY_DIR, MODELS_DIR
 from gui.theme import resolve_theme
@@ -1257,7 +1257,7 @@ class KnowledgeRefreshWorker(QObject):
             ingestion_service = KnowledgeIngestionService()
             status = knowledge_base.status()
             ingest_status = ingestion_service.status()
-            merged_status = {**status, **ingest_status}
+            merged_status = merge_knowledge_status(status, ingest_status)
             if self.load_evidence:
                 evidence_payload = self._retrieve_evidence(knowledge_base)
             else:
@@ -1694,7 +1694,7 @@ class KnowledgeWidget(QWidget):
         self.knowledge_base = DomainKnowledgeBase()
         status = self.knowledge_base.status()
         ingest_status = self.ingestion_service.status()
-        merged_status = {**status, **ingest_status}
+        merged_status = merge_knowledge_status(status, ingest_status)
         self._last_merged_status = dict(merged_status)
         self._update_status_pills(merged_status)
         self._update_summary(merged_status)
@@ -2034,7 +2034,7 @@ class KnowledgeWidget(QWidget):
             immediate_status.setdefault("rag_chunk_count", sum(int(item.get("chunk_count") or 0) for item in results))
             immediate_status.setdefault("kg_entity_count", sum(int(item.get("entity_count") or 0) for item in results))
             immediate_status.setdefault("kg_relation_count", sum(int(item.get("relation_count") or 0) for item in results))
-            self._last_merged_status = {**self._last_merged_status, **immediate_status}
+            self._last_merged_status = merge_knowledge_status(self._last_merged_status, immediate_status)
             self._update_status_pills(self._last_merged_status)
             self.parser_pill.set_state(label, status)
             self._update_document_table(_read_document_rows(getattr(self.ingestion_service, "documents_path", None)))

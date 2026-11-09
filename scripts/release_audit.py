@@ -145,6 +145,7 @@ class ReleaseAudit:
             self.check_product_identity()
             self.check_agent_runtime_contract()
             self.check_runtime_knowledge_paths()
+            self.check_builtin_knowledge_integrity()
             self.check_runtime_knowledge_status_contract()
             self.check_knowledge_pipeline_contract()
             self.check_knowledge_file_type_contract()
@@ -344,6 +345,7 @@ class ReleaseAudit:
             "builtin_rag_chunks_path": "knowledge/csllm/rag/rag_chunks.compact.jsonl.gz",
             "builtin_kg_dir": "knowledge/csllm/kg",
             "builtin_manifest_path": "knowledge/csllm/provenance/manifest.json",
+            "builtin_retrieval_index_path": "knowledge/csllm/rag/retrieval_index.sqlite",
             "base_dir": "knowledge/runtime",
             "upload_dir": "knowledge/runtime/uploads",
             "rag_chunks_path": "knowledge/runtime/rag/rag_chunks.jsonl",
@@ -368,6 +370,16 @@ class ReleaseAudit:
             else "; ".join([*mismatches, *(f"missing:{item}" for item in missing_builtin), f"{external_runtime_path} exists={external_exists}"])
         )
         self.add("知识库运行时路径", passed, detail)
+
+    def check_builtin_knowledge_integrity(self) -> None:
+        from scripts.sync_builtin_knowledge import validate_bundle
+
+        try:
+            result = validate_bundle(ROOT / "knowledge/csllm", records=False)
+        except (OSError, ValueError, KeyError) as exc:
+            self.add("内置知识包完整性", False, str(exc))
+            return
+        self.add("内置知识包完整性", True, json.dumps(result, ensure_ascii=False))
 
     def check_runtime_knowledge_status_contract(self) -> None:
         from core.knowledge_ingestion import (

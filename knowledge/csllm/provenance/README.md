@@ -1,6 +1,6 @@
-# CSAgent 项目知识库数据包
+# 内置知识包
 
-`rag/rag_chunks.compact.jsonl.gz` 保存 RAG 检索文本块。
-`kg/relations.compact.jsonl.gz` 保存知识图谱关系及其 RAG 证据来源。
-`kg/entities.jsonl` 和 `kg/kg_stats.json` 保存知识图谱实体与统计信息。
-`provenance/manifest.json` 和 `provenance/file_manifest.jsonl` 保存记录数、字节数和 SHA256。
+`rag/` 保存 RAG 文本块、只读 SQLite FTS5 索引和 BGE-M3 向量矩阵。
+`kg/` 保存实体、关系与统计。`provenance/` 保存来源元数据、检索评测及文件哈希。
+`source_manifest.json` 保留数据包的来源清单；`manifest.json` 使用当前项目的相对路径。
+用户增量资料和真实设计案例不属于该目录。

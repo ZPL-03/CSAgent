@@ -1,3 +1,5 @@
 abaqus/subroutines/zhangusdfld.for -text
 data/abaqus_runs/** -text
 data/abaqus_runs/**/*.odb filter=lfs diff=lfs merge=lfs -text
+knowledge/csllm/** -text whitespace=cr-at-eol
+knowledge/csllm/rag/* filter=lfs diff=lfs merge=lfs -text

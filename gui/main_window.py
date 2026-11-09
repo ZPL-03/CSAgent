@@ -1190,7 +1190,9 @@ class MainWindow(QMainWindow):
                 ingest_status = self.knowledge_widget.ingestion_service.status()
             except Exception:
                 return
-            merged_status = {**status, **ingest_status}
+            from core.domain_knowledge import merge_knowledge_status
+
+            merged_status = merge_knowledge_status(status, ingest_status)
         builtin_chunks = int(merged_status.get("builtin_rag_chunk_count", 0) or 0)
         builtin_entities = int(merged_status.get("builtin_kg_entity_count", 0) or 0)
         builtin_relations = int(merged_status.get("builtin_kg_relation_count", 0) or 0)
