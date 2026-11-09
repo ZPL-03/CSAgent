@@ -862,6 +862,42 @@ def test_pipeline_worker_evaluate_action_emits_realtime_fem_events(monkeypatch, 
     ] == ["C16", "C17"]
 
 
+def test_manual_fem_sets_run_before_promoting_candidates(monkeypatch) -> None:
+    class TracedOrchestrator(FakeBatchEvaluateOrchestrator):
+        def prepare_candidates_for_fem(self, task, candidates):
+            assert task["run_id"] == "RUN_MANUAL"
+            return super().prepare_candidates_for_fem(task, candidates)
+
+    monkeypatch.setattr(main_window_module, "OrchestratorAgent", TracedOrchestrator)
+    task = {"task_id": "TASK_9", "run_id": "RUN_MANUAL"}
+    worker = main_window_module.PipelineWorker("evaluate", {"task": task, "candidates": [_candidate("TMP_1")]})
+    errors = []
+    completed = []
+    worker.failed.connect(errors.append)
+    worker.finished.connect(lambda *_args: completed.append(True))
+    worker.run()
+    assert errors == []
+    assert completed == [True]
+
+
+def test_thread_completion_refreshes_session_stage(monkeypatch) -> None:
+    app = _app()
+    window = MainWindow()
+    try:
+        window.runtime_stage_text = "generate_report"
+        window.worker_thread = object()
+        window.session.stage = "completed"
+        observed = []
+        monkeypatch.setattr(window, "_update_overview_cards", lambda: observed.append(window._current_ui_stage()))
+        window._clear_worker_refs()
+        assert observed == ["completed"]
+        assert window.worker_thread is None
+        assert window.runtime_stage_text == ""
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_loaded_example_keeps_geometry_as_candidate_variables(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()

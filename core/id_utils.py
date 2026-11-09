@@ -8,7 +8,7 @@ import re
 import uuid
 
 from core.io_utils import read_json
-from core.paths import CASE_LIBRARY_DIR, CASES_DIR, TASKS_DIR
+from core.paths import ABAQUS_RUNS_DIR, CASE_LIBRARY_DIR, CASES_DIR, IO_DIR, TASKS_DIR
 
 
 TASK_PATTERN = re.compile(r"^TASK_(\d+)$")
@@ -139,13 +139,6 @@ def temp_candidate_index(candidate_id: str) -> int | None:
     return _parse_index(str(candidate_id), TEMP_CANDIDATE_PATTERN)
 
 
-def case_id_for_candidate(candidate_id: str) -> str | None:
-    index = candidate_index(candidate_id)
-    if index is None:
-        return None
-    return format_case_id(index)
-
-
 def _case_record_paths() -> list:
     paths = []
     seen = set()
@@ -160,15 +153,20 @@ def _case_record_paths() -> list:
 
 def _max_candidate_index() -> int:
     indices = []
+    # 未入库的失败作业也占用求解编号，不能覆盖其工件。
+    for path in ABAQUS_RUNS_DIR.glob("C*"):
+        parsed = candidate_index(path.name)
+        if path.is_dir() and parsed is not None:
+            indices.append(parsed)
+    for pattern in ("input_C*.json", "result_C*.json"):
+        for path in IO_DIR.glob(pattern):
+            parsed = candidate_index(path.stem.split("_", 1)[1])
+            if parsed is not None:
+                indices.append(parsed)
     for path in _case_record_paths():
-        parsed_case = _parse_index(path.stem, CASE_PATTERN)
-        if parsed_case is not None:
-            indices.append(parsed_case)
-        try:
-            payload = read_json(path)
-        except Exception:
-            continue
+        payload = read_json(path)
         for value in [
+            payload.get("candidate_id"),
             payload.get("design", {}).get("candidate_id"),
             payload.get("abaqus_results", {}).get("candidate_id"),
         ]:
@@ -200,23 +198,26 @@ def next_candidate_index() -> int:
 
 
 def reserve_candidate_ids(count: int) -> list[str]:
-    """为同一批 FEM 样本一次性预占连续正式候选编号。"""
+    """通过原子创建目录持久预占求解号，跨进程不得重复分配。"""
 
     if count <= 0:
         return []
-    start_index = next_candidate_index()
-    return [format_candidate_id(start_index + offset) for offset in range(count)]
+    ABAQUS_RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    index = next_candidate_index()
+    reserved = []
+    while len(reserved) < count:
+        candidate_id = format_candidate_id(index)
+        try:
+            (ABAQUS_RUNS_DIR / candidate_id).mkdir()
+        except FileExistsError:
+            pass
+        else:
+            reserved.append(candidate_id)
+        index += 1
+    return reserved
 
 
-def next_case_id(candidate_id: str | None = None) -> str:
-    preferred_index = candidate_index(candidate_id) if candidate_id else None
-    if preferred_index is not None:
-        case_id = format_case_id(preferred_index)
-        for path in _case_record_paths():
-            if path.stem == case_id:
-                raise ValueError(f"案例编号 {case_id} 已存在，不能重复写入")
-        # 正式案例编号与正式候选编号保持一一对应；并行求解时允许 C2 先于 C1 回写。
-        # 后续新候选仍由现有最大编号顺延，不复用已占用编号。
-        return case_id
+def next_case_id() -> str:
+    """按实际入库顺序分配案例号，独立于会话候选号和求解号。"""
     next_index = _max_case_index() + 1
     return format_case_id(next_index)

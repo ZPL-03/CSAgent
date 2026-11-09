@@ -90,9 +90,9 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
         input_contract="task 字典、fem_designs 列表、results 列表。",
         output_contract="knowledge_updates 列表；包含 case_id、存储状态和校准摘要。",
         llm_policy="不调用 LLM。",
-        memory_policy="写入 data/cases、knowledge/case_library、案例记忆索引和代理公式校准数据；保留 CASE-C-TMP 追踪。",
-        event_policy="发出 knowledge_update_started、knowledge_update_completed、knowledge_update_failed、tool_completed 或 node_failed 事件。",
-        failure_policy="单个案例回流失败会写入失败摘要和事件诊断，不修改有限元结果本身。",
+        memory_policy="完整结果写入 data/cases、knowledge/case_library 和案例记忆；案例号按入库顺序分配，保留 RUN-TASK-TMP-C-CASE 追踪。",
+        event_policy="发出 knowledge_update_completed、knowledge_update_skipped、knowledge_update_failed、tool_completed 或 node_failed 事件。",
+        failure_policy="证据不完整的结果留在运行记录和求解目录，不占用案例号；回流异常写入失败摘要和诊断，不修改有限元结果。",
     ),
     AgentContract(
         node_name="generate_report",

@@ -191,6 +191,9 @@ class FEMAgent(BaseAgent):
 
     def _annotate_result(self, candidate: Dict, result: Dict) -> Dict:
         annotated = dict(result)
+        for field in ("run_id", "task_id", "session_candidate_id"):
+            if candidate.get(field):
+                annotated[field] = candidate[field]
         if candidate.get("analysis", {}).get("use_user_subroutine"):
             source = self._run_dir(candidate["candidate_id"]) / Path(self.abaqus_config["user_subroutine"]).name
             include = source.parent / "pressure_hull_strength.inc"

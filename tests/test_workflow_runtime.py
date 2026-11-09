@@ -21,7 +21,7 @@ class FakeOrchestrator:
         if self.progress_callback:
             self.progress_callback(sender, message, {"event_type": event_type, "payload": {"sender": sender}})
 
-    def parse_instruction(self, instruction, overrides=None):
+    def parse_instruction(self, instruction, overrides=None, *, run_id=None):
         self.calls.append("parse")
         self._emit("ORCHESTRATOR", "任务已解析", "task_parsed")
         return {

@@ -16,11 +16,11 @@ if str(ROOT) not in sys.path:
 
 from agents.fem_agent import FEMAgent
 from agents.knowledge_agent import KnowledgeAgent
-from core.config_loader import load_material_db
+from core.config_loader import load_app_config, load_material_db
 from core.doe_sampler import DOESampler
-from core.id_utils import next_candidate_index, next_task_id, task_file_name
+from core.id_utils import format_temp_candidate_id, next_task_id, reserve_candidate_ids, task_file_name
 from core.io_utils import write_json
-from core.paths import ABAQUS_RUNS_DIR, CASES_DIR, CASE_LIBRARY_DIR, CHROMA_DIR, IO_DIR, MODELS_DIR, RESULTS_DIR, TASKS_DIR
+from core.paths import ABAQUS_RUNS_DIR, CASES_DIR, CASE_LIBRARY_DIR, CHROMA_DIR, IO_DIR, MODELS_DIR, RESULTS_DIR, RUNTIME_DIR, TASKS_DIR
 from core.schema_validator import validate_or_raise
 from core.surrogate_model import SurrogateModelManager
 from core.task_contract import (
@@ -94,21 +94,31 @@ def default_task(
 
 
 def clear_dir(path: Path) -> None:
+    if path.resolve() not in {directory.resolve() for directory in
+                              (IO_DIR, RESULTS_DIR, CASES_DIR, ABAQUS_RUNS_DIR, CASE_LIBRARY_DIR, TASKS_DIR, RUNTIME_DIR)}:
+        raise ValueError(f"不允许清理该目录：{path}")
     if not path.exists():
         path.mkdir(parents=True, exist_ok=True)
         return
     for child in path.iterdir():
         if child.is_dir():
-            shutil.rmtree(child, ignore_errors=True)
+            if child.is_symlink() or not child.resolve().is_relative_to(path.resolve()):
+                raise ValueError(f"清理目标越界：{child}")
+            shutil.rmtree(child)
         else:
             child.unlink(missing_ok=True)
 
 
 def reset_dataset() -> None:
-    for directory in [IO_DIR, RESULTS_DIR, CASES_DIR, ABAQUS_RUNS_DIR, CASE_LIBRARY_DIR, TASKS_DIR]:
+    for directory in [IO_DIR, RESULTS_DIR, CASES_DIR, ABAQUS_RUNS_DIR, CASE_LIBRARY_DIR, TASKS_DIR, RUNTIME_DIR]:
         clear_dir(directory)
     if CHROMA_DIR.exists():
-        shutil.rmtree(CHROMA_DIR, ignore_errors=True)
+        import chromadb
+
+        client = chromadb.PersistentClient(path=str(CHROMA_DIR))
+        name = load_app_config()["case_memory"]["collection_name"]
+        if name in {collection.name for collection in client.list_collections()}:
+            client.delete_collection(name)
     for model_path in MODEL_FILES:
         model_path.unlink(missing_ok=True)
 
@@ -127,6 +137,7 @@ def build_candidates(task: Dict, count: int, start_index: int, strict_solver_win
         start_index=start_index,
         strict_solver_window=strict_solver_window,
         batch_multiplier=1,
+        id_factory=format_temp_candidate_id,
     )
 
 
@@ -146,13 +157,16 @@ def run_task_batch(task: Dict, count: int, workers: int, strict_solver_window: b
     if count <= 0:
         return []
 
-    start_index = next_candidate_index()
     candidates = build_candidates(
         task=task,
         count=count,
-        start_index=start_index,
+        start_index=1,
         strict_solver_window=strict_solver_window,
     )
+    for candidate, candidate_id in zip(candidates, reserve_candidate_ids(len(candidates))):
+        candidate["session_candidate_id"] = candidate["candidate_id"]
+        candidate["candidate_id"] = candidate_id
+        candidate["display_name"] = candidate_id
 
     knowledge_agent = KnowledgeAgent()
     records: List[Dict] = []

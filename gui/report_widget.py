@@ -7,9 +7,6 @@ from typing import Any
 
 from PyQt6.QtWidgets import QLabel, QTextBrowser, QVBoxLayout, QWidget
 
-from core.paths import RESULTS_DIR
-
-
 class ReportWidget(QWidget):
     """展示当前会话报告路径、生成状态和 Markdown 内容。"""
 
@@ -29,19 +26,6 @@ class ReportWidget(QWidget):
         self.report = None
         self.summary_label.setText("当前还没有报告。")
         self.preview_browser.setHtml("<p>完成有限元校核并确认导出报告后，这里会显示 Markdown 报告预览。</p>")
-
-    def refresh_latest(self) -> None:
-        markdown_path = RESULTS_DIR / "latest_report.md"
-        pdf_path = RESULTS_DIR / "latest_report.pdf"
-        if markdown_path.exists():
-            self.update_report(
-                {
-                    "markdown_path": str(markdown_path),
-                    "pdf_path": str(pdf_path) if pdf_path.exists() else None,
-                }
-            )
-        else:
-            self.reset_view()
 
     def update_report(self, report: dict[str, Any] | None) -> None:
         if not report:

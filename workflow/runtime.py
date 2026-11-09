@@ -93,6 +93,7 @@ class DesignWorkflowRuntime:
                     "task": self.orchestrator.parse_instruction(
                         str(payload.get("instruction") or ""),
                         overrides=payload.get("overrides") or None,
+                        run_id=self._active_run_id,
                     )
                 },
             )
@@ -142,7 +143,7 @@ class DesignWorkflowRuntime:
                 output_schema={"knowledge_updates": "list"},
                 handler=lambda payload: {
                     "knowledge_updates": self.orchestrator.persist_knowledge_records(
-                        payload["task"],
+                        {**payload["task"], "run_id": self._active_run_id},
                         payload.get("fem_designs") or [],
                         payload.get("results") or [],
                     )
@@ -170,7 +171,7 @@ class DesignWorkflowRuntime:
     def _evaluate_candidates_with_queue(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not self._active_run_id:
             raise RuntimeError("仿真队列缺少当前工作流运行编号")
-        task = payload["task"]
+        task = {**payload["task"], "run_id": self._active_run_id}
         candidates = list(payload.get("candidates") or [])
         results = []
         if hasattr(self.orchestrator, "prepare_candidates_for_fem"):
@@ -260,6 +261,7 @@ class DesignWorkflowRuntime:
         if not candidates:
             raise ValueError("FEM-ready 候选列表为空")
         active_run_id = run_id or new_run_id()
+        task = {**task, "run_id": active_run_id}
         previous_run_id = self._active_run_id
         previous_stage = self._active_stage
         if not self.event_store.has_run(active_run_id):
@@ -402,7 +404,7 @@ class DesignWorkflowRuntime:
             "parse_task",
             {"instruction": state.get("instruction", ""), "overrides": state.get("overrides") or {}},
         )
-        return {"task": result["task"], "stage": "task_parsed", "error": None}
+        return {"task": {**result["task"], "run_id": state["run_id"]}, "stage": "task_parsed", "error": None}
 
     def _generate_candidates(self, state: DesignWorkflowState) -> Dict[str, Any]:
         result = self.tools.run("generate_candidates", {"task": state["task"]})

@@ -23,6 +23,8 @@ FEM_ARTIFACT_FIELDS = (
     "service_inp",
     "target_inp",
     "visualization_json",
+    "user_subroutine_path",
+    "material_strength_include",
 )
 
 
@@ -118,5 +120,28 @@ def required_fem_artifact_fields(results: Dict[str, Any]) -> Tuple[str, ...]:
         required.update({"target_inp", "target_odb"})
     if any(results.get(field) is not None for field in ("riks_lpf_max", "riks_lpf_last", "riks_increment_count")):
         required.update({"postbuckling_inp", "postbuckling_odb"})
+    if results.get("progressive_damage_complete"):
+        required.update({"user_subroutine_path", "material_strength_include"})
 
     return tuple(field for field in FEM_ARTIFACT_FIELDS if field in required)
+
+
+def complete_case_result_errors(results: Dict[str, Any]) -> Tuple[str, ...]:
+    """返回完整设计案例所缺少的求解证据，不把阶段结果当作完整案例。"""
+    errors = list(result_semantic_errors(results))
+    if not is_successful_result(results):
+        errors.append("求解链路未成功完成")
+    for stage in ("service", "target"):
+        coverage = results.get(f"{stage}_stress_coverage") or {}
+        if (coverage.get("status") != "complete"
+                or not coverage.get("checked_element_positions")
+                or not coverage.get("expected_section_points")
+                or coverage.get("incomplete_element_positions") != 0):
+            errors.append(f"{stage} 压力缺少全部铺层应力覆盖证据")
+        if results.get(f"{stage}_pressure_check_status") not in {"passed", "failed"}:
+            errors.append(f"{stage} 压力校核未完成")
+    if results.get("riks_limit_point_confirmed") is not True or verified_capacity_pressure(results) is None:
+        errors.append("损伤后屈曲路径未确认极限点")
+    if results.get("progressive_damage_complete") is not True or results.get("damage_state_output_complete") is not True:
+        errors.append("渐进损伤分析或状态变量输出不完整")
+    return tuple(errors)

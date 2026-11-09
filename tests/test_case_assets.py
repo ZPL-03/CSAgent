@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import re
 from pathlib import Path
 
-from core.fem_result_semantics import required_fem_artifact_fields, result_semantic_errors, verified_capacity_pressure
+from core.fem_result_semantics import complete_case_result_errors, required_fem_artifact_fields, result_semantic_errors, verified_capacity_pressure
 from core.paths import CASES_DIR, resolve_project_path
 from core.schema_validator import validate_or_raise
 from gui.render_utils import mode_shape_payload_status
@@ -33,7 +34,8 @@ def test_case_library_numbering_and_fem_artifacts_are_consistent() -> None:
         validate_or_raise("abaqus_result.schema.json", result)
 
         case_id = f"CASE_{index}"
-        candidate_id = f"C{index}"
+        candidate_id = case_record["candidate_id"]
+        assert re.fullmatch(r"C[1-9][0-9]*", candidate_id)
         design = case_record.get("design") or {}
         assert case_record["case_id"] == case_id
         assert case_record.get("candidate_id") == candidate_id
@@ -43,6 +45,11 @@ def test_case_library_numbering_and_fem_artifacts_are_consistent() -> None:
         assert result.get("candidate_id") == candidate_id
         assert result.get("status") in {"success", "failed", "max_retries_exceeded"}
         assert not result_semantic_errors(result)
+        assert not complete_case_result_errors(result)
+        for field in ("run_id", "task_id", "session_candidate_id"):
+            values = [item.get(field) for item in (case_record, design, result)]
+            if any(values):
+                assert all(values) and len(set(values)) == 1, (path.name, field)
         capacity_pressure = verified_capacity_pressure(result)
         if capacity_pressure is not None:
             assert capacity_pressure > 0
@@ -56,6 +63,11 @@ def test_case_library_numbering_and_fem_artifacts_are_consistent() -> None:
             assert artifact_path is not None
             assert artifact_path.exists(), f"{path.name} 的 {key} 文件不存在：{artifact_path}"
             assert artifact_path.is_file()
+            assert artifact_path.stat().st_size > 0
+        for path_field, hash_field in (("user_subroutine_path", "user_subroutine_sha256"),
+                                       ("material_strength_include", "material_strength_sha256")):
+            artifact_path = resolve_project_path(result[path_field])
+            assert hashlib.sha256(artifact_path.read_bytes()).hexdigest() == result[hash_field]
 
         mode_status = mode_shape_payload_status(result)
         assert mode_status["available"] is True

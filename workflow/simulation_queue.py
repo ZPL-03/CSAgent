@@ -63,7 +63,7 @@ class SimulationJobQueue:
                     candidate_json, result_json, error_message, created_at, started_at, finished_at, updated_at
                 )
                 VALUES (
-                    ?, ?, ?, COALESCE((SELECT formal_candidate_id FROM simulation_jobs WHERE job_id = ?), NULL),
+                    ?, ?, ?, ?,
                     ?, ?, NULL, NULL,
                     COALESCE((SELECT created_at FROM simulation_jobs WHERE job_id = ?), ?),
                     NULL, NULL, ?
@@ -73,7 +73,7 @@ class SimulationJobQueue:
                     job_id,
                     run_id,
                     session_candidate_id,
-                    job_id,
+                    candidate.get("candidate_id") if candidate.get("session_candidate_id") else None,
                     "queued",
                     json.dumps(candidate, ensure_ascii=False, default=str),
                     job_id,

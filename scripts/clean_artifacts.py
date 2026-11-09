@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import argparse
+import json
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -11,7 +13,7 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.paths import ABAQUS_DIR, ABAQUS_RUNS_DIR, CHROMA_DIR, DATA_DIR, RESULTS_DIR, RUNTIME_DIR
+from core.paths import ABAQUS_DIR, ABAQUS_RUNS_DIR, CASES_DIR, DATA_DIR, RESULTS_DIR, RUNTIME_DIR
 
 
 IO_DIR = DATA_DIR / "io"
@@ -19,8 +21,8 @@ IO_DIR = DATA_DIR / "io"
 
 def candidate_artifact_paths(candidate_id: str) -> list[Path]:
     normalized = str(candidate_id).strip()
-    if not normalized:
-        return []
+    if not re.fullmatch(r"C[1-9][0-9]*", normalized):
+        raise ValueError(f"无效求解编号：{candidate_id}")
     return [
         IO_DIR / f"input_{normalized}.json",
         IO_DIR / f"result_{normalized}.json",
@@ -31,30 +33,29 @@ def candidate_artifact_paths(candidate_id: str) -> list[Path]:
     ]
 
 
-def purge_business_records(candidate_ids: list[str], case_ids: list[str]) -> None:
-    """只清理候选求解工件，不删除正式案例记录，避免破坏连续编号。"""
-    touched = False
+def purge_business_records(candidate_ids: list[str]) -> None:
+    """只清理没有案例引用的求解工件，避免破坏案例证据链。"""
+    referenced = {json.loads(path.read_text(encoding="utf-8")).get("candidate_id")
+                  for path in CASES_DIR.glob("CASE_*.json")}
+    if referenced.intersection(candidate_ids):
+        raise ValueError("求解工件仍被案例引用，不允许单独删除")
     for candidate_id in candidate_ids:
         for path in candidate_artifact_paths(candidate_id):
-            touched = touched or path.exists()
             remove_path(path)
-    _ = case_ids
-    if touched and CHROMA_DIR.exists():
-        shutil.rmtree(CHROMA_DIR, ignore_errors=True)
 
 
 def purge_problem_prefixes(prefixes: list[str]) -> None:
-    candidate_ids = [item.strip() for item in prefixes if item.strip() and item.strip().startswith("C") and not item.strip().startswith("CASE_")]
-    case_ids = [item.strip() for item in prefixes if item.strip().startswith("CASE_")]
-    purge_business_records(candidate_ids, case_ids)
+    candidate_ids = [item.strip() for item in prefixes]
+    for candidate_id in candidate_ids:
+        candidate_artifact_paths(candidate_id)
+    purge_business_records(candidate_ids)
 
     for path in RESULTS_DIR.glob("batch_summary_*.json"):
         text = path.read_text(encoding="utf-8") if path.exists() else ""
-        if any(prefix in text for prefix in prefixes):
+        payload = json.loads(text)
+        records = payload if isinstance(payload, list) else payload.get("records", [])
+        if any(record.get("candidate_id") in candidate_ids for record in records):
             remove_path(path)
-
-    if prefixes and not candidate_ids and not case_ids and CHROMA_DIR.exists():
-        shutil.rmtree(CHROMA_DIR, ignore_errors=True)
 
 
 
@@ -63,8 +64,10 @@ def remove_path(path: Path) -> None:
     """删除文件或目录，不存在时直接跳过。"""
     if not path.exists():
         return
+    if path.is_symlink() or not path.resolve().is_relative_to(ROOT.resolve()) or path.resolve() == ROOT.resolve():
+        raise ValueError(f"不允许清理越界路径：{path}")
     if path.is_dir():
-        shutil.rmtree(path, ignore_errors=True)
+        shutil.rmtree(path)
     else:
         path.unlink(missing_ok=True)
 
@@ -89,43 +92,18 @@ def clean_abaqus_session_files() -> None:
     for path in ABAQUS_DIR.glob("build_*.py"):
         remove_path(path)
 
-    for path in ABAQUS_RUNS_DIR.rglob("build_*.py"):
-        remove_path(path)
-
     residual_patterns = (
         "*.lck",
         "*.023",
         "*.com",
         "*.jnl",
-        "*.sta",
         "*.prt",
         "*.sim",
-        "*.log",
-        "*.env",
         "*.odb_f",
-        "candidate_retry_*.json",
     )
     for pattern in residual_patterns:
         for path in ABAQUS_RUNS_DIR.rglob(pattern):
             remove_path(path)
-
-
-def clean_contaminated_vector_index() -> None:
-    """清理由测试临时目录污染的本地向量索引。"""
-    if not CHROMA_DIR.exists():
-        return
-    temp_markers = (b"pytest-", b"pytest-of-")
-    for path in CHROMA_DIR.rglob("*"):
-        if not path.is_file():
-            continue
-        try:
-            with path.open("rb") as handle:
-                data = handle.read(2_000_000)
-        except OSError:
-            continue
-        if any(marker in data for marker in temp_markers):
-            remove_path(CHROMA_DIR)
-            return
 
 
 def clean_gui_audit_artifacts() -> None:
@@ -137,14 +115,12 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--purge-prefix", action="append", default=[])
     parser.add_argument("--candidate-id", action="append", default=[])
-    parser.add_argument("--case-id", action="append", default=[], help="保留兼容参数；不会删除正式案例 JSON")
     args = parser.parse_args()
 
     clean_python_caches()
     clean_abaqus_session_files()
-    clean_contaminated_vector_index()
     clean_gui_audit_artifacts()
-    purge_business_records(args.candidate_id, args.case_id)
+    purge_business_records(args.candidate_id)
     purge_problem_prefixes(args.purge_prefix)
     return 0
 

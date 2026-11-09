@@ -3,15 +3,17 @@
 from __future__ import annotations
 
 from datetime import datetime
+import json
+from threading import Lock
 from typing import Dict
 
 from agents.base import BaseAgent
 from core.case_memory import CaseMemoryIndex
 from core.config_loader import load_app_config
-from core.fem_result_semantics import is_passed_design_check, normalize_result_semantics, verified_capacity_pressure
+from core.fem_result_semantics import complete_case_result_errors, is_passed_design_check, normalize_result_semantics, required_fem_artifact_fields, verified_capacity_pressure
 from core.id_utils import next_case_id
 from core.io_utils import write_json
-from core.paths import CASE_LIBRARY_DIR, CASES_DIR
+from core.paths import CASE_LIBRARY_DIR, CASES_DIR, resolve_project_path
 from core.schema_validator import validate_or_raise
 from core.surrogate_model import SurrogateModelManager
 from core.task_contract import (
@@ -19,6 +21,9 @@ from core.task_contract import (
     normalize_load_conditions,
     task_payload_from_request,
 )
+
+
+_CASE_WRITE_LOCK = Lock()
 
 
 class KnowledgeAgent(BaseAgent):
@@ -76,6 +81,9 @@ class KnowledgeAgent(BaseAgent):
             "origin_summary": design.get("origin_summary", ""),
             "llm_output_excerpt": design.get("llm_output_excerpt"),
         }
+        for field in ("run_id", "task_id"):
+            if design.get(field):
+                payload[field] = design[field]
         return payload
 
     def _sanitize_abaqus_results(self, abaqus_results: Dict) -> Dict:
@@ -172,7 +180,11 @@ class KnowledgeAgent(BaseAgent):
             "target_odb",
             "target_inp",
         ]
-        return normalize_result_semantics({key: abaqus_results.get(key) for key in keys})
+        payload = {key: abaqus_results.get(key) for key in keys}
+        for field in ("run_id", "task_id"):
+            if abaqus_results.get(field):
+                payload[field] = abaqus_results[field]
+        return normalize_result_semantics(payload)
 
     def _result_pressure(self, results: Dict) -> float | None:
         return verified_capacity_pressure(results)
@@ -181,7 +193,7 @@ class KnowledgeAgent(BaseAgent):
         clean_task = self._sanitize_task(task)
         clean_design = self._sanitize_design(design)
         clean_results = self._sanitize_abaqus_results(abaqus_results)
-        case_id = next_case_id(clean_design.get("candidate_id"))
+        case_id = next_case_id()
         verdict = clean_results.get("verdict") or ("失败" if clean_results.get("status") != "success" else "未知")
         predicted = clean_design.get("surrogate_ultimate_pressure_MPa")
         actual = self._result_pressure(clean_results)
@@ -203,6 +215,9 @@ class KnowledgeAgent(BaseAgent):
         task_id = str(task.get("task_id") or "").strip()
         if task_id:
             record["task_id"] = task_id
+        run_id = str(task.get("run_id") or clean_design.get("run_id") or clean_results.get("run_id") or "").strip()
+        if run_id:
+            record["run_id"] = run_id
         session_candidate_id = str(clean_design.get("session_candidate_id") or clean_results.get("session_candidate_id") or "").strip()
         if session_candidate_id:
             record["session_candidate_id"] = session_candidate_id
@@ -226,7 +241,9 @@ class KnowledgeAgent(BaseAgent):
         return self.case_memory
 
     def _store_record(self, record: Dict) -> None:
-        write_json(CASES_DIR / f"{record['case_id']}.json", record)
+        CASES_DIR.mkdir(parents=True, exist_ok=True)
+        with (CASES_DIR / f"{record['case_id']}.json").open("x", encoding="utf-8") as stream:
+            json.dump(record, stream, ensure_ascii=False, indent=2)
         case_memory = self._case_memory_index()
         if self._should_store_record(record.get("abaqus_results", {})):
             write_json(CASE_LIBRARY_DIR / f"{record['case_id']}.json", record)
@@ -268,8 +285,31 @@ class KnowledgeAgent(BaseAgent):
         design = input_data["design"]
         abaqus_results = input_data["abaqus_results"]
 
-        record = self._build_record(task, design, abaqus_results)
-        self._store_record(record)
+        errors = list(complete_case_result_errors(abaqus_results))
+        for field in required_fem_artifact_fields(abaqus_results):
+            path = resolve_project_path(abaqus_results.get(field))
+            if path is None or not path.is_file() or path.stat().st_size == 0:
+                errors.append(f"{field} 工件缺失或为空")
+        if errors:
+            return {"status": "not_stored_incomplete", "case_id": None, "retrained": False,
+                    "surrogate_summary": None, "reason": "；".join(errors)}
+        if design.get("candidate_id") != abaqus_results.get("candidate_id"):
+            raise ValueError("案例设计与有限元结果的求解编号不匹配")
+        for field in ("run_id", "task_id", "session_candidate_id"):
+            values = {str(item[field]) for item in (task, design, abaqus_results) if item.get(field)}
+            if len(values) > 1:
+                raise ValueError(f"案例追踪字段不匹配：{field}")
+        with _CASE_WRITE_LOCK:
+            for path in CASES_DIR.glob("CASE_*.json"):
+                previous = json.loads(path.read_text(encoding="utf-8"))
+                if previous.get("candidate_id") == design.get("candidate_id"):
+                    if (previous.get("abaqus_results") != self._sanitize_abaqus_results(abaqus_results)
+                            or previous.get("design") != self._sanitize_design(design)):
+                        raise ValueError("同一求解编号已有不同设计或结果，不可重复入库")
+                    return {"status": "stored", "case_id": previous["case_id"], "retrained": False,
+                            "surrogate_summary": None, "already_stored": True}
+            record = self._build_record(task, design, abaqus_results)
+            self._store_record(record)
         if self._should_store_record(record["abaqus_results"]):
             self.emit(f"案例 {record['case_id']} 已进入正式案例库")
         else:

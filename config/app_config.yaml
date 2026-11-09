@@ -85,6 +85,3 @@ conversation:
     - fem_evaluation
     - export_report
 
-report:
-  output_markdown: data/results/latest_report.md
-  output_pdf: data/results/latest_report.pdf

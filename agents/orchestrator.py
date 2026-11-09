@@ -11,7 +11,7 @@ from agents.fem_agent import FEMAgent
 from agents.knowledge_agent import KnowledgeAgent
 from agents.report_gen import ReportGenAgent
 from agents.screener import ScreenerAgent
-from core.id_utils import format_candidate_id, next_candidate_index, reserve_candidate_ids, task_file_name
+from core.id_utils import reserve_candidate_ids, task_file_name
 from core.fem_input_contract import attach_design_revision, validate_fem_input_or_raise
 from core.io_utils import write_json
 from core.paths import IO_DIR, TASKS_DIR
@@ -47,6 +47,7 @@ class OrchestratorAgent(BaseAgent):
     def _task_event_context(self, task: Dict) -> Dict:
         return {
             "task_id": task.get("task_id"),
+            "run_id": task.get("run_id"),
             "created_at": task.get("created_at"),
             "source": task.get("source"),
         }
@@ -67,7 +68,7 @@ class OrchestratorAgent(BaseAgent):
 
     def _promote_candidate_for_fem(self, task: Dict, candidate: Dict, formal_candidate_id: str | None = None) -> Dict:
         enriched_candidate = self._attach_task_context(task, candidate)
-        formal_candidate_id = formal_candidate_id or format_candidate_id(next_candidate_index())
+        formal_candidate_id = formal_candidate_id or reserve_candidate_ids(1)[0]
         session_candidate_id = enriched_candidate.get("candidate_id")
         promoted = dict(enriched_candidate)
         source_layup = deepcopy(enriched_candidate.get("layup"))
@@ -90,6 +91,9 @@ class OrchestratorAgent(BaseAgent):
         promoted["session_candidate_id"] = session_candidate_id
         promoted["candidate_id"] = formal_candidate_id
         promoted["display_name"] = formal_candidate_id
+        for field in ("run_id", "task_id"):
+            if task.get(field):
+                promoted[field] = task[field]
         promoted = attach_design_revision(promoted)
         validate_fem_input_or_raise(promoted)
         return promoted
@@ -103,8 +107,10 @@ class OrchestratorAgent(BaseAgent):
             for index, candidate in enumerate(candidates)
         ]
 
-    def parse_instruction(self, text: str, overrides: Dict | None = None) -> Dict:
+    def parse_instruction(self, text: str, overrides: Dict | None = None, *, run_id: str | None = None) -> Dict:
         task = self.task_parser.parse_instruction(text, overrides=overrides)
+        if run_id:
+            task["run_id"] = run_id
 
         # 写入任务台账
         task_path = TASKS_DIR / task_file_name(task["task_id"])
@@ -213,6 +219,9 @@ class OrchestratorAgent(BaseAgent):
             {**self._task_event_context(task), "candidate": fem_candidate},
         )
         result = self.fem_agent.run(fem_candidate)
+        for field in ("run_id", "task_id"):
+            if fem_candidate.get(field):
+                result[field] = fem_candidate[field]
         result["session_candidate_id"] = fem_candidate.get("session_candidate_id")
         result["display_name"] = fem_candidate.get("display_name")
         write_json(IO_DIR / f"result_{result['candidate_id']}.json", result)
@@ -222,25 +231,25 @@ class OrchestratorAgent(BaseAgent):
         """把有限元结果回流到案例库和案例记忆。"""
 
         results_by_candidate_id: Dict[str, Dict] = {}
-        results_by_session_id: Dict[str, Dict] = {}
         for result in results:
             candidate_id = str(result.get("candidate_id") or "").strip()
-            session_candidate_id = str(result.get("session_candidate_id") or "").strip()
             if candidate_id:
+                if candidate_id in results_by_candidate_id:
+                    raise ValueError(f"有限元结果包含重复求解编号：{candidate_id}")
                 results_by_candidate_id[candidate_id] = result
-            if session_candidate_id:
-                results_by_session_id[session_candidate_id] = result
 
         updates: List[Dict] = []
         for design in designs:
             design_candidate_id = str(design.get("candidate_id") or "").strip()
             design_session_id = str(design.get("session_candidate_id") or "").strip()
-            result = results_by_session_id.get(design_session_id) if design_session_id else None
-            if result is None and design_candidate_id:
-                candidate_result = results_by_candidate_id.get(design_candidate_id)
-                result_session_id = str(candidate_result.get("session_candidate_id") or "").strip() if candidate_result else ""
-                if candidate_result and (not design_session_id or not result_session_id or result_session_id == design_session_id):
-                    result = candidate_result
+            result = results_by_candidate_id.get(design_candidate_id)
+            if result:
+                result_session_id = str(result.get("session_candidate_id") or "").strip()
+                design_run_id = str(design.get("run_id") or task.get("run_id") or "").strip()
+                result_run_id = str(result.get("run_id") or "").strip()
+                if ((design_session_id and result_session_id and result_session_id != design_session_id)
+                        or (design_run_id and result_run_id and result_run_id != design_run_id)):
+                    result = None
             if not result:
                 update = {
                     "status": "missing_result",
@@ -256,7 +265,10 @@ class OrchestratorAgent(BaseAgent):
                 update["candidate_id"] = design.get("candidate_id")
                 update["session_candidate_id"] = design.get("session_candidate_id")
                 updates.append(update)
-                self.emit_event("knowledge_update_completed", f"知识回流完成：{update.get('case_id')}", update)
+                if update.get("status") == "not_stored_incomplete":
+                    self.emit_event("knowledge_update_skipped", f"结果证据不完整，未入案例库：{update.get('reason')}", update)
+                else:
+                    self.emit_event("knowledge_update_completed", f"知识回流完成：{update.get('case_id')}", update)
             except Exception as exc:
                 update = {
                     "status": "failed",

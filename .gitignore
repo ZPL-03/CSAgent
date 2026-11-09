@@ -32,6 +32,7 @@ data/results/batch_summary_*.json
 data/results/natural_language_acceptance_*.json
 data/results/session_export_*.json
 data/results/session_trace_*.csv
+data/results/RUN_*/
 data/runtime/
 knowledge/chroma_db/
 knowledge/runtime/

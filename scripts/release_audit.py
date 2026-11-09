@@ -26,7 +26,7 @@ if hasattr(sys.stderr, "reconfigure"):
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.fem_result_semantics import required_fem_artifact_fields, result_semantic_errors  # noqa: E402
+from core.fem_result_semantics import complete_case_result_errors, required_fem_artifact_fields, result_semantic_errors  # noqa: E402
 from core.paths import resolve_project_path  # noqa: E402
 from core.schema_validator import validate_or_raise  # noqa: E402
 
@@ -1011,6 +1011,7 @@ class ReleaseAudit:
             return
 
         errors: list[str] = []
+        seen_candidates: set[str] = set()
         for index, path in enumerate(paths, start=1):
             data = json.loads(path.read_text(encoding="utf-8"))
             try:
@@ -1020,11 +1021,16 @@ class ReleaseAudit:
                 errors.append(f"{path.name}: {exc}")
                 continue
             expected_case = f"CASE_{index}"
-            expected_candidate = f"C{index}"
+            expected_candidate = data.get("candidate_id")
             design = data.get("design") or {}
             result = data.get("abaqus_results") or {}
             if data.get("case_id") != expected_case:
                 errors.append(f"{path.name}: case_id={data.get('case_id')}")
+            if not re.fullmatch(r"C[1-9][0-9]*", str(expected_candidate or "")):
+                errors.append(f"{path.name}: 求解编号无效")
+            if expected_candidate in seen_candidates:
+                errors.append(f"{path.name}: 求解编号重复")
+            seen_candidates.add(expected_candidate)
             if data.get("candidate_id") != expected_candidate or data.get("display_name") != expected_candidate:
                 errors.append(f"{path.name}: 顶层身份不一致")
             if design.get("candidate_id") != expected_candidate or design.get("display_name") != expected_candidate:
@@ -1033,6 +1039,12 @@ class ReleaseAudit:
                 errors.append(f"{path.name}: abaqus_results.candidate_id={result.get('candidate_id')}")
             for semantic_error in result_semantic_errors(result):
                 errors.append(f"{path.name}: {semantic_error}")
+            for error in complete_case_result_errors(result):
+                errors.append(f"{path.name}: {error}")
+            for field in ("run_id", "task_id", "session_candidate_id"):
+                values = [item.get(field) for item in (data, design, result)]
+                if any(values) and (not all(values) or len(set(values)) != 1):
+                    errors.append(f"{path.name}: {field} 追踪不完整或不一致")
             for artifact_key in required_fem_artifact_fields(result):
                 artifact_path = resolve_project_path(result.get(artifact_key))
                 if artifact_path is None or not artifact_path.is_file():
@@ -1043,14 +1055,16 @@ class ReleaseAudit:
         self.add("案例库编号", not errors, f"{len(paths)} 条案例连续且身份一致" if not errors else "; ".join(errors[:12]))
 
     def check_latest_report(self) -> None:
-        report_path = ROOT / "data/results/latest_report.md"
-        if not report_path.exists():
-            self.add("最新报告", True, "当前没有本地 latest_report.md；报告属于运行时输出")
+        report_paths = sorted((ROOT / "data/results").glob("RUN_*/latest_report.md"))
+        if not report_paths:
+            self.add("最新报告", True, "当前没有会话报告；报告属于运行时输出")
             return
-        text = report_path.read_text(encoding="utf-8")
-        passed = text.startswith("# CSAgent 耐压壳设计报告") and "### 工程解释与制造建议" not in text
-        detail = "报告标题和工程解释后处理正确" if passed else "报告标题或工程解释标题异常"
-        self.add("最新报告", passed, detail)
+        invalid = []
+        for path in report_paths:
+            text = path.read_text(encoding="utf-8")
+            if not text.startswith("# CSAgent 耐压壳设计报告") or "### 工程解释与制造建议" in text:
+                invalid.append(path.parent.name)
+        self.add("最新报告", not invalid, f"{len(report_paths)} 组会话报告标题和工程解释后处理正确" if not invalid else ", ".join(invalid))
 
     def check_llm_health(self) -> None:
         from dotenv import load_dotenv

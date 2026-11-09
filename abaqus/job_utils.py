@@ -23,13 +23,14 @@ def compiler_environment() -> dict[str, str]:
     if script is None or not script.is_file():
         raise RuntimeError("未找到 Intel Fortran 编译环境，请配置 ONEAPI_ROOT 或从编译器命令行启动平台")
     completed = subprocess.run(
-        f'call "{script}" intel64 --force >nul 2>&1 && set', shell=True,
-        capture_output=True, text=True, encoding="mbcs", errors="strict", timeout=60,
+        f'"{os.environ.get("COMSPEC", "cmd.exe")}" /d /u /c call "{script}" intel64 --force >nul 2>&1 && set',
+        capture_output=True, timeout=60,
     )
     if completed.returncode:
         raise RuntimeError("oneAPI 编译环境初始化失败")
     environment = dict(os.environ)
-    for line in completed.stdout.splitlines():
+    # cmd /u 使内置 set 的重定向输出使用 UTF-16LE，保留中文和非本地代码页字符。
+    for line in completed.stdout.decode("utf-16-le").splitlines():
         key, separator, value = line.partition("=")
         if separator and key and not key.startswith("="):
             environment[key] = value

@@ -192,15 +192,16 @@ class PipelineWorker(QObject):
                 return
 
             if self.action == "evaluate":
-                task = self.payload["task"]
+                task = dict(self.payload["task"])
+                run_id = self._manual_run_id(task)
+                task["run_id"] = run_id
+                self._ensure_manual_run(event_store, run_id, task)
                 candidates = self.payload["candidates"]
                 if hasattr(orchestrator, "prepare_candidates_for_fem"):
                     fem_designs = orchestrator.prepare_candidates_for_fem(task, candidates)
                 else:
                     fem_designs = [orchestrator.prepare_candidate_for_fem(task, candidate) for candidate in candidates]
                 results = []
-                run_id = self._manual_run_id(task)
-                self._ensure_manual_run(event_store, run_id, task)
                 simulation_queue = SimulationJobQueue(event_store.db_path) if event_store else None
                 for fem_candidate in fem_designs:
                     session_candidate_id = str(
@@ -321,7 +322,7 @@ class PipelineWorker(QObject):
     def _manual_run_id(self, task: dict | None) -> str:
         raw = self.payload.get("workflow_run_id") or self.payload.get("run_id")
         if not raw and isinstance(task, dict):
-            raw = task.get("task_id")
+            raw = task.get("run_id") or task.get("task_id")
         return str(raw or "manual_fem")
 
     def _ensure_manual_run(self, event_store: WorkflowEventStore | None, run_id: str, task: dict | None) -> None:
@@ -2540,11 +2541,9 @@ class MainWindow(QMainWindow):
         self.example_button.setEnabled(self.session.pending_confirmation is None)
         self.refresh_button.setEnabled(True)
         session_report = self.session.report or {}
-        session_report_raw_path = str(session_report.get("pdf_path") or session_report.get("markdown_path") or "").strip()
         self.open_report_button.setEnabled(
-            (bool(session_report_raw_path) and Path(session_report_raw_path).exists())
-            or (RESULTS_DIR / "latest_report.md").exists()
-            or (RESULTS_DIR / "latest_report.pdf").exists()
+            any(Path(str(session_report[field])).is_file()
+                for field in ("pdf_path", "markdown_path") if session_report.get(field))
         )
         self.export_data_button.setEnabled(
             bool(self.session.task or self.session.candidates or self.session.results_by_session_id or self.session.report)
@@ -2918,6 +2917,8 @@ class MainWindow(QMainWindow):
     def _clear_worker_refs(self) -> None:
         self.worker = None
         self.worker_thread = None
+        self.runtime_stage_text = ""
+        self._update_overview_cards()
 
     def _run_selector_label(self, run: dict) -> str:
         updated_at = str(run.get("updated_at") or "-")
@@ -3282,7 +3283,6 @@ class MainWindow(QMainWindow):
             self.session.report.get("markdown_path") if self.session.report else None,
         ]
         paths = [Path(str(path)) for path in session_paths if str(path or "").strip()]
-        paths.extend([RESULTS_DIR / "latest_report.pdf", RESULTS_DIR / "latest_report.md"])
         for path in paths:
             if path.exists():
                 QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))

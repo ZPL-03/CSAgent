@@ -107,7 +107,7 @@ GUI 的“监控”页提供最近运行记录下拉框、刷新运行记录和�
 
 ## 启动
 
-仓库中的部分正式 ODB 使用 Git LFS 保存。首次检出后执行 `git lfs install` 和 `git lfs pull`，确保工作目录中是完整 ODB，而不是 LFS 指针文本。运行生成的 INP、ODB、子程序和监测证据保存在各候选作业目录；不能把有效求解工件当作普通缓存清理。
+仓库中的正式 ODB 使用 Git LFS 保存。首次检出后执行 `git lfs install` 和 `git lfs pull`，确保工作目录中是完整 ODB，而不是 LFS 指针文本。运行生成的 INP、ODB、子程序和监测证据保存在各候选作业目录；不能把有效求解工件当作普通缓存清理。
 
 ```powershell
 D:\anaconda3\envs\AGENT\python.exe main.py
@@ -133,7 +133,7 @@ D:\anaconda3\envs\AGENT\python.exe scripts\run_natural_language_acceptance.py --
 D:\anaconda3\envs\AGENT\python.exe scripts\build_initial_cases.py --reset --count 5 --task-count 1 --pressures 30 --target-pressure 35
 ```
 
-`--reset` 会清理现有案例、任务、求解输入输出、Abaqus 工件、案例记忆索引和代理公式校准文件，再从 `CASE_1` 和 `C1` 重新计数。初始案例生成使用参数范围内的拉丁超立方采样；批量建库默认不写入会话任务编号，只有显式使用 `--record-task` 时才记录 `TASK_N` 追溯文件。
+`--reset` 会清理现有案例、任务、报告、运行记录、求解输入输出、Abaqus 工件、案例记忆 collection 和代理公式校准文件，从空库重新计数；项目知识文档、知识图谱和项目检索 collection 保留。该操作会删除真实结果，应先核对并备份。初始案例使用参数范围内的拉丁超立方采样；`C<N>` 在求解前原子预占，`CASE_N` 只在完整结果入库时按顺序分配，两者独立。服务与目标压力全部铺层覆盖、渐进损伤输出或确认极限点证据不完整的结果只保留在求解记录中，不占案例号。批量建库使用 `--record-task` 时记录 `TASK_N` 台账；GUI 会话同时保留 `RUN_…`、`TASK_N`、`TMP_N` 追踪。
 
 ## 有限元说明
 

@@ -1085,7 +1085,13 @@ class ReportGenAgent(BaseAgent):
         candidates = input_data.get("candidates", [])
         results = self._enrich_results_with_candidate_context(raw_results, candidates)
         report_kind = self._normalize_report_kind(input_data.get("report_kind"))
-        output_dir = self._output_dir(input_data.get("output_dir"))
+        output_value = input_data.get("output_dir")
+        if not output_value and task.get("run_id"):
+            run_id = str(task["run_id"])
+            if not re.fullmatch(r"RUN_[A-Za-z0-9_]+", run_id):
+                raise ValueError("报告会话编号无效")
+            output_value = RESULTS_DIR / run_id
+        output_dir = self._output_dir(output_value)
         self._last_llm_explanation_used = False
         selected_keys = list(self.REPORT_ARTIFACTS) if report_kind == "all" else [report_kind]
 
