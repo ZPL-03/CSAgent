@@ -1285,10 +1285,30 @@ def test_report_rejects_observed_unsupported_engineering_claims(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     agent = ReportGenAgent()
     payload = {"screened_candidates": [{"symmetric": False}, {"symmetric": False}]}
-    for claim in ("部分候选采用对称铺层。", "较轻候选质量效率更优。", "当前已考虑缺陷敏感性。"):
+    for claim in (
+        "部分候选采用对称铺层。",
+        "当前铺层为对称形式，有利于减小弯曲耦合。",
+        "该层合板具有对称性。",
+        "候选是对称结构。",
+        "较轻候选质量效率更优。",
+        "当前已考虑缺陷敏感性。",
+        "损伤状态变量最大值表明损伤已完全发展。",
+        "Riks 最大增量为当前记录值。",
+    ):
         with pytest.raises(ValueError):
             agent._validate_llm_engineering_text(claim, payload)
     agent._validate_llm_engineering_text("候选采用非对称铺层，应开展缺陷敏感性分析。", payload)
+    agent._validate_llm_engineering_text("当前铺层为非对称形式，不具有对称性。", payload)
+
+
+def test_report_does_not_treat_surface_density_unit_as_material_code(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    agent = ReportGenAgent()
+    payload = {"screened_candidates": [{"material": "T800G/5228", "weight_kg_per_m2": 26.86}]}
+    agent._validate_llm_engineering_text("T800G/5228 的面密度为 26.86 kg/m2。", payload)
+    agent._validate_llm_engineering_text("T800G/5228 的面密度为 26.86 kg / m2。", payload)
+    with pytest.raises(ValueError, match="材料牌号"):
+        agent._validate_llm_engineering_text("M40J 材料需要复核。", payload)
 
 
 def test_report_line_cleanup_preserves_measurements_without_placeholders(monkeypatch):

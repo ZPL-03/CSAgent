@@ -276,6 +276,8 @@ class ReportGenAgent(BaseAgent):
                 "各候选铺层分别读取，不得把一份候选的外侧直角层推广到所有候选。",
                 "没有试验或性能字段支持时，不比较材料韧性、固化残余应力和层间损伤性能。",
                 "progressive_damage_complete为true表示容量分析包含场变量损伤退化，不能写成没有渐进损伤。",
+                "damage_state_maxima只表示局部触发标志的最大值，不能据此断言整体损伤已完全发展。",
+                "riks_lpf_max是载荷比例系数，不是增量步数或增量大小。",
                 "目标压力的弹性起始失效检查与含损伤的Riks容量分析属于不同阶段，不得混淆范围。",
                 "post_peak_drop_20_percent表示峰后受控终止，不是异常中断，也不能说作业没有终止或全部正常结束。",
                 "symmetric或balanced为false表示该属性不满足，不表示铺层或属性数据缺失。",
@@ -321,6 +323,7 @@ class ReportGenAgent(BaseAgent):
         return True
 
     def _material_codes(self, text: str) -> set[str]:
+        text = re.sub(r"\b(?:kg|g)\s*/\s*m2\b", "", text, flags=re.IGNORECASE)
         codes = re.findall(r"\b(?:T|M)[0-9]+[A-Z0-9-]*\b", text, flags=re.IGNORECASE)
         return {code.upper() for code in codes}
 
@@ -342,10 +345,18 @@ class ReportGenAgent(BaseAgent):
             raise ValueError("LLM 报告解释包含当前设计变量域之外的结构型式")
         candidates = payload.get("screened_candidates") or []
         if candidates and all(candidate.get("symmetric") is False for candidate in candidates):
-            if re.search(r"(?:采用|属于|代表|具有|为|是)[^。；，,\n]{0,8}(?<!非)对称铺层", text):
+            if re.search(
+                r"(?<!不)(?<!未)(?:采用|属于|代表|具有|为|是|呈)[^。；，,\n]{0,8}"
+                r"(?<!非)对称(?:铺层|形式|结构|布置|构型|层合板|性)",
+                text,
+            ):
                 raise ValueError("候选均为非对称铺层，解释不能断言采用对称铺层")
         if "质量效率" in text:
             raise ValueError("未定义质量效率指标，不能把较低面密度等同于较高质量效率")
+        if re.search(r"损伤已(?:经)?(?:完全|充分)发展", text):
+            raise ValueError("损伤标志最大值不能证明整体损伤已完全发展")
+        if re.search(r"Riks\s*最大增量(?:为|是)", text, flags=re.IGNORECASE):
+            raise ValueError("Riks 载荷比例系数不能描述为最大增量")
         if re.search(r"已(?:经)?[^。；\n]{0,12}(?:考虑缺陷敏感性|完成缺陷敏感性分析)", text):
             raise ValueError("单一初始缺陷工况不构成已完成缺陷敏感性分析")
         if any(result.get("riks_termination_reason") == "post_peak_drop_20_percent"
@@ -571,7 +582,7 @@ class ReportGenAgent(BaseAgent):
             return "\n".join(
                 [
                     "- 推荐设计方案报告汇总候选生成、代理初筛和正式 FEM 编号之间的追踪关系。",
-                    "- 候选来源包含 LLM 提案、案例迁移和 DOE 采样；去重和规则检查由确定性工程逻辑完成。",
+                    "- 候选来源以各候选的 source 和 provenance 为准，不把系统支持的来源视为该任务已执行的来源。",
                     "- 方案是否进入工程冻结，应结合 FEM 校核结果、制造工艺评审和后续试验验证共同确认。",
                 ]
             )

@@ -1,0 +1,401 @@
+{
+  "case_id": "CASE_9",
+  "candidate_id": "C10",
+  "display_name": "C10",
+  "created_at": "2026-11-09T12:57:18.950030",
+  "source": "abaqus_auto",
+  "task": {
+    "application": "复合材料圆柱壳子模型",
+    "load_conditions": {
+      "type": "external_pressure",
+      "label": "外部静水压力",
+      "external_pressure_MPa": 70.0,
+      "seawater_density_kg_per_m3": 1025.0,
+      "gravity_m_per_s2": 9.80665,
+      "pressure_basis": "user_supplied_external_pressure"
+    },
+    "boundary_conditions": {
+      "type": "END_CLAMPED",
+      "label": "两端固支",
+      "description": "圆柱壳两端截面采用固支等效约束。",
+      "axial_edges": [
+        "X0",
+        "X1"
+      ],
+      "radial_constraint": true,
+      "rotation_constraint": true
+    },
+    "geometry_envelope": {
+      "length_mm": [
+        350.0,
+        350.0
+      ],
+      "radius_mm": [
+        80.0,
+        80.0
+      ],
+      "thickness_mm": [
+        5.0,
+        20.0
+      ],
+      "alpha_deg": [
+        10.0,
+        80.0
+      ],
+      "beta_deg": [
+        10.0,
+        80.0
+      ],
+      "imperfection_ratio": [
+        0.001,
+        0.01
+      ]
+    },
+    "material_system": {},
+    "layup_constraints": {
+      "allowed_angles": [
+        0,
+        45,
+        -45,
+        90
+      ],
+      "symmetric": false,
+      "balanced": true,
+      "min_ratio_per_angle": 0.05,
+      "allowed_angles_deg": [
+        14.0,
+        71.0,
+        90.0
+      ]
+    },
+    "candidate_generation_preferences": {
+      "total_candidates": 1,
+      "llm_candidates": null,
+      "case_transfer_candidates": null,
+      "doe_candidates": null,
+      "source_allocation_mode": "ratio_2_1_1"
+    },
+    "screening_preferences": {
+      "top_k_candidates": 1
+    },
+    "hull_type": "CYLINDRICAL",
+    "design_targets": {
+      "ultimate_pressure_min_MPa": 90.0,
+      "primary_objective": "高承压工况数值校核与案例积累",
+      "service_pressure_MPa": 70.0,
+      "safety_factor": 1.285714
+    }
+  },
+  "design": {
+    "candidate_id": "C10",
+    "display_name": "C10",
+    "source": "CASE_TRANSFER",
+    "session_candidate_id": "TMP_1",
+    "design_revision_id": "DR_c9e89ce177afd96c86c81d740424cf3fb0ccee242ee8e81eec90d4cbd82046e1",
+    "parent_design_revision_id": "DR_c915fd37a34ae0c884a0bd592ad9233e13694163ab99c80568e51351b94d5a7e",
+    "hull_type": "CYLINDRICAL",
+    "geometry": {
+      "length_mm": 350.0,
+      "radius_mm": 80.0,
+      "thickness_mm": 17.0,
+      "alpha_deg": 71.0,
+      "beta_deg": 14.0,
+      "imperfection_ratio": 0.008
+    },
+    "layup": {
+      "template_name": "BASE_90_AB",
+      "layup": "[90°/90°/90°/90°/71°/-71°/14°/-14°/71°/-71°/14°/-14°/71°/-71°/14°/-14°/71°/-71°/14°/-14°/71°/-71°/14°/-14°/71°/-71°/14°/-14°/71°/-71°/14°/-14°/71°/-71°/14°/-14°/90°/90°/90°/90°]",
+      "skin_layup": "[90°/90°/90°/90°/71°/-71°/14°/-14°/71°/-71°/14°/-14°/71°/-71°/14°/-14°/71°/-71°/14°/-14°/71°/-71°/14°/-14°/71°/-71°/14°/-14°/71°/-71°/14°/-14°/71°/-71°/14°/-14°/90°/90°/90°/90°]",
+      "alpha_deg": 71.0,
+      "beta_deg": 14.0,
+      "ply_count": 40,
+      "ply_thickness_mm": 0.425,
+      "angles_deg": [
+        90.0,
+        90.0,
+        90.0,
+        90.0,
+        71.0,
+        -71.0,
+        14.0,
+        -14.0,
+        71.0,
+        -71.0,
+        14.0,
+        -14.0,
+        71.0,
+        -71.0,
+        14.0,
+        -14.0,
+        71.0,
+        -71.0,
+        14.0,
+        -14.0,
+        71.0,
+        -71.0,
+        14.0,
+        -14.0,
+        71.0,
+        -71.0,
+        14.0,
+        -14.0,
+        71.0,
+        -71.0,
+        14.0,
+        -14.0,
+        71.0,
+        -71.0,
+        14.0,
+        -14.0,
+        90.0,
+        90.0,
+        90.0,
+        90.0
+      ],
+      "symmetric": false,
+      "balanced": true
+    },
+    "material_system": {
+      "name": "T800G/5228",
+      "material_key": "T800G_5228",
+      "density_kg_per_m3": 1580.0,
+      "E1_GPa": 147.0,
+      "E2_GPa": 9.32,
+      "G12_GPa": 4.53,
+      "nu12": 0.3,
+      "Xt_MPa": 2820.0,
+      "Xc_MPa": 1538.0,
+      "Yt_MPa": 60.2,
+      "Yc_MPa": 190.0,
+      "S_MPa": 125.0,
+      "property_source": "SRC_7c3a2047de9bff89",
+      "density_source": "CSDM_cph/config/material_db.yaml"
+    },
+    "load_conditions": {
+      "type": "external_pressure",
+      "label": "外部静水压力",
+      "external_pressure_MPa": 70.0,
+      "seawater_density_kg_per_m3": 1025.0,
+      "gravity_m_per_s2": 9.80665,
+      "pressure_basis": "user_supplied_external_pressure"
+    },
+    "boundary_conditions": {
+      "type": "END_CLAMPED",
+      "label": "两端固支",
+      "description": "圆柱壳两端截面采用固支等效约束。",
+      "axial_edges": [
+        "X0",
+        "X1"
+      ],
+      "radial_constraint": true,
+      "rotation_constraint": true
+    },
+    "design_targets": {
+      "ultimate_pressure_min_MPa": 90.0,
+      "service_pressure_MPa": 70.0,
+      "safety_factor": 1.285714,
+      "primary_objective": "高承压工况数值校核与案例积累"
+    },
+    "rule_check": {
+      "is_valid": true,
+      "errors": [],
+      "suggestions": [],
+      "details": {
+        "inside_fem_table_domain": true,
+        "complete_geometry": true,
+        "complete_material_properties": true,
+        "explicit_40_ply_sequence": true,
+        "balanced": true,
+        "symmetric": false
+      }
+    },
+    "provenance": {
+      "generation_basis": "FEM_TABLE_CASE_TRANSFER",
+      "source_id": "SRC_7c3a2047de9bff89",
+      "source_path": "dataset/sources/files/table/7c3a2047de9bff89fe561cfff23b2b8e325a0c27.csv",
+      "source_sha256": "04ba2a97d0979d270a21dff8b470fc6052ef5418208224cc3dcac3cd8e316c97",
+      "source_row_number": 4863,
+      "geometry_match": "exact",
+      "source_geometry": {
+        "length_mm": 350.0,
+        "radius_mm": 80.0
+      },
+      "source_layup": "[90_4/(±71.0/±14.0)_8/90_4]",
+      "historical_fem_reference": {
+        "ultimate_pressure_MPa": 160.8502436,
+        "linear_buckling_pressure_MPa": 241.98,
+        "status": "screening_reference_only_not_current_run"
+      },
+      "source_laminate_stiffness": {
+        "A11": 1009626.3,
+        "A12": 183820.8,
+        "A22": 1391032.5,
+        "A33": 213026.0,
+        "B11": 349638.8,
+        "B12": -15297.9,
+        "B13": -50875.4,
+        "B22": -319043.0,
+        "B23": -57686.4,
+        "B33": -15297.9,
+        "D11": 16943264.2,
+        "D12": 3247758.3,
+        "D13": -30656.6,
+        "D22": 43231117.2,
+        "D23": 43088.3,
+        "D33": 3951117.3
+      },
+      "source_laminate_stiffness_validation": {
+        "status": "recomputed_from_explicit_sequence",
+        "max_abs_error": 0.047487082,
+        "absolute_tolerance": 0.11
+      },
+      "radius_interpretation": {
+        "source_column": "内半径(mm)",
+        "source_value_mm": 80.0,
+        "solver_reference_surface": "middle_surface",
+        "solver_radius_mm": 80.0,
+        "comparison_boundary": "沿用表中名义参数重新校核当前圆柱壳子模型，不作为源模型严格复现证据"
+      },
+      "fem_input_layup": "explicit_physical_plies"
+    },
+    "fem_readiness": {
+      "status": "ready_for_cylindrical_shell_screening",
+      "consumer_schema": "csdm_cph/candidate.schema.json",
+      "current_fem_run_required": true,
+      "full_assembly_blockers": [
+        "金属封头几何、材料和连接细节未进入当前圆柱壳子模型"
+      ],
+      "layup_expanded": true,
+      "input_contract": "explicit_physical_plies"
+    },
+    "surrogate_ultimate_pressure_MPa": 166.682,
+    "surrogate_PBIPF_MPa": 166.682,
+    "surrogate_uncertainty_MPa": 6.111,
+    "surrogate_calibration_status": "not_available",
+    "asme_linear_buckling_pressure_MPa": 461.856,
+    "linear_buckling_source": "ASME RD-1172线性屈曲公式",
+    "surrogate_weight": 26.86,
+    "rationale": "采用正式有限元表格中与目标长度和半径完全一致的输入记录进入当前模型复核。",
+    "origin_summary": "SRC_7c3a2047de9bff89 第 4863 行；历史结果只用于筛选参考。",
+    "llm_output_excerpt": null,
+    "run_id": "RUN_58507AA8A428",
+    "task_id": "TASK_8"
+  },
+  "abaqus_results": {
+    "candidate_id": "C10",
+    "session_candidate_id": "TMP_1",
+    "display_name": "C10",
+    "status": "success",
+    "retry_count": 0,
+    "ultimate_pressure_MPa": 159.733045,
+    "failure_pressure_MPa": 159.733045,
+    "linear_buckling_pressure_MPa": 296.78,
+    "first_mode_eigenvalue": 296.78,
+    "postbuckling_pressure_MPa": 159.733045,
+    "geometric_limit_pressure_MPa": 159.733045,
+    "geometric_limit_pressure_observed_MPa": null,
+    "postbuckling_reference_pressure_MPa": 290.0,
+    "postbuckling_last_pressure_MPa": 90.984855,
+    "riks_lpf_max": 0.5508036,
+    "riks_lpf_last": 0.31374088,
+    "riks_time_at_lpf_max": 0.61781251,
+    "riks_time_last": 1.21781254,
+    "imperfection_amplitude_mm": 0.708,
+    "ultimate_pressure_basis": "含场变量刚度退化的 Static Riks 已确认后峰极限点",
+    "failure_mode": "场变量损伤与几何非线性极限点",
+    "max_displacement_mm": 1.50547,
+    "weight_kg_per_m2": 26.86,
+    "verdict": "通过",
+    "abaqus_odb": "data\\abaqus_runs\\C10\\C10_post.odb",
+    "linear_buckling_odb": "data\\abaqus_runs\\C10\\C10.odb",
+    "postbuckling_odb": "data\\abaqus_runs\\C10\\C10_post.odb",
+    "abaqus_inp": "data\\abaqus_runs\\C10\\C10.inp",
+    "postbuckling_inp": "data\\abaqus_runs\\C10\\C10_post.inp",
+    "visualization_json": "data\\abaqus_runs\\C10\\C10_mode1.json",
+    "artifact_dir": "data\\abaqus_runs\\C10",
+    "error_type": null,
+    "error_log": null,
+    "mode_eigenvalues": [
+      296.78
+    ],
+    "load_summary": "外部静水压力：p=70.0 MPa",
+    "boundary_summary": "两端固支",
+    "boundary_condition_type": "END_CLAMPED",
+    "boundary_implementation": "两端边线采用 Encastre 固支约束",
+    "diagnosis_summary": "精确目标压力校核已完成，目标压力 90.0 MPa，线性屈曲压力 296.78 MPa，最大 Hashin 指数 0.3299472；设计判定为“通过”，容量分析状态为 geometric_limit_confirmed。",
+    "analysis_type": "linear_buckling_plus_exact_service_load_plus_capacity_riks",
+    "user_subroutine_used": true,
+    "progressive_damage_complete": true,
+    "progressive_damage_model": "irreversible_stress_triggered_field_degradation",
+    "user_subroutine_path": "data\\abaqus_runs\\C10\\zhangusdfld.for",
+    "user_subroutine_sha256": "c804d7ddb7a6145bbf785da2e5426a4527e24fdaf6cbf4d8e34ad9f493e177e8",
+    "material_strength_include": "data\\abaqus_runs\\C10\\pressure_hull_strength.inc",
+    "material_strength_sha256": "3296871ce54eb66d781936335eea7c8b848d4f3bdb8c27c8e9a1b66d0fa2a7aa",
+    "design_check_status": "passed_at_design_target_pressure",
+    "design_verdict_basis": "精确设计目标压力下线性屈曲压力高于目标值，且二维 Hashin 首层失效指数小于 1；结论不包含金属封头、连接、渐进损伤或试验认证。",
+    "capacity_assessment_status": "geometric_limit_confirmed",
+    "runtime_script_sha256": "3bde4002397ec7811cc67770576d96ee6652e38c217fea1b861214f37045061a",
+    "verification_scope": "composite_cylindrical_shell_submodel",
+    "abaqus_job_status": "JOB_STATUS_TERMINATED_BY_EXTERNAL_REQUEST",
+    "riks_increment_count": 17,
+    "riks_limit_point_observed": true,
+    "riks_limit_point_confirmed": true,
+    "riks_post_peak_drop_ratio": 0.4343323,
+    "first_ply_failure_pressure_MPa": null,
+    "first_ply_failure_criterion": "Hashin_2D_1980_plane_stress",
+    "first_ply_failure_index": 1.165232,
+    "first_ply_failure_mode": "fiber_compression",
+    "first_ply_failure_element_label": 635,
+    "first_ply_failure_section_point": "SPOS, (fraction = 1.0), Layer = 40",
+    "first_ply_failure_pressure_lower_bound_MPa": 138.826279,
+    "first_ply_failure_pressure_upper_bound_MPa": 159.733045,
+    "service_abaqus_job_status": "JOB_STATUS_COMPLETED_SUCCESSFULLY",
+    "service_failure_criterion": "Hashin_2D_1980_plane_stress",
+    "service_pressure_check_status": "passed",
+    "service_pressure_checked_MPa": 70.0,
+    "service_hashin_index_max": 0.19566369,
+    "service_hashin_failure_mode": "fiber_compression",
+    "service_hashin_element_label": 635,
+    "service_hashin_section_point": "SPOS, (fraction = 1.0), Layer = 40",
+    "target_failure_criterion": "Hashin_2D_1980_plane_stress",
+    "target_abaqus_job_status": "JOB_STATUS_COMPLETED_SUCCESSFULLY",
+    "target_pressure_check_status": "passed",
+    "target_pressure_checked_MPa": 90.0,
+    "target_hashin_index_max": 0.3299472,
+    "target_hashin_failure_mode": "fiber_compression",
+    "target_hashin_element_label": 635,
+    "target_hashin_section_point": "SPOS, (fraction = 1.0), Layer = 40",
+    "service_stress_coverage": {
+      "status": "complete",
+      "expected_section_points": 120,
+      "incomplete_element_positions": 0,
+      "checked_element_positions": 1290
+    },
+    "target_stress_coverage": {
+      "status": "complete",
+      "expected_section_points": 120,
+      "incomplete_element_positions": 0,
+      "checked_element_positions": 1290
+    },
+    "damage_state_output_complete": true,
+    "damage_state_maxima": {
+      "SDV3": 1.0,
+      "SDV2": 1.0,
+      "SDV1": 1.0
+    },
+    "damage_observed": true,
+    "riks_termination_reason": "post_peak_drop_20_percent",
+    "service_odb": "data\\abaqus_runs\\C10\\C10_service.odb",
+    "service_inp": "data\\abaqus_runs\\C10\\C10_service.inp",
+    "target_odb": "data\\abaqus_runs\\C10\\C10_target.odb",
+    "target_inp": "data\\abaqus_runs\\C10\\C10_target.inp",
+    "run_id": "RUN_58507AA8A428",
+    "task_id": "TASK_8"
+  },
+  "verdict": "通过",
+  "surrogate_pressure_error_pct": 4.35,
+  "fem_agent_retry_count": 0,
+  "task_id": "TASK_8",
+  "run_id": "RUN_58507AA8A428",
+  "session_candidate_id": "TMP_1"
+}

@@ -1,0 +1,241 @@
+{
+  "contract_version": "1",
+  "candidate_id": "C12",
+  "display_name": "C12",
+  "source": "CASE_TRANSFER",
+  "hull_type": "CYLINDRICAL",
+  "geometry": {
+    "length_mm": 700.0,
+    "radius_mm": 110.0,
+    "thickness_mm": 20.0,
+    "alpha_deg": 73.0,
+    "beta_deg": 33.0,
+    "imperfection_ratio": 0.008
+  },
+  "layup": {
+    "template_name": "BASE_90_AB",
+    "layup": "[90°/90°/90°/90°/73°/-73°/33°/-33°/73°/-73°/33°/-33°/73°/-73°/33°/-33°/73°/-73°/33°/-33°/73°/-73°/33°/-33°/73°/-73°/33°/-33°/73°/-73°/33°/-33°/73°/-73°/33°/-33°/90°/90°/90°/90°]",
+    "skin_layup": "[90°/90°/90°/90°/73°/-73°/33°/-33°/73°/-73°/33°/-33°/73°/-73°/33°/-33°/73°/-73°/33°/-33°/73°/-73°/33°/-33°/73°/-73°/33°/-33°/73°/-73°/33°/-33°/73°/-73°/33°/-33°/90°/90°/90°/90°]",
+    "alpha_deg": 73.0,
+    "beta_deg": 33.0,
+    "ply_count": 40,
+    "ply_thickness_mm": 0.5,
+    "angles_deg": [
+      90.0,
+      90.0,
+      90.0,
+      90.0,
+      73.0,
+      -73.0,
+      33.0,
+      -33.0,
+      73.0,
+      -73.0,
+      33.0,
+      -33.0,
+      73.0,
+      -73.0,
+      33.0,
+      -33.0,
+      73.0,
+      -73.0,
+      33.0,
+      -33.0,
+      73.0,
+      -73.0,
+      33.0,
+      -33.0,
+      73.0,
+      -73.0,
+      33.0,
+      -33.0,
+      73.0,
+      -73.0,
+      33.0,
+      -33.0,
+      73.0,
+      -73.0,
+      33.0,
+      -33.0,
+      90.0,
+      90.0,
+      90.0,
+      90.0
+    ],
+    "symmetric": false,
+    "balanced": true
+  },
+  "load_conditions": {
+    "type": "external_pressure",
+    "service_depth_m": null,
+    "seawater_density_kg_per_m3": 1025.0,
+    "gravity_m_per_s2": 9.80665,
+    "external_pressure_MPa": 50.0,
+    "pressure_basis": "user_supplied_external_pressure"
+  },
+  "boundary_conditions": {
+    "type": "END_CLAMPED",
+    "label": "两端固支",
+    "description": "圆柱壳两端截面采用固支等效约束。",
+    "basis": "user_input"
+  },
+  "material_system": {
+    "name": "M40J/TDE-85",
+    "material_key": "M40J_TDE_85",
+    "density_kg_per_m3": 1600.0,
+    "E1_GPa": 218.0,
+    "E2_GPa": 9.07,
+    "G12_GPa": 6.35,
+    "nu12": 0.3,
+    "Xt_MPa": 2088.0,
+    "Xc_MPa": 1212.0,
+    "Yt_MPa": 22.5,
+    "Yc_MPa": 196.0,
+    "S_MPa": 61.1,
+    "property_source": "SRC_7c3a2047de9bff89",
+    "density_source": "CSDM_cph/config/material_db.yaml"
+  },
+  "design_targets": {
+    "ultimate_pressure_min_MPa": 60.0,
+    "service_pressure_MPa": 50.0,
+    "safety_factor": 1.2,
+    "primary_objective": "高承压工况数值校核与案例积累"
+  },
+  "analysis": {
+    "model_scope": "composite_cylindrical_shell",
+    "analysis_type": "linear_buckling_plus_first_mode_imperfection_riks",
+    "use_user_subroutine": true,
+    "radius_reference": "shell_middle_surface",
+    "solver_command": "abaqus"
+  },
+  "rule_check": {
+    "is_valid": true,
+    "errors": [],
+    "suggestions": [],
+    "details": {
+      "inside_fem_table_domain": true,
+      "complete_geometry": true,
+      "complete_material_properties": true,
+      "explicit_40_ply_sequence": true,
+      "balanced": true,
+      "symmetric": false
+    }
+  },
+  "rationale": "采用正式有限元表格中与目标长度和半径完全一致的输入记录进入当前模型复核。",
+  "origin_summary": "SRC_7c3a2047de9bff89 第 3866 行；历史结果只用于筛选参考。",
+  "screening": {
+    "candidate_role": "historically_screened_baseline",
+    "historical_reference_comparison": "at_or_above_target_for_same_geometry",
+    "historical_reference_meets_target_at_source_geometry": true,
+    "current_abaqus_status": "not_run",
+    "current_design_verdict": "pending",
+    "claim_boundary": "历史表格只用于候选来源筛选，当前设计是否满足目标必须由本次 Abaqus 结果判定。"
+  },
+  "provenance": {
+    "generation_basis": "FEM_TABLE_CASE_TRANSFER",
+    "source_id": "SRC_7c3a2047de9bff89",
+    "source_path": "dataset/sources/files/table/7c3a2047de9bff89fe561cfff23b2b8e325a0c27.csv",
+    "source_sha256": "04ba2a97d0979d270a21dff8b470fc6052ef5418208224cc3dcac3cd8e316c97",
+    "source_row_number": 3866,
+    "geometry_match": "exact",
+    "source_geometry": {
+      "length_mm": 700.0,
+      "radius_mm": 110.0
+    },
+    "source_layup": "[90_4/(±73.0/±33.0)_8/90_4]",
+    "historical_fem_reference": {
+      "ultimate_pressure_MPa": 117.2363734,
+      "linear_buckling_pressure_MPa": 186.31,
+      "status": "screening_reference_only_not_current_run"
+    },
+    "source_laminate_stiffness": {
+      "A11": 1053391.0,
+      "A12": 506785.7,
+      "A22": 2600755.8,
+      "A33": 579161.2,
+      "B11": 415481.5,
+      "B12": 102840.0,
+      "B13": -145361.1,
+      "B22": -621161.4,
+      "B23": -163494.6,
+      "B33": 102840.0,
+      "D11": 24657322.9,
+      "D12": 11466923.8,
+      "D13": -119445.7,
+      "D22": 107999437.9,
+      "D23": 45132.6,
+      "D33": 13879439.1
+    },
+    "source_laminate_stiffness_validation": {
+      "status": "recomputed_from_explicit_sequence",
+      "max_abs_error": 0.049640629,
+      "absolute_tolerance": 0.11
+    },
+    "radius_interpretation": {
+      "source_column": "内半径(mm)",
+      "source_value_mm": 110.0,
+      "solver_reference_surface": "middle_surface",
+      "solver_radius_mm": 110.0,
+      "comparison_boundary": "沿用表中名义参数重新校核当前圆柱壳子模型，不作为源模型严格复现证据"
+    },
+    "fem_input_layup": "explicit_physical_plies"
+  },
+  "fem_readiness": {
+    "status": "ready_for_cylindrical_shell_screening",
+    "consumer_schema": "csdm_cph/candidate.schema.json",
+    "current_fem_run_required": true,
+    "full_assembly_blockers": [
+      "金属封头几何、材料和连接细节未进入当前圆柱壳子模型"
+    ],
+    "layup_expanded": true,
+    "input_contract": "explicit_physical_plies"
+  },
+  "design_revision_id": "DR_9668ef498ee7e2ba1ef74fe223652ffc6a8b99265c9c47d84ce5d6857e9bba21",
+  "parent_design_revision_id": "DR_fd37ef7465599ffa96e6ba0f14ec1370a828ca502b128f05495802cbcd59bd5a",
+  "surrogate_ultimate_pressure_MPa": 104.847,
+  "surrogate_PBIPF_MPa": 104.847,
+  "surrogate_uncertainty_MPa": 6.111,
+  "surrogate_calibration_status": "not_available",
+  "asme_linear_buckling_pressure_MPa": 256.194,
+  "linear_buckling_feature_Q": 256.193765,
+  "linear_buckling_source": "ASME RD-1172线性屈曲公式",
+  "surrogate_weight": 32.0,
+  "rank_score": 99.7848,
+  "screening_breakdown": {
+    "formula": "score = 1.00 × P_ult - 0.12 × 面密度 - 0.20 × 公式不确定度",
+    "pressure_component": 104.847,
+    "weight_component": 3.84,
+    "uncertainty_component": 1.2222,
+    "surrogate_detail": {
+      "PBIPF_MPa": 104.847,
+      "ultimate_pressure_MPa": 104.847,
+      "asme_linear_buckling_pressure_MPa": 256.193765,
+      "linear_buckling_feature_Q": 256.193765,
+      "linear_buckling_source": "ASME RD-1172线性屈曲公式",
+      "uncertainty_MPa": 6.111,
+      "calibration_status": "not_available",
+      "PBIPF_descriptors": {
+        "D1": 0.437921555653,
+        "D2": 11468.852755069327,
+        "D3": 0.55164160586
+      },
+      "PBIPF_imperfection_input": "permille",
+      "stiffness_terms": {
+        "A22": 2600755.760186685,
+        "B23": 163494.59630609356,
+        "D12": 11466923.776529249,
+        "D22": 107999437.89948945,
+        "D33": 13879439.065046147,
+        "B23_raw": 163494.59630609356
+      },
+      "areal_density_kg_per_m2": 32.000001
+    }
+  },
+  "screening_summary": "PBIPF 公式筛选估计=104.847 MPa，ASME RD-1172线性屈曲压力=256.194 MPa，经验不确定度=6.111 MPa，校准状态=not_available，面密度=32.0 kg/m^2，按 score = 1.00 × P_ult - 0.12 × 面密度 - 0.20 × 公式不确定度 得分 99.7848。",
+  "screening_rank": 1,
+  "screening_selected": true,
+  "selection_reason": "Top-1 入选：PBIPF 公式筛选估计=104.847 MPa，ASME RD-1172线性屈曲压力=256.194 MPa，经验不确定度=6.111 MPa，校准状态=not_available，面密度=32.0 kg/m^2，按 score = 1.00 × P_ult - 0.12 × 面密度 - 0.20 × 公式不确定度 得分 99.7848。 当前排序靠前，适合优先进入真实有限元校核。",
+  "session_candidate_id": "TMP_1",
+  "run_id": "RUN_4B98528C5450",
+  "task_id": "TASK_10"
+}

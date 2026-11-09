@@ -15,7 +15,7 @@ CSAgent 多智能体智能设计平台面向复合材料外压圆柱耐压壳智
 - 壳体类型：外压圆柱耐压壳 `CYLINDRICAL`
 - 几何变量：`length_mm`、`radius_mm`、`thickness_mm`
 - 铺层变量：`alpha_deg`、`beta_deg`、`imperfection_ratio`
-- 材料体系：`T700/Epoxy`、`T800G/5228`、`M40J/TDE-85`
+- 材料体系：`T700/Epoxy`、`T800G/5228`、`M40J/TDE-85`、`IM7-8552`
 - 工况：外部静水压力 `external_pressure_MPa`
 - 目标：极限压力不低于 `ultimate_pressure_min_MPa`，并按面密度或质量目标排序
 - 流程参数：候选池总数和初筛保留数由自然语言明确指定
@@ -110,7 +110,7 @@ python -B scripts/sync_builtin_knowledge.py --source <知识包目录> --archive
 
 同步校验文件哈希、实际记录数、文本块身份和图谱证据引用，只更新 `knowledge/csllm`，不覆盖用户增量、案例或求解工件。
 
-正式案例库包含 7 条完整真实 Abaqus 工况记录，服务压力覆盖 5、10、15、20、30、40 MPa，保留 28 份 ODB 及对应输入和损伤模型工件。案例工况、编号和结果边界见 [项目状态](docs/项目状态.md#当前案例库)；同一结构在不同压力下的记录不等同于独立几何样本。
+正式案例库包含 11 条完整真实 Abaqus 工况记录，服务压力覆盖 5、10、15、20、30、40、50、60、70、80 MPa，保留 44 份 ODB 及对应输入和损伤模型工件。四种材料的高承压结构在当前模型内的容量峰值分别为 150.224333、159.733045、114.094859、183.470576 MPa；这些数值不代表试验认证或额定工作压力。案例工况、编号和结果边界见 [项目状态](docs/项目状态.md#当前案例库)；同一结构在不同压力下的记录不等同于独立几何样本。
 
 资料入库流程为“MinerU / Docling 文档解析 -> 语义分块 -> BGE-M3 向量化索引 -> KG 实体/关系抽取 -> 检索验证 / 证据引用”。PDF、DOCX、PPTX 和图片优先调用 MinerU，失败后尝试 Docling；PDF 会先检查文本层，文本层充足时使用 MinerU pipeline 文本路由，文本层稀疏或扫描型资料使用 MinerU high-accuracy 路由；外部解析器不可用时，PDF 使用 PyMuPDF 文本层解析，DOCX、PPTX、Excel、文本、Markdown、CSV、TSV 和工程文本使用本项目解析器。RAG 分块使用 `chunk_token_size`、`chunk_overlap_tokens` 和 `min_chunk_tokens` 控制 token 窗口、重叠上下文和小块合并；完全相同的 chunk 按 `content_hash` 去重。去重后的用户增量 chunk 写入 `knowledge/runtime/rag/rag_chunks.jsonl`，并同步写入 `knowledge/chroma_db` 中的 `csdm_cph_project_knowledge` collection。向量后端按 `rag.embedding_model=BAAI/bge-m3` 读取本地模型，优先使用 `rag.embedding_cache_dir`，找不到完整快照时只读取当前用户 Hugging Face 本地缓存，不触发下载；两处都没有可用快照时明确记录失败，不使用哈希向量替代。入库服务的 `vector_ready` 只表示用户增量 collection 实际写入成功且数量大于 0；GUI 汇总内置与用户增量向量状态，入库失败仍通过流水线和警告显示。增量向量不可用时保留其 JSONL/BM25 和 KG 检索，manifest 记录失败摘要。KG 写出用户增量实体、关系和统计文件；新资料入库时保留其他上传资料的 RAG chunk、实体和关系，并按文档编号替换同一资料的旧记录。检索验证会确认当前资料的文本块可命中、图谱关系引用有效 chunk，并把证据样本写入 manifest。
 
@@ -127,6 +127,8 @@ GUI 的“监控”页提供最近运行记录下拉框、刷新运行记录和�
 ```powershell
 D:\anaconda3\envs\AGENT\python.exe main.py
 ```
+
+Windows 进程在导入核心模块时将未配置的 `MKL_THREADING_LAYER` 设为 `SEQUENTIAL`，避免 NumPy 矩阵运算与 PyTorch 初始化不同 OpenMP 运行时发生冲突；用户显式设置的值保持不变。该配置不修改系统或 Conda 环境，不设置 `KMP_DUPLICATE_LIB_OK`。
 
 环境自检：
 
