@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List
 
 from core.config_loader import load_app_config
-from core.paths import CHROMA_DIR
+from core.paths import CHROMA_DIR, ROOT_DIR
 
 
 class _InMemoryCollection:
@@ -101,7 +101,8 @@ class RAGEngine:
         self.collection = self.client.get_or_create_collection(name=self.collection_name)
 
         self.embedding_model_name = embedding_model or str(rag_config.get("embedding_model", "BAAI/bge-m3"))
-        self.embedding_cache_dir = Path(str(rag_config.get("embedding_cache_dir", "models/embedding_cache")))
+        cache_path = Path(str(rag_config.get("embedding_cache_dir", "models/embedding_cache"))).expanduser()
+        self.embedding_cache_dir = cache_path if cache_path.is_absolute() else ROOT_DIR / cache_path
         self.embedding_cache_dir.mkdir(parents=True, exist_ok=True)
         self.local_files_only = bool(rag_config.get("local_files_only", True))
         self.use_hash_embedding_only = (os.getenv("CSDM_cph_USE_HASH_EMBEDDING", "0") == "1") or bool(
@@ -124,6 +125,8 @@ class RAGEngine:
 
     def _resolve_embedding_model_reference(self) -> str:
         model_path = Path(self.embedding_model_name).expanduser()
+        if not model_path.is_absolute():
+            model_path = ROOT_DIR / model_path
         if model_path.is_dir():
             return str(model_path.resolve())
         if not self.local_files_only:
