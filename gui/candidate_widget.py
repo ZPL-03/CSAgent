@@ -417,7 +417,7 @@ class CandidateWidget(QWidget):
             "<h4>几何设计参数</h4><ul>"
             f"{geometry_items}</ul>"
             "<h4>分析条件</h4>"
-            f"<p>初始几何缺陷比：{_format_number(geometry.get('imperfection_ratio'), 6)}；不参与设计变量搜索。</p>"
+            f"<p>初始几何缺陷比：{_format_number(geometry.get('imperfection_ratio'), 6)}</p>"
             "<h4>材料系统</h4><ul>"
             f"{material_items}</ul>"
             "<h4>载荷与边界</h4><ul>"

@@ -104,7 +104,7 @@ class OrchestratorAgent(BaseAgent):
     def _validate_analysis_conditions(candidate: Dict) -> None:
         expected = fixed_imperfection_ratio()
         if (candidate.get("geometry") or {}).get("imperfection_ratio") != expected:
-            raise ValueError(f"初始几何缺陷比必须为 {expected:g}；请按固定分析条件生成候选，不能直接改写已求解案例。")
+            raise ValueError(f"初始几何缺陷比必须为 {expected:g}。")
 
     def prepare_candidates_for_fem(self, task: Dict, candidates: List[Dict]) -> List[Dict]:
         """为同一批有限元样本生成互不重复的正式编号。"""

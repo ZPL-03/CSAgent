@@ -240,7 +240,7 @@ class CandidateGenAgent(BaseAgent):
             f"半径 R(mm) 必须为数值；参考尺寸只表示设计中心，候选值仍需在 {range_text('radius_mm')} 内提出；只有固定几何约束才必须沿用",
             f"厚度 t(mm) 必须为数值；参考尺寸只表示设计中心，候选值仍需在 {range_text('thickness_mm')} 内提出；只有固定几何约束才必须沿用",
             f"alpha(deg) 与 beta(deg) 必须为 {range_text('alpha_deg')} 内的两个铺层角建议值",
-            f"初始几何缺陷比固定为 {fixed_imperfection_ratio():g}（{fixed_imperfection_ratio() * 1000:g}‰），属于分析条件，不参与设计变量搜索",
+            f"初始几何缺陷比：项目计算采用 {fixed_imperfection_ratio():g}（{fixed_imperfection_ratio() * 1000:g}‰），模型提案值单独记录",
             "铺层形式使用 [90_4/(±alpha/±beta)_8/90_4] 或 [(±alpha/±beta)_10] 这一类可解析格式",
         ]
 
@@ -668,7 +668,7 @@ class CandidateGenAgent(BaseAgent):
                     if not usable_items:
                         self._record_llm_generation_diagnostic(
                             "field_validation",
-                            "候选缺少材料、几何、铺层角或缺陷比等完整参数",
+                            "候选缺少材料、几何尺寸或铺层角等必要参数",
                             answer=answer,
                             parsed_count=len(items),
                             usable_count=0,
@@ -687,7 +687,7 @@ class CandidateGenAgent(BaseAgent):
                         retry_hint = (
                             "\n\n上一轮候选未通过项目参数域规则，原因："
                             f"{reasons or '未给出有效规则诊断'}。"
-                            "请重新输出候选表，确保长度、半径、厚度、alpha、beta 和缺陷比均在系统候选字段约束范围内。"
+                            "请重新输出候选表，确保长度、半径、厚度、alpha 和 beta 均在系统候选字段约束范围内。"
                         )
                         self._record_llm_generation_diagnostic(
                             "rule_check",

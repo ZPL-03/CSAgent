@@ -233,12 +233,12 @@ class FEMAgent(BaseAgent):
             adjustment["strategy"] = "增大壳体网格尺寸以绕开局部畸变"
         elif failure_type == "geometry_issue":
             geometry["thickness_mm"] = round(min(max(geometry["thickness_mm"] + 0.5, 5.0), 20.0), 3)
-            adjustment["strategy"] = "提高壁厚，保持初始几何缺陷条件不变"
+            adjustment["strategy"] = "提高壁厚"
         elif failure_type == "convergence_fail":
             adjusted.setdefault("analysis", {})
             adjusted["analysis"]["buckling_modes"] = int(adjusted["analysis"].get("buckling_modes", 8)) + 4
             geometry["thickness_mm"] = round(min(geometry["thickness_mm"] + 0.8, 20.0), 3)
-            adjustment["strategy"] = "增加特征值搜索规模并提高壁厚，保持初始几何缺陷条件不变"
+            adjustment["strategy"] = "增加特征值搜索规模并提高壁厚"
         elif failure_type == "pressure_negative":
             adjusted.setdefault("analysis", {})
             adjusted["analysis"]["buckling_modes"] = max(int(adjusted["analysis"].get("buckling_modes", 8)), 12) + 4

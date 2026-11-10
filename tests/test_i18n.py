@@ -2,12 +2,15 @@ from __future__ import annotations
 
 import os
 
+import pytest
+
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication
 
 from gui.i18n import LocaleManager
 from gui.main_window import MainWindow
+from core.task_parser import TaskParser
 
 
 def _app() -> QApplication:
@@ -33,6 +36,20 @@ def test_locale_manager_persists_language(tmp_path) -> None:
     assert reloaded.language == "en"
     assert reloaded.theme == "light"
     assert reloaded.text("app.title") == "CSAgent"
+
+
+@pytest.mark.parametrize("language", ["zh", "en"])
+def test_default_templates_include_dimensions_and_quantities(tmp_path, language) -> None:
+    locale = LocaleManager(tmp_path / "ui_settings.json")
+    locale.set_language(language)
+    parser = TaskParser()
+    for key in ("input.placeholder", "chat.empty.user_prompt"):
+        task = parser.parse_instruction(locale.text(key))["task"]
+        assert task["candidate_generation_preferences"]["total_candidates"] == 12
+        assert task["screening_preferences"]["top_k_candidates"] == 5
+        assert task["geometry_envelope"]["length_mm"] == [500, 500]
+        assert task["geometry_envelope"]["radius_mm"] == [100, 100]
+        assert task["geometry_envelope"]["imperfection_ratio"] == [0.008, 0.008]
 
 
 def test_main_window_switches_primary_shell_language(monkeypatch, tmp_path) -> None:

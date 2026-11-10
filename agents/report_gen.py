@@ -255,8 +255,7 @@ class ReportGenAgent(BaseAgent):
             "results": [{key: value for key, value in result.items() if key != "design_verdict_basis"}
                         for result in summary.get("results", [])],
             "aggregate": {"overall": overall, "result_count": result_count, "passed_count": passed_count},
-            "analysis_conditions": {"imperfection_role": "固定分析条件，不是设计变量或制造验收阈值",
-                                    "imperfection_ratios": sorted({item["imperfection_ratio"] for item in summary.get("all_candidates", [])
+            "analysis_conditions": {"imperfection_ratios": sorted({item["imperfection_ratio"] for item in summary.get("all_candidates", [])
                                                                     if item.get("imperfection_ratio") is not None})},
             "interpretation_constraints": [
                 "数值由报告模板输出；解释不复述数值不代表原始数据缺失。",
@@ -615,7 +614,7 @@ class ReportGenAgent(BaseAgent):
                 f"- 初始几何缺陷比：{geometry.get('imperfection_ratio')}",
                 f"- 生成提案理由（原文）：{candidate.get('rationale') or '生成记录未提供额外理由，不作推断。'}",
                 f"- 来源追踪：{candidate.get('origin_summary') or '见候选生成记录。'}",
-                *([f"- 来源提案缺陷比：{proposed_defect}；本方案采用的固定分析条件为 {geometry.get('imperfection_ratio')}。"]
+                *([f"- 来源提案缺陷比：{proposed_defect}"]
                   if proposed_defect is not None and proposed_defect != geometry.get("imperfection_ratio") else []),
             ])
         lines.extend(["", "## 代理预筛方案与筛选理由", ""])

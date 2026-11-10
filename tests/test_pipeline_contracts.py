@@ -154,7 +154,7 @@ def test_current_designs_fix_imperfection_without_rewriting_case_source(monkeypa
         fem_input = OrchestratorAgent().prepare_candidate_for_fem(task, migrated)
         adjusted = FEMAgent().apply_adjustment(fem_input, failure, 0)
         assert adjusted["geometry"]["imperfection_ratio"] == 0.008
-    with pytest.raises(ValueError, match="不作为设计变量"):
+    with pytest.raises(ValueError, match="初始几何缺陷比统一采用 0.008"):
         TaskParser().parse_instruction("工作压力 12 MPa，缺陷比 0.005")
 
 
@@ -268,7 +268,8 @@ def test_candidate_prompt_separates_user_facts_from_system_constraints(monkeypat
     assert "T700/Epoxy" not in user_fact_section
     assert "500.0" not in user_fact_section
     assert "T700/Epoxy" in user_prompt
-    assert "初始几何缺陷比固定为 0.008" in user_prompt
+    assert "项目计算采用 0.008" in user_prompt
+    assert "模型提案值单独记录" in user_prompt
     assert "结构化任务 JSON" not in user_prompt
     assert "不要输出 JSON" in system_prompt
     assert "结构性能依据和制造/缺陷风险依据" in user_prompt
@@ -603,6 +604,8 @@ def test_llm_candidates_are_extracted_from_engineering_natural_answer(monkeypatc
     assert candidates[0]["geometry"]["thickness_mm"] == 11.0
     assert candidates[0]["geometry"]["imperfection_ratio"] == 0.008
     assert candidates[0]["provenance"]["proposed_imperfection_ratio"] == 0.005
+    assert candidates[1]["geometry"]["imperfection_ratio"] == 0.008
+    assert candidates[1]["provenance"]["proposed_imperfection_ratio"] == 0.006
     assert candidates[0]["geometry"]["alpha_deg"] == 35.0
     assert candidates[0]["geometry"]["beta_deg"] == 65.0
     assert "S01" in candidates[0]["origin_summary"]
@@ -1283,7 +1286,7 @@ def test_report_summarizes_provenance_without_internal_layup_dump(monkeypatch):
     text = ReportGenAgent()._render_markdown(task, results, candidates)
     assert "source_layup" not in text and "angles_deg" not in text
     assert "来源提案缺陷比：0.003" in text
-    assert "固定分析条件为 0.008" in text
+    assert "初始几何缺陷比：0.008" in text
 
 
 def test_report_without_fem_never_claims_final_recommendation(monkeypatch, tmp_path):

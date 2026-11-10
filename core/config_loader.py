@@ -37,7 +37,7 @@ def load_param_ranges() -> Dict[str, Any]:
 
 
 def fixed_imperfection_ratio() -> float:
-    """候选设计统一采用的初始几何缺陷比，不属于优化变量。"""
+    """读取候选采用的初始几何缺陷比。"""
     value = float(load_param_ranges()["analysis_assumptions"]["imperfection_ratio"])
     bounds = load_param_ranges()["geometry"]["imperfection_ratio"]
     if not float(bounds["min"]) <= value <= float(bounds["max"]):

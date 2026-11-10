@@ -233,7 +233,7 @@ class TaskParser:
         fixed_defect = fixed_imperfection_ratio()
         specified_defect = values.get("imperfection_ratio")
         if specified_defect is not None and abs(specified_defect - fixed_defect) > 1e-9:
-            raise ValueError(f"初始几何缺陷比统一采用 {fixed_defect:g}（{fixed_defect * 1000:g}‰），不作为设计变量。")
+            raise ValueError(f"初始几何缺陷比统一采用 {fixed_defect:g}（{fixed_defect * 1000:g}‰）。")
         geometry["imperfection_ratio"] = [fixed_defect, fixed_defect]
         return normalize_geometry_envelope(geometry)
 

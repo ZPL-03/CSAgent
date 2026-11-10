@@ -923,7 +923,7 @@ def test_manual_screen_asks_for_missing_quantity_before_worker(monkeypatch) -> N
         app.processEvents()
 
 
-def test_loaded_example_specifies_dimensions_and_waits_for_quantities(monkeypatch) -> None:
+def test_loaded_example_specifies_dimensions_and_quantities(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
     window = MainWindow()
@@ -934,8 +934,8 @@ def test_loaded_example_specifies_dimensions_and_waits_for_quantities(monkeypatc
         assert "工作压力 30 MPa" in text
         assert "极限压力" not in text
         task = TaskParser().parse_instruction(text)["task"]
-        assert task["candidate_generation_preferences"]["total_candidates"] is None
-        assert task["screening_preferences"]["top_k_candidates"] is None
+        assert task["candidate_generation_preferences"]["total_candidates"] == 12
+        assert task["screening_preferences"]["top_k_candidates"] == 5
         assert task["geometry_envelope"]["length_mm"] == [500, 500]
         assert task["geometry_envelope"]["radius_mm"] == [100, 100]
         assert task["geometry_envelope"]["thickness_mm"][0] < task["geometry_envelope"]["thickness_mm"][1]
