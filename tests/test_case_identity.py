@@ -165,11 +165,11 @@ def test_report_files_are_isolated_by_run(monkeypatch, tmp_path):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     monkeypatch.setattr(reports, "RESULTS_DIR", tmp_path)
     agent = reports.ReportGenAgent()
-    monkeypatch.setattr(agent, "_render_fem_report_markdown", lambda task, *_args: task["run_id"])
+    monkeypatch.setattr(agent, "_render_markdown", lambda task, *_args: task["run_id"])
     monkeypatch.setattr(agent, "_write_pdf", lambda *_args: None)
-    first = agent.run({"task": {"run_id": "RUN_A"}, "report_kind": "fem"})
-    saved = (tmp_path / "RUN_A/fem_verification_report.md").read_bytes()
-    second = agent.run({"task": {"run_id": "RUN_B"}, "report_kind": "fem"})
+    first = agent.run({"task": {"run_id": "RUN_A"}})
+    saved = (tmp_path / "RUN_A/overall_design_report.md").read_bytes()
+    second = agent.run({"task": {"run_id": "RUN_B"}})
     assert first["markdown_path"] != second["markdown_path"]
-    assert (tmp_path / "RUN_A/fem_verification_report.md").read_bytes() == saved
-    assert (tmp_path / "RUN_B/fem_verification_report.md").read_text(encoding="utf-8") == "RUN_B"
+    assert (tmp_path / "RUN_A/overall_design_report.md").read_bytes() == saved
+    assert (tmp_path / "RUN_B/overall_design_report.md").read_text(encoding="utf-8") == "RUN_B"

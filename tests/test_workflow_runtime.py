@@ -116,6 +116,89 @@ class FailingScreenOrchestrator(FakeOrchestrator):
         raise RuntimeError("screen failed")
 
 
+class InteractiveQuantityOrchestrator(FakeOrchestrator):
+    update_task_quantity = OrchestratorAgent.update_task_quantity
+    _task_payload = OrchestratorAgent._task_payload
+
+    def parse_instruction(self, instruction, overrides=None, *, run_id=None):
+        self.calls.append("parse")
+        return TaskParser().parse_instruction(instruction, overrides)
+
+    def generate_candidates(self, task):
+        self.calls.append("generate")
+        return [{"candidate_id": f"TMP_{index}", "source": "DOE"}
+                for index in range(1, task["task"]["candidate_generation_preferences"]["total_candidates"] + 1)]
+
+
+@pytest.mark.parametrize("reply", ["预筛保留 -1 个", "预筛保留 +1 个", "预筛保留 1.5 个"])
+def test_invalid_first_instruction_quantity_stops_before_candidate_generation(tmp_path, reply):
+    orchestrator = InteractiveQuantityOrchestrator()
+    runtime = DesignWorkflowRuntime(orchestrator=orchestrator, event_store=WorkflowEventStore(tmp_path / "invalid.sqlite3"))
+    with pytest.raises(ValueError, match="整数"):
+        runtime.start("工作压力 12 MPa，生成 2 个方案，" + reply)
+    assert orchestrator.calls == ["parse"]
+
+
+@pytest.mark.parametrize("counts,gate,reply", [
+    ("", "candidate_count", "生成 {value} 个方案"),
+    ("，生成 2 个方案", "screen_count", "预筛保留 {value} 个"),
+])
+@pytest.mark.parametrize("value", ["-1", "+1", "1.5", ".5", "0", "100"])
+def test_invalid_quantity_reply_preserves_pending_stage_and_task(tmp_path, counts, gate, reply, value):
+    orchestrator = InteractiveQuantityOrchestrator()
+    store = WorkflowEventStore(tmp_path / "invalid_reply.sqlite3")
+    runtime = DesignWorkflowRuntime(orchestrator=orchestrator, event_store=store)
+    state = runtime.start("工作压力 12 MPa" + counts)
+    calls = list(orchestrator.calls)
+    with pytest.raises(ValueError):
+        runtime.provide_quantity(state["run_id"], reply.format(value=value))
+    resumed = runtime.resume(state["run_id"])
+    assert resumed["pending_confirmation"] == gate
+    assert resumed["task"] == state["task"]
+    assert orchestrator.calls == calls
+    assert not [event for event in store.list_events(state["run_id"]) if event["event_type"] == "user_quantity_provided"]
+
+
+@pytest.mark.parametrize("counts,first_gate", [
+    ("", "candidate_count"),
+    ("，生成 2 个方案", "screen_count"),
+    ("，预筛保留 1 个方案", "candidate_count"),
+    ("，生成 2 个方案，预筛保留 1 个方案", "screen_candidates"),
+])
+def test_quantities_are_requested_at_their_stage_and_resume_without_repeating_nodes(tmp_path, counts, first_gate):
+    orchestrator = InteractiveQuantityOrchestrator()
+    store = WorkflowEventStore(tmp_path / "quantities.sqlite3")
+    runtime = DesignWorkflowRuntime(orchestrator=orchestrator, event_store=store)
+    state = runtime.start("工作压力 12 MPa，长度 500 mm，半径 100 mm" + counts)
+    run_id, task_id = state["run_id"], state["task"]["task_id"]
+    assert state["pending_confirmation"] == first_gate
+    if first_gate == "candidate_count":
+        assert not state["candidates"]
+        with pytest.raises(ValueError):
+            runtime.provide_quantity(run_id, "-2 个方案")
+        assert runtime.resume(run_id)["pending_confirmation"] == "candidate_count"
+        runtime = DesignWorkflowRuntime(orchestrator=orchestrator, event_store=store)
+        state = runtime.provide_quantity(run_id, "请生成 2 个候选")
+    if state["pending_confirmation"] == "screen_count":
+        with pytest.raises(ValueError):
+            runtime.provide_quantity(run_id, "保留 3 个方案")
+        state = runtime.provide_quantity(run_id, "预筛保留 1 个")
+    else:
+        state = runtime.continue_after_confirmation(run_id, True)
+    assert state["pending_confirmation"] == "fem_evaluation"
+    assert len(state["candidates"]) == 2 and len(state["screened_candidates"]) == 1
+    assert state["task"]["task_id"] == task_id and state["run_id"] == run_id
+    assert state["task"]["task"]["design_targets"]["ultimate_pressure_min_MPa"] == 12
+    assert state["task"]["task"]["user_input_facts"]["candidate_generation"] == {"total_candidates": 2, "top_k_candidates": 1}
+    assert orchestrator.calls == ["parse", "generate", "screen"]
+    messages = [event for event in store.list_events(run_id) if event["event_type"] == "quantity_requested"]
+    assert len(messages) == ("生成" not in counts) + ("预筛" not in counts)
+    state = runtime.continue_after_confirmation(state, True)
+    assert state["pending_confirmation"] == "export_report"
+    state = runtime.continue_after_confirmation(state, True)
+    assert state["stage"] == "completed"
+
+
 class FakeChildAgent:
     def __init__(self) -> None:
         self.progress_callback = None

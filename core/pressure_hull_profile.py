@@ -8,6 +8,7 @@ from functools import lru_cache
 from typing import Any, Dict, List
 
 from core.config_loader import load_param_ranges as _load_param_ranges_raw
+from core.config_loader import fixed_imperfection_ratio
 
 
 HULL_TYPES = ["CYLINDRICAL"]
@@ -35,7 +36,7 @@ DEFAULT_GEOMETRY = {
         "thickness_mm": 10.0,
         "alpha_deg": 40.0,
         "beta_deg": 70.0,
-        "imperfection_ratio": 0.005,
+        "imperfection_ratio": fixed_imperfection_ratio(),
     }
 }
 
@@ -403,7 +404,7 @@ def expand_layup_for_fem(raw_layup: Any, geometry: Dict[str, Any] | None = None)
             "skin_layup": rendered,
             "ply_count": len(angles),
             "angles_deg": angles,
-            "ply_thickness_mm": round(total_thickness / count, 6) if total_thickness > 0.0 else raw.get("ply_thickness_mm"),
+            "ply_thickness_mm": total_thickness / count if total_thickness > 0.0 else raw.get("ply_thickness_mm"),
             "symmetric": sequence_is_symmetric(angles),
             "balanced": sequence_is_balanced(angles),
             "skin_f0": round(sum(1 for angle in angles if abs(angle) < 1e-6) / count, 3),

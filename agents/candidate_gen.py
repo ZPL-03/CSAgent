@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 
 from agents.base import BaseAgent
 from core.case_retriever import CaseRetriever
-from core.config_loader import load_app_config, load_llm_config, load_material_db
+from core.config_loader import fixed_imperfection_ratio, load_app_config, load_llm_config, load_material_db
 from core.domain_knowledge import DomainKnowledgeBase
 from core.doe_sampler import DOESampler
 from core.id_utils import format_temp_candidate_id
@@ -202,7 +202,7 @@ class CandidateGenAgent(BaseAgent):
         )
         system_prompt = (
             "你是 csllm 领域微调模型中的复合材料耐压壳候选方案生成助手。"
-            "本轮输入是系统整理后的工程任务书，不是原始用户自然语言，也不是 JSON 任务契约。"
+            "输入是系统整理的工程任务书，不是原始用户自然语言，也不是 JSON 任务契约。"
             "请按自然语言工程回答风格输出，候选方案表是主体，表外说明保持简洁。"
             "候选方案必须用 Markdown 表格表达，列名中直接写出编号、材料、长度、半径或内径、厚度、alpha、beta、铺层形式、缺陷比和推荐理由。"
             "表格中的推荐理由必须用一句话同时包含结构性能依据和制造/缺陷风险依据，不要只写泛化结论。"
@@ -240,7 +240,7 @@ class CandidateGenAgent(BaseAgent):
             f"半径 R(mm) 必须为数值；参考尺寸只表示设计中心，候选值仍需在 {range_text('radius_mm')} 内提出；只有固定几何约束才必须沿用",
             f"厚度 t(mm) 必须为数值；参考尺寸只表示设计中心，候选值仍需在 {range_text('thickness_mm')} 内提出；只有固定几何约束才必须沿用",
             f"alpha(deg) 与 beta(deg) 必须为 {range_text('alpha_deg')} 内的两个铺层角建议值",
-            f"缺陷比必须为无量纲小数 {range_text('imperfection_ratio')}，也可以写成 1-10‰；不要用 0.05 或 0.07 表示缺陷比",
+            f"初始几何缺陷比固定为 {fixed_imperfection_ratio():g}（{fixed_imperfection_ratio() * 1000:g}‰），属于分析条件，不参与设计变量搜索",
             "铺层形式使用 [90_4/(±alpha/±beta)_8/90_4] 或 [(±alpha/±beta)_10] 这一类可解析格式",
         ]
 
@@ -461,6 +461,9 @@ class CandidateGenAgent(BaseAgent):
         )
         geometry = dict(raw_geometry)
         geometry.update({key: value for key, value in user_geometry.items() if value is not None})
+        merged["provenance"] = {**(raw.get("provenance") or {}),
+                                "proposed_imperfection_ratio": raw_geometry.get("imperfection_ratio")}
+        geometry["imperfection_ratio"] = fixed_imperfection_ratio()
         if geometry:
             merged["geometry"] = geometry
 
@@ -518,8 +521,12 @@ class CandidateGenAgent(BaseAgent):
         geometry: Dict[str, float],
         index: int | None = None,
     ) -> Dict[str, float]:
-        _ = task, index
-        return normalize_geometry(hull_type, geometry)
+        geometry = normalize_geometry(hull_type, geometry)
+        for key, bounds in self._task_payload(task)["geometry_envelope"].items():
+            if bounds[0] == bounds[1]:
+                geometry[key] = float(bounds[0])
+        geometry["imperfection_ratio"] = fixed_imperfection_ratio()
+        return geometry
 
     def _repair_layup_if_needed(self, layup: Dict[str, Any], geometry: Dict[str, float]) -> Dict[str, Any]:
         candidate = {
@@ -548,6 +555,8 @@ class CandidateGenAgent(BaseAgent):
         )
 
     def _normalize_candidate(self, task: Dict[str, Any], raw: Dict[str, Any], index: int, source: str) -> Dict[str, Any]:
+        source_defect = (raw.get("geometry") or {}).get("imperfection_ratio")
+        raw = {**raw, "geometry": {**(raw.get("geometry") or {}), "imperfection_ratio": fixed_imperfection_ratio()}}
         task_payload = self._task_payload(task)
         hull_type = resolve_hull_type(raw.get("hull_type") or task_payload.get("hull_type"))
         missing_geometry = missing_geometry_params(raw.get("geometry"), hull_type)
@@ -582,6 +591,11 @@ class CandidateGenAgent(BaseAgent):
             "rank_score": None,
             "rationale": str(raw.get("rationale", f"{source} 生成候选")),
             "origin_summary": str(raw.get("origin_summary") or raw.get("source_text") or ""),
+            "provenance": {
+                "proposed_imperfection_ratio": source_defect,
+                **(raw.get("provenance") or {}),
+                "fixed_analysis_conditions": {"imperfection_ratio": fixed_imperfection_ratio()},
+            },
             "llm_output_excerpt": _sanitize_llm_output_excerpt(raw.get("llm_output_excerpt")),
             "material_system": material_system,
             "load_conditions": task_payload["load_conditions"],
@@ -726,6 +740,8 @@ class CandidateGenAgent(BaseAgent):
 
     def _resolve_source_targets(self, task: Dict[str, Any]) -> Dict[str, int]:
         target_total = requested_candidate_pool_size(task)
+        if target_total is None:
+            raise ValueError("候选方案数量尚未确认，不能生成候选池。")
         preferences = task_payload_from_request(task).get("candidate_generation_preferences", {})
         counts = {
             "llm": preferences.get("llm_candidates"),

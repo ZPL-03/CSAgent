@@ -18,6 +18,9 @@ geometry:
     min: 0.001
     max: 0.01
 
+analysis_assumptions:
+  imperfection_ratio: 0.008
+
 load:
   external_pressure_MPa:
     min: 1

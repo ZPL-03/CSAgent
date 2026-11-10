@@ -37,6 +37,13 @@ def _runtime_stages(events: list[tuple[str, str, dict]]) -> set[str]:
     return {payload.get("runtime_stage", "") for payload in _runtime_events(events)}
 
 
+def test_skipped_report_commentary_does_not_claim_report_exists(tmp_path):
+    controller, _, _, _ = _controller(tmp_path)
+    message = controller._render_commentary("report_summary", {"report": None, "skipped": True})
+    assert "跳过" in message
+    assert "已生成" not in message
+
+
 def test_conversation_flow_emits_human_confirmed_full_path(tmp_path):
     controller, orchestrator, store, events = _controller(tmp_path)
 

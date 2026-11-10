@@ -44,7 +44,7 @@ def _generated_candidate() -> dict:
             "schema_version": "2",
             "generation_mode": "fem_ready_cylindrical_shell",
             "candidate_count": 1,
-            "geometry": {"length_mm": 600, "radius_mm": 150},
+            "geometry": {"length_mm": 600, "radius_mm": 150, "imperfection_ratio": 0.008},
             "load_conditions": {"service_depth_m": 5000},
             "boundary_conditions": {"type": "FLANGE_CONSTRAINED"},
         }
@@ -82,6 +82,30 @@ def test_orchestrator_promotes_csllm_candidate_without_changing_design_revision(
     assert promoted["session_candidate_id"] == "TMP_1"
     assert promoted["design_revision_id"] == candidate["design_revision_id"]
     assert validate_fem_input(promoted) == []
+
+
+def test_new_fem_candidates_require_fixed_defect_before_reserving_ids(monkeypatch) -> None:
+    import agents.orchestrator as module
+    candidate = _generated_candidate()
+    candidate["geometry"]["imperfection_ratio"] = 0.003
+    monkeypatch.setattr(module, "reserve_candidate_ids", lambda *_: pytest.fail("无效分析条件不能分配求解编号"))
+    orchestrator = object.__new__(OrchestratorAgent)
+    with pytest.raises(ValueError, match="0.008"):
+        orchestrator.prepare_candidate_for_fem({}, candidate)
+    with pytest.raises(ValueError, match="0.008"):
+        orchestrator.prepare_candidates_for_fem({}, [candidate])
+
+
+def test_result_annotation_preserves_actual_solver_design() -> None:
+    candidate = _generated_candidate()
+    agent = FEMAgent()
+    candidate["geometry"]["thickness_mm"] = 10.0
+    adjusted = agent.apply_adjustment(candidate, "convergence_fail", 1)
+    result = agent._annotate_result(adjusted, {"status": "failed"})
+    assert result["solved_design"]["geometry"] == adjusted["geometry"]
+    assert result["solved_design"]["layup"] == adjusted["layup"]
+    assert result["solved_design"]["design_revision_id"] == adjusted["design_revision_id"]
+    assert candidate["geometry"] != adjusted["geometry"]
 
 
 def test_missing_fem_fields_fail_closed_instead_of_using_defaults() -> None:
@@ -163,7 +187,8 @@ def test_retry_design_change_creates_child_revision() -> None:
 
     adjusted = agent.apply_adjustment(candidate, "convergence_fail", 0)
 
-    assert adjusted["geometry"] != candidate["geometry"]
+    assert adjusted["geometry"]["imperfection_ratio"] == candidate["geometry"]["imperfection_ratio"]
+    assert adjusted["analysis"] != candidate["analysis"]
     assert adjusted["design_revision_id"] != candidate["design_revision_id"]
     assert adjusted["parent_design_revision_id"] == candidate["design_revision_id"]
     assert validate_fem_input(adjusted) == []

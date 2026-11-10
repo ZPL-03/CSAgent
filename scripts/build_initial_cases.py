@@ -16,7 +16,7 @@ if str(ROOT) not in sys.path:
 
 from agents.fem_agent import FEMAgent
 from agents.knowledge_agent import KnowledgeAgent
-from core.config_loader import load_app_config, load_material_db
+from core.config_loader import fixed_imperfection_ratio, load_app_config, load_material_db
 from core.doe_sampler import DOESampler
 from core.id_utils import format_temp_candidate_id, next_task_id, reserve_candidate_ids, task_file_name
 from core.io_utils import write_json
@@ -45,6 +45,7 @@ def default_task(
 ) -> Dict:
     material = load_material_db()[material_key]
     target_pressure = float(target_pressure_MPa if target_pressure_MPa is not None else pressure_MPa)
+    defect = fixed_imperfection_ratio()
     task_payload = normalize_task_payload(
         {
             "application": "复合材料外压圆柱耐压壳",
@@ -56,7 +57,7 @@ def default_task(
                 "thickness_mm": [5, 20],
                 "alpha_deg": [10, 80],
                 "beta_deg": [10, 80],
-                "imperfection_ratio": [0.001, 0.01],
+                "imperfection_ratio": [defect, defect],
             },
             "material_system": {
                 "name": material["display_name"],

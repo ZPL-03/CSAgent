@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict
 
-from core.config_loader import load_material_db
+from core.config_loader import fixed_imperfection_ratio, load_material_db
 from core.id_utils import next_task_id
 from core.schema_validator import validate_or_raise
 from core.task_contract import (
@@ -19,11 +19,19 @@ from core.task_contract import (
     normalize_load_conditions,
     normalize_task_payload,
     task_payload_from_request,
+    validate_quantity,
 )
 
 
 DEFAULT_SEAWATER_DENSITY_KG_PER_M3 = 1025.0
 DEFAULT_GRAVITY_M_PER_S2 = 9.80665
+QUANTITY_PATTERN = r"([+-]?\s*(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)(?![0-9.])"
+
+
+def quantity_request_message(confirmation: str, candidate_count: int = 0) -> str:
+    if confirmation == "candidate_count":
+        return "需要生成多少个候选方案？请回复 1 至 60 的整数，例如“12 个方案”。"
+    return f"候选池共有 {candidate_count} 个方案，代理预筛需要保留多少个？请回复 1 至 {min(30, candidate_count)} 的整数。"
 
 
 class TaskParser:
@@ -209,6 +217,8 @@ class TaskParser:
         values = self._extract_geometry_values(text)
         fixed_values = self._extract_fixed_geometry_values(text, values)
         for key, value in values.items():
+            if key == "imperfection_ratio":
+                continue
             if key in fixed_values:
                 geometry[key] = [value, value]
                 continue
@@ -218,12 +228,13 @@ class TaskParser:
                 "thickness_mm": 3.0,
                 "alpha_deg": 10.0,
                 "beta_deg": 10.0,
-                "imperfection_ratio": 0.001,
             }[key]
-            if key == "imperfection_ratio":
-                geometry[key] = [max(0.001, value - width), min(0.01, value + width)]
-            else:
-                geometry[key] = [value - width, value + width]
+            geometry[key] = [value - width, value + width]
+        fixed_defect = fixed_imperfection_ratio()
+        specified_defect = values.get("imperfection_ratio")
+        if specified_defect is not None and abs(specified_defect - fixed_defect) > 1e-9:
+            raise ValueError(f"初始几何缺陷比统一采用 {fixed_defect:g}（{fixed_defect * 1000:g}‰），不作为设计变量。")
+        geometry["imperfection_ratio"] = [fixed_defect, fixed_defect]
         return normalize_geometry_envelope(geometry)
 
     def _ultimate_pressure_target_value(self, text: str) -> float | None:
@@ -258,35 +269,50 @@ class TaskParser:
             "primary_objective": objective,
         }
 
-    def _extract_top_k_candidates(self, text: str) -> int:
+    def _extract_top_k_candidates(self, text: str) -> int | None:
         patterns = [
-            r"(?:初筛保留|筛选后保留|初步保留)\s*([1-9][0-9]?)\s*(?:个)?(?:候选|样本|方案)?",
-            r"(?:初筛|筛选|预筛|预选|预筛选)\s*([1-9][0-9]?)\s*(?:个)?(?:候选|样本|方案)?",
-            r"(?:预筛|预选|预筛选|预筛保留|预筛数量)\D{0,10}([1-9][0-9]?)\s*(?:个)?(?:候选|样本|方案)?(?:\D{0,8}(?:进入|送入|用于|参加)(?:校核|有限元|FEM))?",
-            r"([1-9][0-9]?)\s*(?:个)?(?:候选|样本|方案)?\D{0,8}(?:进入|送入|用于|参加)(?:校核|有限元|FEM)",
-            r"(?:初筛数量|筛选数量|TopK|Top-K)\D{0,4}([1-9][0-9]?)",
-            r"(?:初筛|筛选)\D{0,8}(?:Top[- ]?|TOP[- ]?|top[- ]?)\s*([1-9][0-9]?)",
-            r"(?:keep|retain|reserve)\s*([1-9][0-9]?)\s*(?:screened\s+)?(?:candidates|designs|samples)",
-            r"(?:keep|retain|reserve)\s*([1-9][0-9]?)\s*(?:candidates|designs|samples)?\s*(?:after|following)\s*(?:screening|prescreening|pre[- ]?screening)",
-            r"(?:screen|select|top[- ]?k|top)\D{0,8}([1-9][0-9]?)",
+            rf"(?:初筛保留|筛选后保留|初步保留)\s*{QUANTITY_PATTERN}\s*(?:个)?(?:候选|样本|方案)?",
+            rf"(?:初筛|筛选|预筛|预选|预筛选)\s*{QUANTITY_PATTERN}\s*(?:个)?(?:候选|样本|方案)?",
+            rf"(?:初筛|筛选|预筛|预选|预筛选)[^0-9.+\-，。；,;\n]{{0,8}}?(?:top[- ]?)\s*{QUANTITY_PATTERN}",
+            rf"(?:预筛|预选|预筛选|预筛保留|预筛数量)[^0-9.+\-，。；,;\n]{{0,10}}?{QUANTITY_PATTERN}",
+            rf"(?<![0-9.+-]){QUANTITY_PATTERN}\s*(?:个)?(?:候选|样本|方案)?[^0-9.+\-，。；,;\n]{{0,8}}?(?:进入|送入|用于|参加)(?:校核|有限元|FEM)",
+            rf"(?:初筛数量|筛选数量|TopK|Top-K)[^0-9.+\-，。；,;\n]{{0,4}}?{QUANTITY_PATTERN}",
+            rf"(?:keep|retain|reserve)\s*{QUANTITY_PATTERN}\s*(?:screened\s+)?(?:candidates|designs|samples)",
+            rf"(?:keep|retain|reserve)\s*{QUANTITY_PATTERN}\s*(?:candidates|designs|samples)?\s*(?:after|following)\s*(?:screening|prescreening|pre[- ]?screening)",
+            rf"(?:screen|select|top[- ]?k|top[- ]?)[^0-9.+\-，。；,;\n]{{0,8}}?{QUANTITY_PATTERN}",
         ]
         for pattern in patterns:
             match = re.search(pattern, text, flags=re.IGNORECASE)
             if match:
-                return int(max(1, min(float(match.group(1)), 30.0)))
-        raise ValueError("任务缺少初筛保留数量，请在自然语言需求中明确指定。")
+                return self.validate_quantity(match.group(1), "top_k_candidates")
+        return None
 
-    def _extract_total_candidates(self, text: str) -> int:
+    def _extract_total_candidates(self, text: str) -> int | None:
         patterns = [
-            r"(?:总候选|候选总数|候选池|初始候选)\D{0,6}([1-9][0-9]?)\s*(?:个)?(?:候选|样本|方案)?",
-            r"(?:生成|给出|提供|输出)\s*([1-9][0-9]?)\s*(?:个)?(?:候选|样本|方案)?",
-            r"(?:generate|create|produce)\s*([1-9][0-9]?)\s*(?:candidates|designs|samples)?",
+            rf"(?:总候选|候选总数|候选池|初始候选)[^0-9.+\-，。；,;\n]{{0,6}}?{QUANTITY_PATTERN}\s*(?:个)?(?:候选|样本|方案)?",
+            rf"(?:生成|给出|提供|输出)\s*{QUANTITY_PATTERN}\s*(?:个)?(?:候选|样本|方案)?",
+            rf"(?:generate|create|produce)\s*{QUANTITY_PATTERN}\s*(?:candidates|designs|samples)?",
         ]
         for pattern in patterns:
             match = re.search(pattern, text, flags=re.IGNORECASE)
             if match:
-                return int(max(1, min(float(match.group(1)), 60.0)))
-        raise ValueError("任务缺少候选池总数，请在自然语言需求中明确指定。")
+                return self.validate_quantity(match.group(1), "total_candidates")
+        return None
+
+    @staticmethod
+    def validate_quantity(value: Any, field: str, available: int | None = None) -> int:
+        return validate_quantity(value, field, available)
+
+    def quantity_from_reply(self, text: str, field: str, available: int | None = None) -> int:
+        """从当前数量问题的回答中提取单一明确整数。"""
+        match = re.fullmatch(rf"\s*(?:请|先|就|需要|生成|保留|筛选|预筛|初筛|方案|候选|数量|共|个|[，。,:：!！\s])*{QUANTITY_PATTERN}\s*(?:个|份)?\s*(?:候选方案|候选|样本|方案)?\s*[。.!！]?\s*", text)
+        if match:
+            return self.validate_quantity(match.group(1), field, available)
+        extractor = self._extract_total_candidates if field == "total_candidates" else self._extract_top_k_candidates
+        number = extractor(text)
+        if number is None or len(re.findall(r"[0-9]+(?:\.[0-9]+)?", text)) != 1:
+            raise ValueError("请直接回复本阶段需要的方案数量，例如“6 个方案”。")
+        return self.validate_quantity(number, field, available)
 
     def _extract_candidate_generation_preferences(self, text: str) -> Dict[str, Any]:
         total_candidates = self._extract_total_candidates(text)
@@ -309,12 +335,11 @@ class TaskParser:
 
     def _extract_user_input_facts(self, text: str, hints: Dict[str, Any]) -> Dict[str, Any]:
         material, is_user_specified = self._extract_material(text)
-        facts: Dict[str, Any] = {
-            "candidate_generation": {
-                "total_candidates": int(hints["candidate_generation_preferences"]["total_candidates"]),
-                "top_k_candidates": int(hints["screening_preferences"]["top_k_candidates"]),
-            }
-        }
+        facts: Dict[str, Any] = {"candidate_generation": {}}
+        for field, preferences in (("total_candidates", "candidate_generation_preferences"),
+                                   ("top_k_candidates", "screening_preferences")):
+            if hints[preferences].get(field) is not None:
+                facts["candidate_generation"][field] = hints[preferences][field]
 
         application = self._extract_application(text)
         if any(keyword in text for keyword in ["潜器", "水下", "深海", "舱段", "耐压壳", "压力壳", "圆柱"]):
@@ -421,11 +446,18 @@ class TaskParser:
         generation = dict(updated.get("candidate_generation_preferences", {}))
         screening = dict(updated.get("screening_preferences", {}))
         if overrides.get("total_candidates") is not None:
-            generation["total_candidates"] = int(max(1, min(float(overrides["total_candidates"]), 60.0)))
+            generation["total_candidates"] = self.validate_quantity(overrides["total_candidates"], "total_candidates")
         if overrides.get("top_k_candidates") is not None:
-            screening["top_k_candidates"] = int(max(1, min(float(overrides["top_k_candidates"]), 30.0)))
+            screening["top_k_candidates"] = self.validate_quantity(overrides["top_k_candidates"], "top_k_candidates")
         updated["candidate_generation_preferences"] = generation
         updated["screening_preferences"] = screening
+        facts = dict(updated.get("user_input_facts") or {})
+        quantities = dict(facts.get("candidate_generation") or {})
+        for field, values in (("total_candidates", generation), ("top_k_candidates", screening)):
+            if overrides.get(field) is not None:
+                quantities[field] = values[field]
+        facts["candidate_generation"] = quantities
+        updated["user_input_facts"] = facts
         return updated
 
     def _text_with_overrides(self, text: str, overrides: Dict[str, Any] | None) -> str:
@@ -433,9 +465,11 @@ class TaskParser:
             return text
         parts = [text]
         if overrides.get("total_candidates") is not None:
-            parts.append(f"生成 {int(overrides['total_candidates'])} 个候选")
+            total = self.validate_quantity(overrides["total_candidates"], "total_candidates")
+            parts.append(f"生成 {total} 个候选")
         if overrides.get("top_k_candidates") is not None:
-            parts.append(f"初筛保留 {int(overrides['top_k_candidates'])} 个候选")
+            top_k = self.validate_quantity(overrides["top_k_candidates"], "top_k_candidates")
+            parts.append(f"初筛保留 {top_k} 个候选")
         return "，".join(part for part in parts if str(part).strip())
 
     def parse_instruction(self, text: str, overrides: Dict[str, Any] | None = None) -> Dict[str, Any]:

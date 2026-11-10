@@ -11,6 +11,7 @@ from agents.fem_agent import FEMAgent
 from agents.knowledge_agent import KnowledgeAgent
 from agents.report_gen import ReportGenAgent
 from agents.screener import ScreenerAgent
+from core.config_loader import fixed_imperfection_ratio
 from core.id_utils import reserve_candidate_ids, task_file_name
 from core.fem_input_contract import attach_design_revision, validate_fem_input_or_raise
 from core.io_utils import write_json
@@ -67,6 +68,7 @@ class OrchestratorAgent(BaseAgent):
         return enriched
 
     def _promote_candidate_for_fem(self, task: Dict, candidate: Dict, formal_candidate_id: str | None = None) -> Dict:
+        self._validate_analysis_conditions(candidate)
         enriched_candidate = self._attach_task_context(task, candidate)
         formal_candidate_id = formal_candidate_id or reserve_candidate_ids(1)[0]
         session_candidate_id = enriched_candidate.get("candidate_id")
@@ -98,9 +100,17 @@ class OrchestratorAgent(BaseAgent):
         validate_fem_input_or_raise(promoted)
         return promoted
 
+    @staticmethod
+    def _validate_analysis_conditions(candidate: Dict) -> None:
+        expected = fixed_imperfection_ratio()
+        if (candidate.get("geometry") or {}).get("imperfection_ratio") != expected:
+            raise ValueError(f"初始几何缺陷比必须为 {expected:g}；请按固定分析条件生成候选，不能直接改写已求解案例。")
+
     def prepare_candidates_for_fem(self, task: Dict, candidates: List[Dict]) -> List[Dict]:
         """为同一批有限元样本生成互不重复的正式编号。"""
 
+        for candidate in candidates:
+            self._validate_analysis_conditions(candidate)
         formal_candidate_ids = reserve_candidate_ids(len(candidates))
         return [
             self._promote_candidate_for_fem(task, candidate, formal_candidate_ids[index])
@@ -133,6 +143,8 @@ class OrchestratorAgent(BaseAgent):
     def generate_candidates(self, task: Dict) -> List[Dict]:
         task_payload = self._task_payload(task)
         target_total = requested_candidate_pool_size(task)
+        if target_total is None:
+            raise ValueError("生成候选前需要用户确认候选方案数量。")
         self.emit_event(
             "candidate_generation_started",
             (
@@ -162,9 +174,24 @@ class OrchestratorAgent(BaseAgent):
         )
         return candidates
 
+    def update_task_quantity(self, task: Dict, field: str, value: int) -> Dict:
+        """将用户补充的流程数量写回同一任务，不分配新任务号。"""
+        payload = self._task_payload(task)
+        preferences = "candidate_generation_preferences" if field == "total_candidates" else "screening_preferences"
+        payload[preferences] = {**payload[preferences], field: value}
+        facts = dict(payload.get("user_input_facts") or {})
+        facts["candidate_generation"] = {**facts.get("candidate_generation", {}), field: value}
+        payload["user_input_facts"] = facts
+        updated = {**task, "task": payload} if isinstance(task.get("task"), dict) else {**task, **payload}
+        write_json(TASKS_DIR / task_file_name(updated["task_id"]), updated)
+        return updated
+
     def screen_candidates(self, task: Dict, candidates: List[Dict]) -> List[Dict]:
         score_formula = self.screener.score_formula_text
         requested_top_k = requested_screen_top_k(task)
+        if requested_top_k is None:
+            raise ValueError("代理预筛前需要用户确认保留数量。")
+        TaskParser.validate_quantity(requested_top_k, "top_k_candidates", len(candidates))
         effective_top_k = effective_screen_top_k(task, len(candidates))
         self.emit_event(
             "screening_started",
@@ -261,7 +288,8 @@ class OrchestratorAgent(BaseAgent):
                 self.emit_event("knowledge_update_failed", "知识回流缺少匹配有限元结果", update)
                 continue
             try:
-                update = self.knowledge_agent.run({"task": task, "design": design, "abaqus_results": result})
+                solved_design = {**design, **deepcopy(result.get("solved_design") or {})}
+                update = self.knowledge_agent.run({"task": task, "design": solved_design, "abaqus_results": result})
                 update["candidate_id"] = design.get("candidate_id")
                 update["session_candidate_id"] = design.get("session_candidate_id")
                 updates.append(update)
@@ -292,7 +320,6 @@ class OrchestratorAgent(BaseAgent):
         task: Dict,
         results: List[Dict],
         candidates: List[Dict] | None = None,
-        report_kind: str = "all",
         output_dir: str | None = None,
     ) -> Dict:
         self.emit_event(
@@ -305,7 +332,6 @@ class OrchestratorAgent(BaseAgent):
                 "task": task,
                 "results": results,
                 "candidates": candidates or [],
-                "report_kind": report_kind,
                 "output_dir": output_dir,
             }
         )
@@ -320,7 +346,7 @@ class OrchestratorAgent(BaseAgent):
         results = [self.evaluate_prepared_candidate(task, candidate) for candidate in fem_candidates]
         knowledge_updates = self.persist_knowledge_records(task, fem_candidates, results)
 
-        report = self.generate_report(task, results, fem_candidates)
+        report = self.generate_report(task, results, self.last_ranked_candidates or candidates)
         return {
             "task": task,
             "candidates": candidates,

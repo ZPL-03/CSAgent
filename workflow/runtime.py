@@ -8,6 +8,8 @@ from typing import Any, Callable, Dict
 from langgraph.graph import END, START, StateGraph
 
 from agents.orchestrator import OrchestratorAgent
+from core.task_contract import requested_candidate_pool_size, requested_screen_top_k
+from core.task_parser import TaskParser, quantity_request_message
 from workflow.agent_contracts import contract_by_node
 from workflow.event_store import WorkflowEventStore
 from workflow.events import WorkflowEvent
@@ -327,6 +329,8 @@ class DesignWorkflowRuntime:
         graph.add_node("parse_task", lambda state: self._node("parse_task", state, self._parse_task))
         graph.add_node("generate_candidates", lambda state: self._node("generate_candidates", state, self._generate_candidates))
         graph.add_node("wait_screen", lambda state: self._node("wait_screen", state, self._wait_screen))
+        graph.add_node("wait_candidate_count", lambda state: self._node("wait_candidate_count", state, self._wait_candidate_count))
+        graph.add_node("wait_screen_count", lambda state: self._node("wait_screen_count", state, self._wait_screen_count))
         graph.add_node("screen_candidates", lambda state: self._node("screen_candidates", state, self._screen_candidates))
         graph.add_node("skip_screen", lambda state: self._node("skip_screen", state, self._skip_screen))
         graph.add_node("wait_fem", lambda state: self._node("wait_fem", state, self._wait_fem))
@@ -344,6 +348,8 @@ class DesignWorkflowRuntime:
             {
                 "parse_task": "parse_task",
                 "generate_candidates": "generate_candidates",
+                "wait_candidate_count": "wait_candidate_count",
+                "wait_screen_count": "wait_screen_count",
                 "wait_screen": "wait_screen",
                 "screen_candidates": "screen_candidates",
                 "skip_screen": "skip_screen",
@@ -357,12 +363,17 @@ class DesignWorkflowRuntime:
                 "end": END,
             },
         )
-        graph.add_edge("parse_task", "generate_candidates")
+        graph.add_conditional_edges("parse_task", self._route_generation, {
+            "wait_candidate_count": "wait_candidate_count", "generate_candidates": "generate_candidates",
+        })
+        graph.add_edge("wait_candidate_count", END)
+        graph.add_edge("wait_screen_count", END)
         graph.add_conditional_edges(
             "generate_candidates",
             self._route_screen,
             {
                 "wait_screen": "wait_screen",
+                "wait_screen_count": "wait_screen_count",
                 "screen_candidates": "screen_candidates",
                 "skip_screen": "skip_screen",
             },
@@ -418,6 +429,16 @@ class DesignWorkflowRuntime:
 
     def _wait_screen(self, state: DesignWorkflowState) -> Dict[str, Any]:
         return {"stage": "awaiting_screen_confirmation", "pending_confirmation": "screen_candidates"}
+
+    def _wait_candidate_count(self, state: DesignWorkflowState) -> Dict[str, Any]:
+        self._emit_event("quantity_requested", "ORCHESTRATOR", quantity_request_message("candidate_count"),
+                         {"confirmation_id": "candidate_count"})
+        return {"stage": "awaiting_candidate_count", "pending_confirmation": "candidate_count"}
+
+    def _wait_screen_count(self, state: DesignWorkflowState) -> Dict[str, Any]:
+        self._emit_event("quantity_requested", "ORCHESTRATOR", quantity_request_message("screen_count", len(state.get("candidates", []))),
+                         {"confirmation_id": "screen_count"})
+        return {"stage": "awaiting_screen_count", "pending_confirmation": "screen_count"}
 
     def _screen_candidates(self, state: DesignWorkflowState) -> Dict[str, Any]:
         result = self.tools.run(
@@ -490,7 +511,7 @@ class DesignWorkflowRuntime:
             {
                 "task": state["task"],
                 "results": state.get("results", []),
-                "candidates": state.get("evaluated_candidates", []),
+                "candidates": state.get("candidates", []),
             },
         )
         return {"report": result["report"], "stage": "completed", "pending_confirmation": None, "error": None}
@@ -500,9 +521,15 @@ class DesignWorkflowRuntime:
 
     def _route_screen(self, state: DesignWorkflowState) -> str:
         approved = state.get("screen_approved")
+        count = requested_screen_top_k(state["task"])
+        if approved is not False and (count is None or count > len(state.get("candidates", []))):
+            return "wait_screen_count"
         if approved is None:
             return "wait_screen"
         return "screen_candidates" if approved else "skip_screen"
+
+    def _route_generation(self, state: DesignWorkflowState) -> str:
+        return "wait_candidate_count" if requested_candidate_pool_size(state["task"]) is None else "generate_candidates"
 
     def _route_fem(self, state: DesignWorkflowState) -> str:
         approved = state.get("fem_approved")
@@ -522,10 +549,11 @@ class DesignWorkflowRuntime:
         if not state.get("task"):
             return "parse_task"
         if not state.get("candidates"):
-            return "generate_candidates"
+            return self._route_generation(state)
         if state.get("pending_confirmation") == "screen_candidates" or state.get("stage") in {
             "candidates_generated",
             "awaiting_screen_confirmation",
+            "awaiting_screen_count",
         }:
             return self._route_screen(state)
         if state.get("pending_confirmation") == "fem_evaluation" or state.get("stage") in {
@@ -563,6 +591,25 @@ class DesignWorkflowRuntime:
         self.event_store.save_snapshot(workflow_run_id, state)
         self._active_run_id = workflow_run_id
         self._emit_event("workflow_started", "WorkflowRuntime", "设计工作流已启动", {"instruction": instruction})
+        return self._invoke(state)
+
+    def provide_quantity(self, state_or_run_id: DesignWorkflowState | str, text: str) -> DesignWorkflowState:
+        """校验阶段数量并从持久化等待点继续，不重复已完成的节点。"""
+        state = self.resume(state_or_run_id) if isinstance(state_or_run_id, str) else dict(state_or_run_id)
+        pending = state.get("pending_confirmation")
+        if pending not in {"candidate_count", "screen_count"}:
+            raise ValueError("当前流程没有等待数量输入。")
+        field = "total_candidates" if pending == "candidate_count" else "top_k_candidates"
+        available = len(state.get("candidates", [])) if pending == "screen_count" else None
+        value = TaskParser().quantity_from_reply(text, field, available)
+        state["task"] = self.orchestrator.update_task_quantity(state["task"], field, value)
+        state["pending_confirmation"] = None
+        if pending == "screen_count":
+            state["screen_approved"] = True
+        self._active_run_id = state["run_id"]
+        self.event_store.save_snapshot(state["run_id"], state)
+        self._emit_event("user_quantity_provided", "HumanOperator", f"用户确认流程数量：{field}={value}",
+                         {"field": field, "value": value, "reply": text})
         return self._invoke(state)
 
     def resume(self, run_id: str) -> DesignWorkflowState:

@@ -14,6 +14,7 @@ from core.task_contract import (
     requested_screen_top_k,
     task_payload_from_request,
 )
+from core.task_parser import TaskParser, quantity_request_message
 from workflow.runtime import DesignWorkflowRuntime
 from workflow.event_store import WorkflowEventStore
 
@@ -62,7 +63,7 @@ class ConversationFlowController:
         if self.event_callback:
             self.event_callback(event_type, message, payload or {})
 
-    def _target_counts(self, task: Dict | None, candidate_count: int) -> Dict[str, int]:
+    def _target_counts(self, task: Dict | None, candidate_count: int) -> Dict:
         return {
             "candidate_pool_target": requested_candidate_pool_size(task),
             "requested_top_k": requested_screen_top_k(task),
@@ -77,7 +78,7 @@ class ConversationFlowController:
             top_k = requested_screen_top_k(task)
             return (
                 f"我已经把你的需求整理成结构化任务了，当前按 {describe_load_conditions(task_payload.get('load_conditions', {}))} "
-                f"和 {describe_boundary_conditions(task_payload.get('boundary_conditions', {}))} 来生成方案，候选池先按 {target_total} 个目标展开，后续初筛会保留 Top-{top_k}。"
+                f"和 {describe_boundary_conditions(task_payload.get('boundary_conditions', {}))} 来生成方案，候选池目标为 {target_total or '待确认'}，初筛保留数量为 {top_k or '待确认'}。"
             )
         if stage == "candidate_summary":
             source_counter = payload.get("source_counter") if isinstance(payload.get("source_counter"), dict) else {}
@@ -98,9 +99,9 @@ class ConversationFlowController:
                 f"通过 {payload.get('passed_count', '-')} 个。报告阶段会读取 FEM 结果、候选追踪和知识证据生成交付文档。"
             )
         if stage == "report_summary":
-            report = payload.get("report") if isinstance(payload.get("report"), dict) else {}
-            outputs = report.get("report_outputs") if isinstance(report.get("report_outputs"), dict) else {}
-            return f"报告已生成，当前输出目录包含 {len(outputs) or 1} 类报告产物，可在报告页预览或打开 PDF。"
+            if payload.get("skipped"):
+                return "已跳过总体报告导出，候选与有限元结果仍保存在当前会话中。"
+            return "总体设计方案报告已生成，可预览或打开 PDF。报告包含完整候选池、生成依据、预筛、有限元校核和最终推荐。"
         if stage == "conversation_paused":
             return "我先把当前状态停在这里，后面的候选和结果都还保留着，你随时可以继续往下推。"
         return ""
@@ -111,6 +112,8 @@ class ConversationFlowController:
             self._emit("assistant_commentary", commentary, {"stage": stage, **payload})
 
     def _emit_runtime_event(self, event_type: str, message: str, payload: Dict | None = None) -> None:
+        if event_type == "quantity_requested":
+            return
         record = payload or {}
         self._emit(
             "workflow_runtime_event",
@@ -136,7 +139,6 @@ class ConversationFlowController:
 
         workflow_state = self._runtime().start(instruction, overrides=overrides)
         task = workflow_state["task"]
-        task_payload = task_payload_from_request(task)
         candidates = workflow_state.get("candidates", [])
 
         state.workflow_run_id = workflow_state["run_id"]
@@ -144,6 +146,42 @@ class ConversationFlowController:
         state.candidates = candidates
         state.stage = workflow_state.get("stage", "awaiting_screen_confirmation")
         state.pending_confirmation = workflow_state.get("pending_confirmation", "screen_candidates")
+
+        if state.pending_confirmation == "candidate_count":
+            self._emit("task_summary", "工作压力和几何要求已记录，等待确认候选方案数量。", {"task": task})
+            self._emit_quantity_request(state)
+            return state
+        return self._summarize_candidates(state)
+
+    def _emit_quantity_request(self, state: ConversationState) -> None:
+        message = quantity_request_message(state.pending_confirmation, len(state.candidates))
+        self._emit("quantity_requested", message, {"confirmation_id": state.pending_confirmation})
+
+    def provide_quantity(self, state: ConversationState, text: str) -> ConversationState:
+        previous = state.pending_confirmation
+        if previous not in {"candidate_count", "screen_count"}:
+            raise ValueError("当前流程没有等待数量输入。")
+        try:
+            TaskParser().quantity_from_reply(text, "total_candidates" if previous == "candidate_count" else "top_k_candidates",
+                                            len(state.candidates) if previous == "screen_count" else None)
+        except ValueError as exc:
+            self._emit("quantity_invalid", str(exc), {"confirmation_id": previous})
+            return state
+        workflow_state = self._runtime().provide_quantity(state.workflow_run_id, text)
+        state.task = workflow_state["task"]
+        state.candidates = workflow_state.get("candidates", [])
+        state.screened_candidates = workflow_state.get("screened_candidates", [])
+        state.evaluated_candidates = workflow_state.get("evaluated_candidates", [])
+        state.pending_confirmation = workflow_state.get("pending_confirmation")
+        state.stage = workflow_state["stage"]
+        if previous == "candidate_count":
+            return self._summarize_candidates(state)
+        return self._emit_runtime_screen_summary(state, True)
+
+    def _summarize_candidates(self, state: ConversationState) -> ConversationState:
+        task = state.task
+        task_payload = task_payload_from_request(task)
+        candidates = state.candidates
 
         source_counter = _source_counter(candidates)
         target_counts = self._target_counts(task, len(candidates))
@@ -154,7 +192,7 @@ class ConversationFlowController:
                 f"{describe_load_conditions(task_payload['load_conditions'])} | "
                 f"{describe_boundary_conditions(task_payload['boundary_conditions'])} | "
                 f"候选池目标 {target_counts['candidate_pool_target']} 个 | "
-                f"初筛保留 Top-{target_counts['requested_top_k']}"
+                f"初筛保留 {target_counts['requested_top_k'] or '待确认'}"
             ),
             {"task": task},
         )
@@ -179,8 +217,11 @@ class ConversationFlowController:
                 **target_counts,
             },
         )
+        if state.pending_confirmation == "screen_count":
+            self._emit_quantity_request(state)
+            return state
         screen_note = ""
-        if target_counts["effective_top_k"] < target_counts["requested_top_k"]:
+        if target_counts["requested_top_k"] is not None and target_counts["effective_top_k"] < target_counts["requested_top_k"]:
             screen_note = f" 当前只有 {len(candidates)} 个候选，因此最多保留 {target_counts['effective_top_k']} 个。"
         self._emit(
             "confirmation_requested",
@@ -201,13 +242,7 @@ class ConversationFlowController:
     def continue_after_confirmation(self, state: ConversationState, approved: bool) -> ConversationState:
         if state.workflow_run_id:
             return self._continue_with_workflow_runtime(state, approved)
-        if state.pending_confirmation == "screen_candidates":
-            return self._handle_screen_confirmation(state, approved)
-        if state.pending_confirmation == "fem_evaluation":
-            return self._handle_fem_confirmation(state, approved)
-        if state.pending_confirmation == "export_report":
-            return self._handle_report_confirmation(state, approved)
-        return state
+        raise ValueError("会话缺少运行编号，无法继续；请恢复已保存的运行。")
 
     def _continue_with_workflow_runtime(self, state: ConversationState, approved: bool) -> ConversationState:
         if state.task is None:
@@ -329,140 +364,4 @@ class ConversationFlowController:
         else:
             self._emit("report_summary", "已跳过报告导出。", {"report": None})
             self._emit_commentary("report_summary", {"report": None, "skipped": True})
-        return state
-
-    def _handle_screen_confirmation(self, state: ConversationState, approved: bool) -> ConversationState:
-        if state.task is None:
-            return state
-        target_counts = self._target_counts(state.task, len(state.candidates))
-
-        if approved:
-            screened_candidates = self.orchestrator.screen_candidates(state.task, state.candidates)
-            ranked_candidates = getattr(self.orchestrator, "last_ranked_candidates", None)
-            if isinstance(ranked_candidates, list) and ranked_candidates:
-                state.candidates = ranked_candidates
-            state.screened_candidates = screened_candidates
-            state.evaluated_candidates = screened_candidates
-            self._emit(
-                "screening_summary",
-                (
-                    f"代理模型初筛已完成：{len(state.candidates)} -> {len(screened_candidates)}，"
-                    f"请求 Top-{target_counts['requested_top_k']}。"
-                ),
-                {
-                    "screened_candidates": screened_candidates,
-                    "ranked_candidates": state.candidates,
-                    **target_counts,
-                },
-            )
-            self._emit_commentary(
-                "screening_summary",
-                {
-                    "input_count": len(state.candidates),
-                    "output_count": len(screened_candidates),
-                    "selected_candidates": screened_candidates[:3],
-                    **target_counts,
-                },
-            )
-        else:
-            state.screen_skipped = True
-            state.screened_candidates = []
-            state.evaluated_candidates = list(state.candidates)
-            self._emit(
-                "screening_summary",
-                f"已跳过代理模型初筛，将直接对全部 {len(state.candidates)} 个候选进入有限元校核。",
-                {"screened_candidates": state.candidates, "screen_skipped": True, **target_counts},
-            )
-            self._emit_commentary(
-                "screening_summary",
-                {
-                    "input_count": len(state.candidates),
-                    "output_count": len(state.candidates),
-                    "screen_skipped": True,
-                    **target_counts,
-                },
-            )
-
-        state.pending_confirmation = "fem_evaluation"
-        state.stage = "awaiting_fem_confirmation"
-        fem_targets = state.evaluated_candidates
-        preview_reasons = [candidate.get("selection_reason") for candidate in fem_targets[:3] if candidate.get("selection_reason")]
-        detail_suffix = f" 重点入选原因：{' | '.join(preview_reasons)}" if preview_reasons else ""
-        self._emit(
-            "confirmation_requested",
-            f"是否进行有限元校核？当前待校核样本 {len(fem_targets)} 个。{detail_suffix}",
-            {"confirmation_id": "fem_evaluation", "default": True, "candidate_count": len(fem_targets)},
-        )
-        return state
-
-    def _handle_fem_confirmation(self, state: ConversationState, approved: bool) -> ConversationState:
-        if state.task is None:
-            return state
-
-        if not approved:
-            state.pending_confirmation = None
-            state.stage = "paused_before_fem"
-            self._emit(
-                "conversation_paused",
-                "已暂停在有限元校核前。当前候选和初筛结果已保留，可稍后继续。",
-                {"stage": state.stage},
-            )
-            self._emit_commentary("conversation_paused", {"stage": state.stage})
-            return state
-
-        if hasattr(self.orchestrator, "prepare_candidates_for_fem"):
-            fem_designs = self.orchestrator.prepare_candidates_for_fem(state.task, state.evaluated_candidates)
-        else:
-            fem_designs = [
-                self.orchestrator.prepare_candidate_for_fem(state.task, candidate)
-                for candidate in state.evaluated_candidates
-            ]
-        results = [self.orchestrator.evaluate_prepared_candidate(state.task, design) for design in fem_designs]
-        self.orchestrator.persist_knowledge_records(state.task, fem_designs, results)
-        state.results = results
-        passed_count = sum(1 for result in results if result.get("verdict") == "通过")
-        state.pending_confirmation = "export_report"
-        state.stage = "awaiting_report_confirmation"
-
-        self._emit(
-            "fem_summary",
-            f"有限元校核完成：共 {len(results)} 个样本，其中通过 {passed_count} 个。",
-            {"results": results, "passed_count": passed_count},
-        )
-        self._emit_commentary(
-            "fem_summary",
-            {
-                "result_count": len(results),
-                "passed_count": passed_count,
-                "results": results[:3],
-            },
-        )
-        self._emit(
-            "confirmation_requested",
-            "是否导出设计报告？报告将包含工况摘要、代理模型选择理由、有限元结果解读和工程建议。",
-            {"confirmation_id": "export_report", "default": True},
-        )
-        return state
-
-    def _handle_report_confirmation(self, state: ConversationState, approved: bool) -> ConversationState:
-        if state.task is None:
-            return state
-
-        if approved:
-            state.report = self.orchestrator.generate_report(state.task, state.results, state.evaluated_candidates)
-            self._emit(
-                "report_summary",
-                (
-                    f"报告已导出：{state.report.get('markdown_path')} / "
-                    f"{state.report.get('pdf_path')}"
-                ),
-                {"report": state.report},
-            )
-            self._emit_commentary("report_summary", {"report": state.report})
-        else:
-            self._emit("report_summary", "已跳过报告导出。", {"report": None})
-            self._emit_commentary("report_summary", {"report": None, "skipped": True})
-
-        state.pending_confirmation = None
-        state.stage = "completed"
         return state

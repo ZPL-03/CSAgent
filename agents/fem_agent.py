@@ -13,9 +13,10 @@ from jinja2 import Template
 from abaqus.job_utils import compiler_environment, diagnose_failure, is_abaqus_available, read_tail_text, run_command, wait_for_result_file
 from agents.base import BaseAgent
 from core.config_loader import load_app_config
-from core.fem_input_contract import attach_design_revision, validate_fem_input_or_raise
+from core.fem_input_contract import attach_design_revision, design_revision_payload, validate_fem_input_or_raise
 from core.io_utils import read_json, write_json
 from core.paths import ABAQUS_RUNS_DIR, ABAQUS_TEMPLATE_DIR, IO_DIR, ROOT_DIR, to_project_relative_path
+from core.pressure_hull_profile import expand_layup_for_fem
 from core.schema_validator import validate_or_raise
 from core.task_contract import describe_boundary_conditions, describe_load_conditions
 
@@ -211,6 +212,11 @@ class FEMAgent(BaseAgent):
         annotated["boundary_summary"] = describe_boundary_conditions(candidate.get("boundary_conditions", {}))
         annotated["design_revision_id"] = candidate.get("design_revision_id")
         annotated["parent_design_revision_id"] = candidate.get("parent_design_revision_id")
+        annotated["solved_design"] = {
+            **deepcopy(design_revision_payload(candidate)),
+            "design_revision_id": candidate.get("design_revision_id"),
+            "parent_design_revision_id": candidate.get("parent_design_revision_id"),
+        }
         annotated["diagnosis_summary"] = self._diagnosis_summary(annotated)
         return annotated
 
@@ -227,14 +233,12 @@ class FEMAgent(BaseAgent):
             adjustment["strategy"] = "增大壳体网格尺寸以绕开局部畸变"
         elif failure_type == "geometry_issue":
             geometry["thickness_mm"] = round(min(max(geometry["thickness_mm"] + 0.5, 5.0), 20.0), 3)
-            geometry["imperfection_ratio"] = round(min(max(geometry["imperfection_ratio"], 0.001), 0.008), 6)
-            adjustment["strategy"] = "提高壁厚并收敛到稳定缺陷区间"
+            adjustment["strategy"] = "提高壁厚，保持初始几何缺陷条件不变"
         elif failure_type == "convergence_fail":
             adjusted.setdefault("analysis", {})
             adjusted["analysis"]["buckling_modes"] = int(adjusted["analysis"].get("buckling_modes", 8)) + 4
             geometry["thickness_mm"] = round(min(geometry["thickness_mm"] + 0.8, 20.0), 3)
-            geometry["imperfection_ratio"] = round(max(geometry["imperfection_ratio"] * 0.85, 0.001), 6)
-            adjustment["strategy"] = "增加特征值搜索规模、提高壁厚并降低缺陷幅值"
+            adjustment["strategy"] = "增加特征值搜索规模并提高壁厚，保持初始几何缺陷条件不变"
         elif failure_type == "pressure_negative":
             adjusted.setdefault("analysis", {})
             adjusted["analysis"]["buckling_modes"] = max(int(adjusted["analysis"].get("buckling_modes", 8)), 12) + 4
@@ -243,6 +247,7 @@ class FEMAgent(BaseAgent):
             adjustment["strategy"] = "清理临时文件后重试"
 
         adjusted["geometry"] = geometry
+        adjusted["layup"] = expand_layup_for_fem(adjusted.get("layup"), geometry)
         adjusted["last_adjustment"] = adjustment
         adjusted = attach_design_revision(adjusted, parent_revision_id=parent_revision_id)
         validate_fem_input_or_raise(adjusted)

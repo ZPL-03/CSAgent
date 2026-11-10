@@ -31,37 +31,80 @@ from workflow.event_store import WorkflowEventStore
 
 DEFAULT_INSTRUCTION_CASES = [
     {
-        "instruction": "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 8 个候选，初筛保留 3 个候选",
-        "expected": {"external_pressure_MPa": 30.0, "ultimate_pressure_min_MPa": 35.0, "candidate_count": 8, "screened_count": 3},
+        "instruction": "请设计复合材料耐压圆柱壳，工作压力 30 MPa，长度 500 mm，半径 100 mm，生成 8 个候选，初筛保留 3 个候选",
+        "expected": {
+            "external_pressure_MPa": 30,
+            "ultimate_pressure_min_MPa": 30,
+            "candidate_count": 8,
+            "screened_count": 3
+        }
     },
     {
-        "instruction": "面向深海设备舱的复合材料圆柱耐压壳，外压 28 MPa，极限压力目标不低于 36 MPa，两端简支，生成 8 个候选，初筛保留 3 个候选",
-        "expected": {"external_pressure_MPa": 28.0, "ultimate_pressure_min_MPa": 36.0, "candidate_count": 8, "screened_count": 3},
+        "instruction": "面向深海设备舱设计复合材料圆柱耐压壳，工作压力 28 MPa，长度 600 mm，半径 120 mm，两端简支，生成 8 个候选，初筛保留 3 个候选",
+        "expected": {
+            "external_pressure_MPa": 28,
+            "ultimate_pressure_min_MPa": 28,
+            "candidate_count": 8,
+            "screened_count": 3
+        }
     },
     {
-        "instruction": "Design a composite external-pressure cylindrical pressure hull for 25 MPa hydrostatic pressure, ultimate pressure at least 40 MPa, simply supported ends, generate 8 candidates and retain 3 screened candidates.",
-        "expected": {"external_pressure_MPa": 25.0, "ultimate_pressure_min_MPa": 40.0, "candidate_count": 8, "screened_count": 3},
+        "instruction": "Design a composite cylindrical pressure hull for 25 MPa hydrostatic pressure, length 500 mm, radius 100 mm, simply supported ends, generate 8 candidates and retain 3 screened candidates.",
+        "expected": {
+            "external_pressure_MPa": 25,
+            "ultimate_pressure_min_MPa": 25,
+            "candidate_count": 8,
+            "screened_count": 3
+        }
     },
     {
-        "instruction": "复合材料外压圆柱壳耐压设计，外压 32 MPa，极限压力不低于 42 MPa，可参考长度 520 mm、半径 105 mm、厚度 11 mm，但候选参数允许优化，生成 8 个候选，初筛保留 3 个候选",
-        "expected": {"external_pressure_MPa": 32.0, "ultimate_pressure_min_MPa": 42.0, "candidate_count": 8, "screened_count": 3},
+        "instruction": "复合材料耐压圆柱壳，工作压力 32 MPa，可参考长度 520 mm、半径 105 mm、厚度 11 mm，生成 8 个候选，初筛保留 3 个候选",
+        "expected": {
+            "external_pressure_MPa": 32,
+            "ultimate_pressure_min_MPa": 32,
+            "candidate_count": 8,
+            "screened_count": 3
+        }
     },
     {
-        "instruction": "请生成无人潜航器用复合材料耐压圆柱壳方案，外压 22 MPa，极限压力不低于 33 MPa，生成 8 个候选，初筛保留 3 个候选",
-        "expected": {"external_pressure_MPa": 22.0, "ultimate_pressure_min_MPa": 33.0, "candidate_count": 8, "screened_count": 3},
+        "instruction": "请设计无人潜航器用复合材料耐压圆柱壳，工作压力 22 MPa，长度 500 mm，半径 100 mm",
+        "expected": {
+            "external_pressure_MPa": 22,
+            "ultimate_pressure_min_MPa": 22,
+            "candidate_count": 8,
+            "screened_count": 3
+        },
+        "candidate_count_reply": "8",
+        "screen_count_reply": "3"
     },
     {
-        "instruction": "复合材料外压圆柱耐压壳，目标工况外压 35 MPa，极限压力不少于 45 MPa，要求两端固支，生成 8 个候选，初筛保留 3 个候选",
-        "expected": {"external_pressure_MPa": 35.0, "ultimate_pressure_min_MPa": 45.0, "candidate_count": 8, "screened_count": 3},
+        "instruction": "复合材料耐压圆柱壳，工作压力 35 MPa，要求两端固支，生成 8 个候选，初筛保留 3 个候选",
+        "expected": {
+            "external_pressure_MPa": 35,
+            "ultimate_pressure_min_MPa": 35,
+            "candidate_count": 8,
+            "screened_count": 3
+        }
     },
     {
-        "instruction": "为轻量化深海耐压舱设计复合材料圆柱壳，外压 18 MPa，极限压力不低于 30 MPa，生成 8 个候选，初筛保留 3 个候选",
-        "expected": {"external_pressure_MPa": 18.0, "ultimate_pressure_min_MPa": 30.0, "candidate_count": 8, "screened_count": 3},
+        "instruction": "为深海耐压舱设计轻量化复合材料圆柱壳，工作压力 18 MPa，长度 500 mm，半径 100 mm，生成 8 个候选",
+        "expected": {
+            "external_pressure_MPa": 18,
+            "ultimate_pressure_min_MPa": 18,
+            "candidate_count": 8,
+            "screened_count": 3
+        },
+        "screen_count_reply": "3"
     },
     {
-        "instruction": "Composite pressure hull preliminary design: external pressure 40 MPa, required ultimate pressure no less than 52 MPa, generate 8 candidate designs and retain 3 screened candidates.",
-        "expected": {"external_pressure_MPa": 40.0, "ultimate_pressure_min_MPa": 52.0, "candidate_count": 8, "screened_count": 3},
-    },
+        "instruction": "Composite cylindrical pressure hull design: working pressure 40 MPa, generate 8 candidate designs and retain 3 screened candidates.",
+        "expected": {
+            "external_pressure_MPa": 40,
+            "ultimate_pressure_min_MPa": 40,
+            "candidate_count": 8,
+            "screened_count": 3
+        }
+    }
 ]
 
 
@@ -222,8 +265,8 @@ def _validate_completed_state(
         raise AssertionError("工作流未完成知识回流")
     if not state.report:
         raise AssertionError("工作流未生成报告")
-    if not state.report.get("report_outputs"):
-        raise AssertionError("工作流未生成 FEM/总体/推荐方案报告交付件")
+    if set(state.report.get("report_outputs") or {}) != {"overall"}:
+        raise AssertionError("工作流未生成总体设计方案报告")
 
     _assert_unique_candidates(state.candidates)
     _assert_unique_candidates(state.evaluated_candidates)
@@ -276,7 +319,12 @@ def _run_case(case: dict[str, Any], output_dir: Path, use_real_fem: bool) -> dic
     )
 
     state = controller.start(instruction)
-    state = controller.continue_after_confirmation(state, True)
+    if state.pending_confirmation == "candidate_count":
+        state = controller.provide_quantity(state, str(case.get("candidate_count_reply") or ""))
+    if state.pending_confirmation == "screen_count":
+        state = controller.provide_quantity(state, str(case.get("screen_count_reply") or ""))
+    elif state.pending_confirmation == "screen_candidates":
+        state = controller.continue_after_confirmation(state, True)
     state = controller.continue_after_confirmation(state, True)
     state = controller.continue_after_confirmation(state, True)
     summary = _validate_completed_state(state, instruction, expected=expected)
@@ -308,7 +356,11 @@ def _normalize_instruction_case(item: Any) -> dict[str, Any] | None:
         if not instruction:
             return None
         expected = item.get("expected")
-        return {"instruction": instruction, "expected": expected} if isinstance(expected, dict) else {"instruction": instruction}
+        normalized = {"instruction": instruction, **({"expected": expected} if isinstance(expected, dict) else {})}
+        for key in ("candidate_count_reply", "screen_count_reply"):
+            if item.get(key) is not None:
+                normalized[key] = item[key]
+        return normalized
     return None
 
 

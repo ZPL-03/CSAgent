@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 import os
+from pathlib import Path
 
 import pytest
 
@@ -14,7 +15,12 @@ from core.id_utils import format_temp_candidate_id
 from core.llm_backend import LLMBackend
 from core.rag_engine import RAGEngine
 from core.schema_validator import SchemaValidationError, validate_or_raise
-from core.task_contract import requested_candidate_pool_size, requested_screen_top_k, task_payload_from_request
+from core.task_contract import (
+    normalize_task_payload,
+    requested_candidate_pool_size,
+    requested_screen_top_k,
+    task_payload_from_request,
+)
 from core.task_parser import TaskParser
 
 
@@ -24,6 +30,140 @@ class _FakeKnowledge:
 
     def format_snippets(self, _task, top_k=5):
         return list(self.snippets[:top_k])
+
+
+@pytest.mark.parametrize("reply", ["6", "6 个方案", "请生成6个候选", "生成6个候选方案"])
+def test_quantity_reply_accepts_natural_integer_answers(reply):
+    assert TaskParser().quantity_from_reply(reply, "total_candidates") == 6
+
+
+@pytest.mark.parametrize("reply", ["0", "-1", "保留-1个", "1.5", "100", "生成2个还是3个", ""])
+def test_quantity_reply_rejects_invalid_or_ambiguous_counts(reply):
+    with pytest.raises(ValueError):
+        TaskParser().quantity_from_reply(reply, "total_candidates")
+
+
+@pytest.mark.parametrize("preferences", [None, {}, {"total_candidates": None, "top_k_candidates": None}])
+@pytest.mark.parametrize("wrapped", [False, True])
+def test_structured_task_keeps_unspecified_quantities_pending(preferences, wrapped):
+    task = {} if preferences is None else {
+        "candidate_generation_preferences": dict(preferences),
+        "screening_preferences": dict(preferences),
+    }
+    payload = task_payload_from_request({"task": task}) if wrapped else normalize_task_payload(task)
+    assert payload["candidate_generation_preferences"]["total_candidates"] is None
+    assert payload["screening_preferences"]["top_k_candidates"] is None
+    assert requested_candidate_pool_size({"task": payload}) is None
+    assert requested_screen_top_k({"task": payload}) is None
+
+
+@pytest.mark.parametrize("field", [
+    "total_candidates", "top_k_candidates", "llm_candidates", "case_transfer_candidates", "doe_candidates",
+])
+@pytest.mark.parametrize("value", [-1, 1.5, 1.0, True, False, 61, "-1", "+1", "1.5", "1e1", "无效", "", float("nan"), float("inf")])
+def test_task_quantity_normalization_rejects_invalid_values(field, value):
+    key = "screening_preferences" if field == "top_k_candidates" else "candidate_generation_preferences"
+    with pytest.raises(ValueError, match="整数"):
+        normalize_task_payload({key: {field: value}})
+
+
+@pytest.mark.parametrize("field,value", [("total_candidates", 0), ("top_k_candidates", 0), ("top_k_candidates", 31)])
+def test_task_quantity_normalization_rejects_out_of_range_values(field, value):
+    key = "screening_preferences" if field == "top_k_candidates" else "candidate_generation_preferences"
+    with pytest.raises(ValueError, match="整数"):
+        normalize_task_payload({key: {field: value}})
+
+
+def test_task_quantity_normalization_preserves_valid_boundaries_and_source_zero():
+    payload = normalize_task_payload({
+        "candidate_generation_preferences": {
+            "total_candidates": " 60 ", "llm_candidates": 0, "case_transfer_candidates": "0", "doe_candidates": 60,
+        },
+        "screening_preferences": {"top_k_candidates": "30"},
+    })
+    assert payload["candidate_generation_preferences"] == {
+        "total_candidates": 60, "llm_candidates": 0, "case_transfer_candidates": 0, "doe_candidates": 60,
+        "source_allocation_mode": "explicit_counts",
+    }
+    assert payload["screening_preferences"]["top_k_candidates"] == 30
+
+
+@pytest.mark.parametrize("quantity_text,field,value", [
+    ("生成 1 个方案", "total_candidates", 1),
+    ("候选池总数为 60 个", "total_candidates", 60),
+    ("预筛保留 1 个", "top_k_candidates", 1),
+    ("初筛数量为 30", "top_k_candidates", 30),
+    ("5 个方案进入有限元", "top_k_candidates", 5),
+    ("初筛 Top-5", "top_k_candidates", 5),
+    ("Top-5", "top_k_candidates", 5),
+    ("Top-K 5", "top_k_candidates", 5),
+    ("generate 60 candidates", "total_candidates", 60),
+    ("keep 30 candidates", "top_k_candidates", 30),
+])
+def test_parser_and_quantity_reply_preserve_valid_counts(quantity_text, field, value):
+    parser = TaskParser()
+    task = parser.parse_instruction("工作压力 12 MPa，" + quantity_text)
+    payload = task_payload_from_request(task)
+    key = "candidate_generation_preferences" if field == "total_candidates" else "screening_preferences"
+    assert payload[key][field] == value
+    assert parser.quantity_from_reply(quantity_text, field) == value
+
+
+@pytest.mark.parametrize("quantity_text,field", [
+    ("生成 {value} 个方案", "total_candidates"),
+    ("候选池总数为 {value} 个", "total_candidates"),
+    ("预筛保留 {value} 个", "top_k_candidates"),
+    ("初筛数量为 {value}", "top_k_candidates"),
+    ("{value} 个方案进入有限元", "top_k_candidates"),
+    ("generate {value} candidates", "total_candidates"),
+    ("keep {value} candidates", "top_k_candidates"),
+])
+@pytest.mark.parametrize("value", ["-1", "+1", "1.5", "1.0", ".5", "0", "100"])
+def test_parser_and_quantity_reply_reject_the_same_invalid_counts(quantity_text, field, value):
+    text = quantity_text.format(value=value)
+    parser = TaskParser()
+    with pytest.raises(ValueError, match="整数"):
+        parser.parse_instruction("工作压力 12 MPa，" + text)
+    with pytest.raises(ValueError):
+        parser.quantity_from_reply(text, field)
+
+
+@pytest.mark.parametrize("field", ["total_candidates", "top_k_candidates"])
+@pytest.mark.parametrize("value", [-1, 1.5, True, "+1", "1.5", "无效"])
+def test_parser_rejects_invalid_quantity_overrides(field, value):
+    with pytest.raises(ValueError, match="整数"):
+        TaskParser().parse_instruction("工作压力 12 MPa", {field: value})
+
+
+def test_current_designs_fix_imperfection_without_rewriting_case_source(monkeypatch):
+    from copy import deepcopy
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = TaskParser().parse_instruction("工作压力 12 MPa，长度 500 mm，半径 100 mm，生成4个方案，预筛1个")
+    agent = CandidateGenAgent()
+    source = agent.doe_sampler.sample_candidates(task, 1, strict_solver_window=True)[0]
+    source["geometry"]["imperfection_ratio"] = 0.003
+    original = deepcopy(source)
+    migrated = agent._normalize_candidate(task, source, 1, "CASE_TRANSFER")
+    assert source == original
+    assert migrated["geometry"]["imperfection_ratio"] == 0.008
+    assert migrated["provenance"]["proposed_imperfection_ratio"] == 0.003
+    assert all(item["geometry"]["imperfection_ratio"] == 0.008 for item in agent.run(task))
+    for failure in ("geometry_issue", "convergence_fail"):
+        from agents.fem_agent import FEMAgent
+        from agents.orchestrator import OrchestratorAgent
+        fem_input = OrchestratorAgent().prepare_candidate_for_fem(task, migrated)
+        adjusted = FEMAgent().apply_adjustment(fem_input, failure, 0)
+        assert adjusted["geometry"]["imperfection_ratio"] == 0.008
+    with pytest.raises(ValueError, match="不作为设计变量"):
+        TaskParser().parse_instruction("工作压力 12 MPa，缺陷比 0.005")
+
+
+def test_initial_case_task_uses_fixed_analysis_defect_and_working_pressure():
+    from scripts.build_initial_cases import default_task
+
+    task = default_task("T700_Epoxy", 20.0)
+    assert task["geometry_envelope"]["imperfection_ratio"] == [0.008, 0.008]
+    assert task["design_targets"]["ultimate_pressure_min_MPa"] == 20.0
 
 
 def test_parser_reads_natural_language_pool_counts(monkeypatch):
@@ -128,7 +268,7 @@ def test_candidate_prompt_separates_user_facts_from_system_constraints(monkeypat
     assert "T700/Epoxy" not in user_fact_section
     assert "500.0" not in user_fact_section
     assert "T700/Epoxy" in user_prompt
-    assert "0.001-0.01" in user_prompt
+    assert "初始几何缺陷比固定为 0.008" in user_prompt
     assert "结构化任务 JSON" not in user_prompt
     assert "不要输出 JSON" in system_prompt
     assert "结构性能依据和制造/缺陷风险依据" in user_prompt
@@ -290,17 +430,23 @@ def test_candidate_source_targets_follow_default_ratio(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("instruction", "message"),
+    ("instruction", "field"),
     [
-        ("外压 30 MPa，初筛保留 3 个候选", "候选池总数"),
-        ("外压 30 MPa，生成 6 个候选", "初筛保留数量"),
-        ("生成 6 个候选，初筛保留 3 个候选", "外部静水压力"),
+        ("工作压力 30 MPa，初筛保留 3 个候选", "total_candidates"),
+        ("工作压力 30 MPa，生成 6 个候选", "top_k_candidates"),
     ],
 )
-def test_parser_requires_pool_and_screen_counts(monkeypatch, instruction, message):
+def test_parser_keeps_unspecified_counts_pending(monkeypatch, instruction, field):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    with pytest.raises(ValueError, match=message):
-        TaskParser().parse_instruction(instruction)
+    task = task_payload_from_request(TaskParser().parse_instruction(instruction))
+    key = "candidate_generation_preferences" if field == "total_candidates" else "screening_preferences"
+    assert task[key][field] is None
+    assert field not in task["user_input_facts"]["candidate_generation"]
+
+
+def test_parser_requires_working_pressure():
+    with pytest.raises(ValueError, match="外部静水压力"):
+        TaskParser().parse_instruction("生成 6 个候选，初筛保留 3 个候选")
 
 
 def test_candidate_generation_uses_three_initial_sources(monkeypatch):
@@ -424,7 +570,7 @@ def test_llm_candidates_are_extracted_from_engineering_natural_answer(monkeypatc
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = TaskParser().parse_instruction(
         "请为复合材料外压圆柱耐压壳设计方案，材料 T700/Epoxy，外压 30 MPa，几何参考长度约 500 mm，"
-        "半径约 100 mm，厚度约 10 mm，初始缺陷比参考 0.5%，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
+        "半径约 100 mm，厚度约 10 mm，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
     )
     agent = CandidateGenAgent()
 
@@ -455,7 +601,8 @@ def test_llm_candidates_are_extracted_from_engineering_natural_answer(monkeypatc
     assert candidates[0]["geometry"]["length_mm"] == 520.0
     assert candidates[0]["geometry"]["radius_mm"] == 108.0
     assert candidates[0]["geometry"]["thickness_mm"] == 11.0
-    assert candidates[0]["geometry"]["imperfection_ratio"] == 0.005
+    assert candidates[0]["geometry"]["imperfection_ratio"] == 0.008
+    assert candidates[0]["provenance"]["proposed_imperfection_ratio"] == 0.005
     assert candidates[0]["geometry"]["alpha_deg"] == 35.0
     assert candidates[0]["geometry"]["beta_deg"] == 65.0
     assert "S01" in candidates[0]["origin_summary"]
@@ -737,6 +884,7 @@ def test_orchestrator_run_uses_batch_fem_promotion(monkeypatch):
         candidate["source"] = source
     orchestrator = OrchestratorAgent.__new__(OrchestratorAgent)
     orchestrator.emit = lambda *_args, **_kwargs: None
+    orchestrator.last_ranked_candidates = []
     orchestrator.parse_instruction = lambda *_args, **_kwargs: task
     orchestrator.generate_candidates = lambda _task: candidates
     orchestrator.screen_candidates = lambda _task, _candidates: list(_candidates)
@@ -1051,6 +1199,8 @@ def _report_sample():
         "material_system": {"name": "T700/Epoxy"},
         "rationale": "兼顾环向刚度和制造角度。",
         "screening_summary": "PBIPF 公式初筛通过。",
+        "screening_rank": 1,
+        "screening_selected": True,
         "selection_reason": "代理模型排序靠前。",
         "surrogate_ultimate_pressure_MPa": 41.0,
         "asme_linear_buckling_pressure_MPa": 52.0,
@@ -1090,94 +1240,97 @@ def test_report_falls_back_to_structured_engineering_explanation(monkeypatch):
     assert agent._last_llm_explanation_used is False
 
 
-def test_report_tracks_llm_usage_per_artifact(monkeypatch, tmp_path):
+def test_report_tracks_llm_usage_in_single_artifact(monkeypatch, tmp_path):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task, results, candidates = _report_sample()
     agent = ReportGenAgent()
-
-    def overall(*args):
+    def render(*args):
         agent._last_llm_explanation_used = True
-        return "# CSAgent 耐压壳设计报告\n\n工程说明。"
-
-    def deterministic(*args):
-        return "# 结构化报告\n\n工程事实。"
-
-    monkeypatch.setattr(agent, "_render_markdown", overall)
-    monkeypatch.setattr(agent, "_render_fem_report_markdown", deterministic)
-    monkeypatch.setattr(agent, "_render_design_solution_markdown", deterministic)
-    report = agent.run({"task": task, "results": results, "candidates": candidates,
-                        "report_kind": "all", "output_dir": str(tmp_path)})
-
+        return "# CSAgent 总体设计方案报告\n\n工程说明。"
+    monkeypatch.setattr(agent, "_render_markdown", render)
+    report = agent.run({"task": task, "results": results, "candidates": candidates, "output_dir": str(tmp_path)})
     assert report["llm_explanation_used"] is True
+    assert set(report["report_outputs"]) == {"overall"}
     assert report["report_outputs"]["overall"]["llm_explanation_used"] is True
-    assert report["report_outputs"]["fem"]["llm_explanation_used"] is False
-    assert report["report_outputs"]["design_solution"]["llm_explanation_used"] is False
 
 
-def test_report_all_generates_overall_fem_and_solution_artifacts(monkeypatch, tmp_path):
+def test_report_generates_one_complete_design_document(monkeypatch, tmp_path):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task, results, candidates = _report_sample()
-    agent = ReportGenAgent()
-
-    report = agent.run(
-        {
-            "task": task,
-            "results": results,
-            "candidates": candidates,
-            "report_kind": "all",
-            "output_dir": str(tmp_path),
-        }
-    )
-
-    assert report["report_kind"] == "all"
-    assert set(report["report_outputs"]) == {"overall", "fem", "design_solution"}
-    assert report["markdown_path"].endswith("latest_report.md")
-    assert (tmp_path / "latest_report.md").is_file()
-    for key, title in {
-        "overall": "CSAgent 总体设计报告",
-        "fem": "CSAgent FEM 校核报告",
-        "design_solution": "CSAgent 推荐设计方案",
-    }.items():
-        payload = report["report_outputs"][key]
-        stem = ReportGenAgent.REPORT_ARTIFACTS[key][0]
-        markdown_path = tmp_path / f"{stem}.md"
-        assert payload["title"] == title
-        assert payload["report_kind"] == key
-        assert payload["markdown_path"] == str(markdown_path)
-        assert markdown_path.is_file()
-        assert title in markdown_path.read_text(encoding="utf-8")
-        if payload["pdf_generated"]:
-            assert payload["pdf_path"]
-            assert (tmp_path / f"{stem}.pdf").is_file()
-        else:
-            assert payload["pdf_path"] is None
+    candidates[0].update(screening_rank=1, screening_selected=True, rationale="采用角度组合平衡环向与轴向刚度")
+    extra = dict(candidates[0], candidate_id="TMP_2", display_name="TMP_2", screening_rank=2,
+                 screening_selected=False, rationale="保留较薄壁厚对比方案", selection_reason="排名低于本轮保留数量")
+    report = ReportGenAgent().run({"task": task, "results": results, "candidates": [*candidates, extra],
+                                   "output_dir": str(tmp_path)})
+    assert report["report_kind"] == "overall"
+    assert set(report["report_outputs"]) == {"overall"}
+    assert sorted(path.name for path in tmp_path.iterdir() if path.is_file()) == ["overall_design_report.md", "overall_design_report.pdf"]
+    text = Path(report["markdown_path"]).read_text(encoding="utf-8")
+    sections = ["设计需求与校核依据", "全部候选方案与生成依据", "代理预筛方案与筛选理由",
+                "有限元校核结果", "最终推荐设计方案", "工程解释与制造建议"]
+    assert [text.index("## " + title) for title in sections] == sorted(text.index("## " + title) for title in sections)
+    assert "候选 TMP_2" in text and extra["rationale"] in text
+    assert "排名低于本轮保留数量" in text
+    assert "当前没有同时具备完整通过证据" in text
 
 
-def test_design_solution_report_can_be_generated_before_fem(monkeypatch, tmp_path):
+def test_report_summarizes_provenance_without_internal_layup_dump(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    task, _results, candidates = _report_sample()
-    agent = ReportGenAgent()
+    task, results, candidates = _report_sample()
+    candidates[0]["provenance"] = {"source_layup": {"angles_deg": [90, -45] * 20},
+                                    "proposed_imperfection_ratio": 0.003}
+    candidates[0]["geometry"]["imperfection_ratio"] = 0.008
+    text = ReportGenAgent()._render_markdown(task, results, candidates)
+    assert "source_layup" not in text and "angles_deg" not in text
+    assert "来源提案缺陷比：0.003" in text
+    assert "固定分析条件为 0.008" in text
 
-    report = agent.run(
-        {
-            "task": task,
-            "results": [],
-            "candidates": candidates,
-            "report_kind": "design_solution",
-            "output_dir": str(tmp_path),
+
+def test_report_without_fem_never_claims_final_recommendation(monkeypatch, tmp_path):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, _, candidates = _report_sample()
+    report = ReportGenAgent().run({"task": task, "results": [], "candidates": candidates, "output_dir": str(tmp_path)})
+    assert set(report["report_outputs"]) == {"overall"}
+    assert "当前没有有限元结果" in report["content"]
+    assert "当前没有同时具备完整通过证据" in report["content"]
+
+
+@pytest.mark.parametrize("objective,expected", [("最小壳体质量", "TMP_1"), ("最小面密度", "TMP_2")])
+def test_final_recommendation_obeys_objective_and_requires_complete_evidence(monkeypatch, tmp_path, objective, expected):
+    from copy import deepcopy
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, _, candidates = _report_sample()
+    task["task"]["design_targets"]["primary_objective"] = objective
+    second = deepcopy(candidates[0])
+    second.update(candidate_id="TMP_2", display_name="TMP_2", surrogate_weight=14)
+    second["geometry"].update(length_mm=800, radius_mm=180)
+    candidates.append(second)
+    results = []
+    for index in (1, 2):
+        result = {
+            "candidate_id": f"C{index}", "session_candidate_id": f"TMP_{index}",
+            "status": "success", "verdict": "通过", "ultimate_pressure_MPa": 40,
+            "riks_limit_point_confirmed": True, "progressive_damage_complete": True,
+            "damage_state_output_complete": True,
+            "verification_scope": "composite_cylindrical_shell_submodel",
         }
-    )
-
-    markdown_path = tmp_path / "recommended_design_solution.md"
-    assert report["report_kind"] == "design_solution"
-    assert report["markdown_path"] == str(markdown_path)
-    assert set(report["report_outputs"]) == {"design_solution"}
-    assert markdown_path.is_file()
-    markdown = markdown_path.read_text(encoding="utf-8")
-    assert "CSAgent 推荐设计方案" in markdown
-    assert "尚未校核" in markdown
-    assert "CSAgent FEM 校核报告" not in markdown
-    assert not (tmp_path / "latest_report.md").exists()
+        for stage in ("service", "target"):
+            result[f"{stage}_pressure_check_status"] = "passed"
+            result[f"{stage}_stress_coverage"] = {"status": "complete", "checked_element_positions": 8,
+                                                 "expected_section_points": 8, "incomplete_element_positions": 0}
+        results.append(result)
+    agent = ReportGenAgent()
+    payload = agent._build_llm_explanation_payload(agent._build_structured_summary(task, results, candidates))
+    with pytest.raises(ValueError, match="重复执行"):
+        agent._validate_llm_engineering_text("建议对入选候选优先开展真实有限元复核。", payload)
+    agent._validate_llm_engineering_text("建议开展网格加密后的独立有限元复核。", payload)
+    report = agent.run({"task": task, "candidates": candidates, "results": results,
+                        "output_dir": str(tmp_path / "reports")})
+    assert f"- 推荐：{expected}" in report["content"]
+    for result in results:
+        result["damage_state_output_complete"] = False
+    report_text = agent._render_markdown(task, results, candidates)
+    assert "当前没有同时具备完整通过证据" in report_text
 
 
 def test_report_uses_llm_only_for_grounded_engineering_explanation(monkeypatch):
@@ -1211,8 +1364,7 @@ def test_report_uses_llm_only_for_grounded_engineering_explanation(monkeypatch):
     assert agent._last_llm_explanation_used is True
 
 
-@pytest.mark.parametrize("kind", ["overall", "fem", "design_solution"])
-def test_report_accepts_convertible_math_without_llm_retry(monkeypatch, kind):
+def test_report_accepts_convertible_math_without_llm_retry(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task, results, candidates = _report_sample()
     agent = ReportGenAgent()
@@ -1227,10 +1379,7 @@ def test_report_accepts_convertible_math_without_llm_retry(monkeypatch, kind):
 
     agent.llm_backend = MathBackend()
     summary = agent._build_structured_summary(task, results, candidates)
-    if kind == "overall":
-        text = agent._render_engineering_explanation(summary)
-    else:
-        text = agent._render_report_artifact_explanation(kind, summary)
+    text = agent._render_engineering_explanation(summary)
     assert "T700/Epoxy" in text and "P_ult" in text
     assert "**ODB**" in text
     assert "$" not in text and r"\(" not in text
@@ -1271,12 +1420,12 @@ def test_report_rejection_is_not_reported_as_solver_or_connection_failure(monkey
             return r"- 增加 $9999\,\mathrm{MPa}$ 要求。"
 
     agent.llm_backend = UnsupportedFactBackend()
-    agent._render_report_artifact_explanation("fem", agent._build_structured_summary(task, results, candidates))
+    agent._render_engineering_explanation(agent._build_structured_summary(task, results, candidates))
 
     assert not agent._last_llm_explanation_used
     rejection = [event[2] for event in events if event[2]["event_type"] == "report_explanation_rejected"]
     assert len(rejection) == 1
-    assert rejection[0]["payload"]["report_kind"] == "fem"
+    assert rejection[0]["payload"]["report_kind"] == "overall"
     assert "之外的数值" in rejection[0]["payload"]["reason"]
     assert "生成失败" not in rejection[0]["message"]
 
@@ -1520,7 +1669,7 @@ def test_report_fallback_uses_explicit_layup_not_unused_angle_parameters(monkeyp
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     agent = ReportGenAgent()
     text = agent._render_deterministic_engineering_explanation({
-        "screened_candidates": [{"alpha_deg": 65.233, "beta_deg": 60.581,
+        "all_candidates": [{"alpha_deg": 65.233, "beta_deg": 60.581,
                                   "layup": "[90/45/-45/0]", "material": "T700/Epoxy"}],
     })
     assert "[90/45/-45/0]" in text

@@ -112,7 +112,7 @@
       ],
       "properties": {
         "total_candidates": {
-          "type": "integer",
+          "type": ["integer", "null"],
           "minimum": 1,
           "maximum": 60
         },
@@ -143,7 +143,7 @@
       "required": ["top_k_candidates"],
       "properties": {
         "top_k_candidates": {
-          "type": "integer",
+          "type": ["integer", "null"],
           "minimum": 1,
           "maximum": 30
         }

@@ -133,7 +133,7 @@ def test_report_button_allows_partial_evaluated_results(monkeypatch) -> None:
 
         window._update_button_states()
         assert window.report_button.isEnabled() is True
-        assert [item["candidate_id"] for item in window._report_candidate_set()] == ["TMP_1"]
+        assert [item["candidate_id"] for item in window._report_candidate_set()] == ["TMP_1", "TMP_2"]
 
         captured = {}
         window._run_action = lambda action, payload, status_text: captured.update(
@@ -142,7 +142,7 @@ def test_report_button_allows_partial_evaluated_results(monkeypatch) -> None:
         window._start_report()
 
         assert captured["action"] == "report"
-        assert [item["candidate_id"] for item in captured["payload"]["candidates"]] == ["TMP_1"]
+        assert [item["candidate_id"] for item in captured["payload"]["candidates"]] == ["TMP_1", "TMP_2"]
         assert [item["candidate_id"] for item in captured["payload"]["results"]] == ["C1"]
     finally:
         window.close()
@@ -284,7 +284,7 @@ def test_runtime_stage_is_displayed_while_waiting_snapshot_is_being_executed(mon
         app.processEvents()
 
 
-def test_design_solution_report_uses_candidates_before_fem(monkeypatch, tmp_path) -> None:
+def test_report_requires_fem_results(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
     window = MainWindow()
@@ -293,23 +293,8 @@ def test_design_solution_report_uses_candidates_before_fem(monkeypatch, tmp_path
         window.session.candidates = [_candidate("TMP_1"), _candidate("TMP_2")]
         window.session.screened_candidates = [_candidate("TMP_2")]
         window.report_output_dir = tmp_path
-        index = window.report_type_selector.findData("design_solution")
-        window.report_type_selector.setCurrentIndex(index)
-
         window._update_button_states()
-        assert window.report_button.isEnabled() is True
-
-        captured = {}
-        window._run_action = lambda action, payload, status_text: captured.update(
-            {"action": action, "payload": payload, "status_text": status_text}
-        )
-        window._start_report()
-
-        assert captured["action"] == "report"
-        assert captured["payload"]["report_kind"] == "design_solution"
-        assert captured["payload"]["output_dir"] == str(tmp_path)
-        assert [item["candidate_id"] for item in captured["payload"]["candidates"]] == ["TMP_2"]
-        assert captured["payload"]["results"] == []
+        assert window.report_button.isEnabled() is False
     finally:
         window.close()
         app.processEvents()
@@ -324,9 +309,6 @@ def test_fem_report_uses_output_dir_and_evaluated_results(monkeypatch, tmp_path)
         window.session.candidates = [_candidate("TMP_1"), _candidate("TMP_2")]
         window.session.results_by_session_id = {"TMP_1": {"candidate_id": "C1", "session_candidate_id": "TMP_1"}}
         window.report_output_dir = tmp_path
-        index = window.report_type_selector.findData("fem")
-        window.report_type_selector.setCurrentIndex(index)
-
         window._update_button_states()
         assert window.report_button.isEnabled() is True
 
@@ -337,9 +319,9 @@ def test_fem_report_uses_output_dir_and_evaluated_results(monkeypatch, tmp_path)
         window._start_report()
 
         assert captured["action"] == "report"
-        assert captured["payload"]["report_kind"] == "fem"
+        assert "report_kind" not in captured["payload"]
         assert captured["payload"]["output_dir"] == str(tmp_path)
-        assert [item["candidate_id"] for item in captured["payload"]["candidates"]] == ["TMP_1"]
+        assert [item["candidate_id"] for item in captured["payload"]["candidates"]] == ["TMP_1", "TMP_2"]
         assert [item["candidate_id"] for item in captured["payload"]["results"]] == ["C1"]
     finally:
         window.close()
@@ -467,8 +449,8 @@ def test_workbench_non_destructive_buttons_execute_connected_actions(monkeypatch
     window = MainWindow()
     try:
         window.example_button.click()
-        assert "外压 30 MPa" in window.input_line.text()
-        assert "生成 12 个候选" in window.input_line.text()
+        assert "工作压力 30 MPa" in window.input_line.text()
+        assert "长度 500 mm" in window.input_line.text()
 
         approvals: list[bool] = []
         window._respond_confirmation = lambda approved: approvals.append(approved)
@@ -565,13 +547,10 @@ def test_primary_workflow_buttons_click_through_to_pipeline(monkeypatch, tmp_pat
             }
         }
         window.report_output_dir = tmp_path
-        report_index = window.report_type_selector.findData("fem")
-        if report_index >= 0:
-            window.report_type_selector.setCurrentIndex(report_index)
         window._update_button_states()
         window.report_button.click()
         assert calls[-1][0] == "report"
-        assert calls[-1][1]["report_kind"] == "fem"
+        assert "report_kind" not in calls[-1][1]
         assert calls[-1][1]["output_dir"] == str(tmp_path)
         assert calls[-1][1]["results"][0]["candidate_id"] == "C1"
     finally:
@@ -898,7 +877,53 @@ def test_thread_completion_refreshes_session_stage(monkeypatch) -> None:
         app.processEvents()
 
 
-def test_loaded_example_keeps_geometry_as_candidate_variables(monkeypatch) -> None:
+def test_quantity_send_keeps_same_session_and_clears_input(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window.session.workflow_run_id = "RUN_QUANTITY"
+        window.session.stage = "awaiting_candidate_count"
+        window.session.pending_confirmation = "candidate_count"
+        captured = {}
+        window._run_action = lambda action, payload, status_text: captured.update(action=action, payload=payload)
+        window._update_button_states()
+        assert not window.confirm_yes_button.isEnabled() and not window.confirm_no_button.isEnabled()
+        window.input_line.setText("生成 6 个方案")
+        window.generate_button.click()
+        assert captured["action"] == "conversation_quantity"
+        assert captured["payload"]["state"].workflow_run_id == "RUN_QUANTITY"
+        assert captured["payload"]["reply"] == "生成 6 个方案"
+        assert window.input_line.text() == ""
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_manual_screen_asks_for_missing_quantity_before_worker(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window.session.task = TaskParser().parse_instruction("工作压力 20 MPa，生成 4 个候选")
+        window.session.candidates = [_candidate(f"TMP_{i}") for i in range(1, 5)]
+        captured = {}
+        window._run_action = lambda action, payload, status_text: captured.update(action=action, payload=payload)
+        window._start_screen()
+        assert window.session.pending_confirmation == "manual_screen_count" and not captured
+        window.input_line.setText("-1")
+        window._start_conversation()
+        assert not captured and window.session.pending_confirmation == "manual_screen_count"
+        window.input_line.setText("保留 2 个方案")
+        window._start_conversation()
+        assert captured["action"] == "screen" and captured["payload"]["top_k"] == 2
+        assert window.input_line.text() == ""
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_loaded_example_specifies_dimensions_and_waits_for_quantities(monkeypatch) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()
     window = MainWindow()
@@ -906,11 +931,15 @@ def test_loaded_example_keeps_geometry_as_candidate_variables(monkeypatch) -> No
         window._load_example_prompt()
         text = window.input_line.text()
 
-        assert "外压 30 MPa" in text
-        assert "生成 12 个候选" in text
-        assert "初筛保留 5 个候选" in text
-        assert "长度" not in text
-        assert "半径" not in text
+        assert "工作压力 30 MPa" in text
+        assert "极限压力" not in text
+        task = TaskParser().parse_instruction(text)["task"]
+        assert task["candidate_generation_preferences"]["total_candidates"] is None
+        assert task["screening_preferences"]["top_k_candidates"] is None
+        assert task["geometry_envelope"]["length_mm"] == [500, 500]
+        assert task["geometry_envelope"]["radius_mm"] == [100, 100]
+        assert task["geometry_envelope"]["thickness_mm"][0] < task["geometry_envelope"]["thickness_mm"][1]
+        assert task["geometry_envelope"]["imperfection_ratio"] == [0.008, 0.008]
         assert "厚度" not in text
         assert "初始缺陷" not in text
     finally:

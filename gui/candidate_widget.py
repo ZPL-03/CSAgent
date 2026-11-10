@@ -371,6 +371,7 @@ class CandidateWidget(QWidget):
         geometry_items = "".join(
             f"<li>{GEOMETRY_LABELS.get(key, key)}: {_format_number(value)}</li>"
             for key, value in geometry.items()
+            if key != "imperfection_ratio"
         )
         material_items = "".join(f"<li>{key}: {value}</li>" for key, value in material.items())
         target_items = "".join(f"<li>{key}: {value}</li>" for key, value in design_targets.items())
@@ -415,6 +416,8 @@ class CandidateWidget(QWidget):
             f"线性屈曲压力来源：{candidate.get('linear_buckling_source') or '-'}</p>"
             "<h4>几何设计参数</h4><ul>"
             f"{geometry_items}</ul>"
+            "<h4>分析条件</h4>"
+            f"<p>初始几何缺陷比：{_format_number(geometry.get('imperfection_ratio'), 6)}；不参与设计变量搜索。</p>"
             "<h4>材料系统</h4><ul>"
             f"{material_items}</ul>"
             "<h4>载荷与边界</h4><ul>"

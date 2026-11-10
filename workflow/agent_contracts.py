@@ -36,7 +36,7 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
         llm_policy="不调用 LLM。",
         memory_policy="写入 workflow_snapshots 中的 task、user_input_facts、geometry_reference 和 fixed_geometry 字段；不写入案例库。",
         event_policy="发出 workflow_started、node_started、tool_started、tool_completed、node_completed 或 node_failed 事件。",
-        failure_policy="缺少候选池总数或初筛数量时直接失败，主流程不启动。",
+        failure_policy="缺少工作压力或水深时明确报错；候选数与预筛数缺失时在执行对应阶段前等待用户补充，不自动填数。",
     ),
     AgentContract(
         node_name="generate_candidates",
@@ -102,7 +102,7 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
         tool_name="generate_report",
         responsibility="基于结构化任务、候选和有限元结果生成 Markdown/PDF 报告。",
         input_contract="task 字典、results 列表、candidates 列表。",
-        output_contract="report 字典；包含当前报告 Markdown/PDF 路径、正文、LLM 工程解释状态，以及 overall/fem/design_solution 三类 report_outputs。",
+        output_contract="report 字典；包含总体设计方案报告 Markdown/PDF 路径、正文、LLM 工程解释状态和仅含 overall 的 report_outputs。",
         llm_policy="只在工程解释和制造建议中受控调用 LLM；数值、排序和结论由结构化数据确定。",
         memory_policy="读取当前快照、候选池、有限元结果和知识回流状态，写入 report、report_outputs 和 data/results 报告文件。",
         event_policy="发出 report_generation_started、report_completed、report_failed、tool_completed 或 node_failed 事件。",

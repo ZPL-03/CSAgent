@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 import numpy as np
 
-from core.config_loader import load_app_config, load_material_db, load_param_ranges
+from core.config_loader import fixed_imperfection_ratio, load_app_config, load_material_db, load_param_ranges
 from core.id_utils import format_candidate_id
 from core.pressure_hull_profile import (
     layup_pattern,
@@ -93,6 +93,7 @@ class DOESampler:
                 low = float(base["min"])
                 high = float(base["max"])
             bounds_by_feature[feature] = {"min": low, "max": high}
+        bounds_by_feature["imperfection_ratio"] = {"min": fixed_imperfection_ratio(), "max": fixed_imperfection_ratio()}
         return bounds_by_feature
 
     def _lhs(self, dimensions: int, samples: int, seed_offset: int = 0) -> np.ndarray:

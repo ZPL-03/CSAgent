@@ -46,6 +46,7 @@ from PyQt6.QtWidgets import (
 from agents.orchestrator import OrchestratorAgent
 from core.config_loader import load_app_config, load_llm_config
 from core.conversation_flow import ConversationFlowController, ConversationState
+from core.task_parser import TaskParser, quantity_request_message
 from core.paths import ASSETS_DIR, CASE_LIBRARY_DIR, CASES_DIR, CONFIG_DIR, RESULTS_DIR, ensure_project_dirs
 from core.task_contract import (
     describe_boundary_conditions,
@@ -171,6 +172,11 @@ class PipelineWorker(QObject):
                 self.finished.emit(self.action, {"state": updated})
                 return
 
+            if self.action == "conversation_quantity":
+                updated = controller.provide_quantity(self.payload["state"], self.payload["reply"])
+                self.finished.emit(self.action, {"state": updated})
+                return
+
             if self.action == "generate":
                 instruction = self.payload["instruction"]
                 task = orchestrator.parse_instruction(instruction, overrides=self.payload.get("overrides"))
@@ -181,10 +187,13 @@ class PipelineWorker(QObject):
             if self.action == "screen":
                 task = self.payload["task"]
                 candidates = self.payload["candidates"]
+                if self.payload.get("top_k") is not None:
+                    task = orchestrator.update_task_quantity(task, "top_k_candidates", self.payload["top_k"])
                 screened = orchestrator.screen_candidates(task, candidates)
                 self.finished.emit(
                     self.action,
                     {
+                        "task": task,
                         "screened_candidates": screened,
                         "ranked_candidates": getattr(orchestrator, "last_ranked_candidates", []),
                     },
@@ -293,7 +302,6 @@ class PipelineWorker(QObject):
                     task,
                     results,
                     candidates,
-                    report_kind=str(self.payload.get("report_kind") or "all"),
                     output_dir=self.payload.get("output_dir"),
                 )
                 self.finished.emit(self.action, {"report": report})
@@ -596,9 +604,6 @@ class MainWindow(QMainWindow):
         self.refresh_button = QPushButton(self.locale.text("button.refresh_knowledge"))
         self.open_report_button = QPushButton(self.locale.text("button.open_report"))
         self.export_data_button = QPushButton(self.locale.text("button.export_data"))
-        self.report_type_selector = QComboBox()
-        self._populate_report_type_selector()
-        self.report_type_selector.setMinimumHeight(42)
         self.report_dir_button = QPushButton(self.locale.text("button.report_dir"))
         self.report_dir_button.setToolTip(self.locale.text("tooltip.report_dir"))
         self.reset_view_button = QPushButton()
@@ -724,25 +729,6 @@ class MainWindow(QMainWindow):
             )
         )
 
-    def _populate_report_type_selector(self) -> None:
-        current_kind = None
-        if hasattr(self, "report_type_selector"):
-            current_kind = self.report_type_selector.currentData()
-            self.report_type_selector.blockSignals(True)
-            self.report_type_selector.clear()
-        report_options = [
-            ("report.kind.all", "all"),
-            ("report.kind.overall", "overall"),
-            ("report.kind.fem", "fem"),
-            ("report.kind.design_solution", "design_solution"),
-        ]
-        for text_key, kind in report_options:
-            self.report_type_selector.addItem(self.locale.text(text_key), kind)
-        if current_kind:
-            index = self.report_type_selector.findData(current_kind)
-            if index >= 0:
-                self.report_type_selector.setCurrentIndex(index)
-        self.report_type_selector.blockSignals(False)
 
     def _build_layout(self) -> None:
         input_action_layout = QHBoxLayout()
@@ -855,7 +841,6 @@ class MainWindow(QMainWindow):
         right_layout.addLayout(action_grid)
         right_layout.addWidget(self.log_header)
         right_layout.addWidget(self.log_widget, 1)
-        right_layout.addWidget(self.report_type_selector)
         right_layout.addWidget(self.report_dir_button)
         right_layout.addWidget(self.report_button)
         right_layout.addWidget(self.export_data_button)
@@ -2383,7 +2368,6 @@ class MainWindow(QMainWindow):
         self.open_report_button.clicked.connect(self._open_latest_report)
         self.export_data_button.clicked.connect(self._export_session_data)
         self.report_dir_button.clicked.connect(self._choose_report_output_dir)
-        self.report_type_selector.currentIndexChanged.connect(lambda: self._update_button_states())
         self.live_visual_toggle_button.clicked.connect(self._toggle_live_visual_mode)
         self.reset_view_button.clicked.connect(self.live_result_view.reset_view)
         self.fit_view_button.clicked.connect(self.live_result_view.fit_view)
@@ -2450,7 +2434,6 @@ class MainWindow(QMainWindow):
         self.refresh_button.setText(self.locale.text("button.refresh_knowledge"))
         self.open_report_button.setText(self.locale.text("button.open_report"))
         self.export_data_button.setText(self.locale.text("button.export_data"))
-        self._populate_report_type_selector()
         self.report_dir_button.setText(self.locale.text("button.report_dir"))
         self.report_dir_button.setToolTip(self.locale.text("tooltip.report_dir"))
         self.reset_view_button.setText("")
@@ -2497,15 +2480,15 @@ class MainWindow(QMainWindow):
         self.generate_button.setEnabled(not busy)
         self.input_line.setEnabled(not busy)
         self.run_selector.setEnabled(not busy)
-        self.confirm_yes_button.setEnabled(not busy and self.session.pending_confirmation is not None)
-        self.confirm_no_button.setEnabled(not busy and self.session.pending_confirmation is not None)
+        is_confirmation = self.session.pending_confirmation in {"screen_candidates", "fem_evaluation", "export_report"}
+        self.confirm_yes_button.setEnabled(not busy and is_confirmation)
+        self.confirm_no_button.setEnabled(not busy and is_confirmation)
         for button in [
             self.example_button,
             self.trace_button,
             self.refresh_button,
             self.open_report_button,
             self.export_data_button,
-            self.report_type_selector,
             self.report_dir_button,
             self.reset_view_button,
             self.live_visual_toggle_button,
@@ -2527,14 +2510,11 @@ class MainWindow(QMainWindow):
         has_results = bool(self.session.results_by_session_id)
         has_pending_current = bool(self._pending_candidates(self.session.current_candidates)) if has_candidates else False
         has_pending_display = bool(self._pending_candidates(self.session.display_candidates)) if has_candidates else False
-        report_kind = str(self.report_type_selector.currentData() or "all")
-        if report_kind == "design_solution":
-            report_ready = bool(self.session.task and (self.session.candidates or self.session.screened_candidates))
-        else:
-            report_ready = bool(self.session.task and has_results)
+        report_ready = bool(self.session.task and has_results)
 
-        self.confirm_yes_button.setEnabled(self.session.pending_confirmation is not None)
-        self.confirm_no_button.setEnabled(self.session.pending_confirmation is not None)
+        is_confirmation = self.session.pending_confirmation in {"screen_candidates", "fem_evaluation", "export_report"}
+        self.confirm_yes_button.setEnabled(is_confirmation)
+        self.confirm_no_button.setEnabled(is_confirmation)
         self.screen_button.setEnabled(has_candidates and self.session.pending_confirmation is None)
         self.evaluate_selected_button.setEnabled(has_pending_display and self.session.pending_confirmation is None)
         self.evaluate_all_button.setEnabled(has_pending_current and self.session.pending_confirmation is None)
@@ -2559,8 +2539,8 @@ class MainWindow(QMainWindow):
         generated_count = len(self.session.candidates)
         pending_count = len(self._pending_candidates(self.session.current_candidates)) if self.session.current_candidates else 0
         passed_count = sum(1 for result in self.session.results_by_session_id.values() if result.get("verdict") == "通过")
-        candidate_pool_target = requested_candidate_pool_size(self.session.task) if self.session.task else 0
-        requested_top_k = requested_screen_top_k(self.session.task) if self.session.task else 0
+        candidate_pool_target = (requested_candidate_pool_size(self.session.task) or "待确认") if self.session.task else 0
+        requested_top_k = (requested_screen_top_k(self.session.task) or "待确认") if self.session.task else 0
         stage_display = self._display_stage(self._current_ui_stage())
         pending_label_zh = "待初筛" if self.session.stage == "awaiting_screen_confirmation" else "待 FEM"
         pending_label_en = "Pending Screening" if self.session.stage == "awaiting_screen_confirmation" else "Pending FEM"
@@ -2611,6 +2591,10 @@ class MainWindow(QMainWindow):
     def _display_stage(self, stage: str | None) -> str:
         value = str(stage or "idle")
         zh = {
+            "awaiting_candidate_count": "待候选数量",
+            "awaiting_screen_count": "待预筛数量",
+            "wait_candidate_count": "待候选数量",
+            "wait_screen_count": "待预筛数量",
             "idle": "等待输入",
             "parsing": "任务解析中",
             "generate_candidates": "候选生成中",
@@ -2630,6 +2614,10 @@ class MainWindow(QMainWindow):
             "failed": "失败",
         }
         en = {
+            "awaiting_candidate_count": "Candidate Count",
+            "awaiting_screen_count": "Screening Count",
+            "wait_candidate_count": "Candidate Count",
+            "wait_screen_count": "Screening Count",
             "idle": "Idle",
             "parsing": "Parsing",
             "generate_candidates": "Generating",
@@ -2684,6 +2672,8 @@ class MainWindow(QMainWindow):
 
     def _display_confirmation_gate(self, gate: str | None) -> str:
         mapping = {
+            "candidate_count": "audit.candidate_count",
+            "screen_count": "audit.screen_count",
             "screen_candidates": "audit.confirm_screen",
             "fem_evaluation": "audit.confirm_fem",
             "export_report": "audit.confirm_report",
@@ -3190,6 +3180,23 @@ class MainWindow(QMainWindow):
         instruction = self.input_line.text().strip()
         if not instruction:
             return
+        if self.session.pending_confirmation == "manual_screen_count":
+            self.chat_widget.add_message("USER", instruction)
+            self.input_line.clear()
+            try:
+                count = TaskParser().quantity_from_reply(instruction, "top_k_candidates", len(self.session.candidates))
+            except ValueError as exc:
+                self.chat_widget.add_message("SYSTEM", str(exc))
+                return
+            self._run_action("screen", {"task": self.session.task, "candidates": self.session.candidates, "top_k": count},
+                             "正在执行代理模型初筛")
+            return
+        if self.session.pending_confirmation in {"candidate_count", "screen_count"}:
+            self.chat_widget.add_message("USER", instruction)
+            self.input_line.clear()
+            self._run_action("conversation_quantity", {"state": self.session.to_flow_state(), "reply": instruction},
+                             "正在处理方案数量并推进流程")
+            return
         self.session = PipelineSession(instruction=instruction)
         self._live_visual_mode = "auto"
         self._selected_live_candidate = None
@@ -3205,7 +3212,7 @@ class MainWindow(QMainWindow):
 
     def _load_example_prompt(self) -> None:
         self.input_line.setText(
-            "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 12 个候选，初筛保留 5 个候选"
+            self.locale.text("chat.empty.user_prompt")
         )
         self.input_line.setFocus()
 
@@ -3397,7 +3404,7 @@ class MainWindow(QMainWindow):
         return json_path, csv_path
 
     def _respond_confirmation(self, approved: bool) -> None:
-        if self.session.pending_confirmation is None:
+        if self.session.pending_confirmation not in {"screen_candidates", "fem_evaluation", "export_report"}:
             return
         label = self.locale.text("user.continue") if approved else self.locale.text("user.pause")
         self.chat_widget.add_message("USER", label)
@@ -3414,20 +3421,9 @@ class MainWindow(QMainWindow):
     def _selected_candidates_for_evaluation(self) -> list[dict]:
         return self.workbench_candidate_widget.selected_candidates()
 
-    def _design_solution_candidate_set(self) -> list[dict]:
-        if self.session.screened_candidates:
-            return list(self.session.screened_candidates)
-        if self.session.candidates:
-            return list(self.session.candidates)
-        return list(self.session.current_candidates)
 
     def _report_candidate_set(self) -> list[dict]:
-        evaluated = set(self.session.results_by_session_id.keys())
-        return [
-            candidate
-            for candidate in self.session.display_candidates
-            if str(candidate.get("candidate_id")) in evaluated
-        ]
+        return list(self.session.display_candidates)
 
     def _ordered_report_results(self) -> list[dict]:
         ordered_results: list[dict] = []
@@ -3444,6 +3440,13 @@ class MainWindow(QMainWindow):
 
     def _start_screen(self) -> None:
         if not self.session.task or not self.session.candidates:
+            return
+        if requested_screen_top_k(self.session.task) is None:
+            self.session.pending_confirmation = "manual_screen_count"
+            self.session.stage = "awaiting_screen_count"
+            self.chat_widget.add_message("ORCHESTRATOR", quantity_request_message("screen_count", len(self.session.candidates)))
+            self._update_button_states()
+            self.input_line.setFocus()
             return
         self._run_action(
             "screen",
@@ -3480,16 +3483,10 @@ class MainWindow(QMainWindow):
     def _start_report(self) -> None:
         if not self.session.task:
             return
-        report_kind = str(self.report_type_selector.currentData() or "all")
         ordered_results = self._ordered_report_results()
-        if report_kind == "design_solution":
-            report_candidates = self._design_solution_candidate_set()
-            if not report_candidates:
-                return
-        else:
-            report_candidates = self._report_candidate_set()
-            if not ordered_results:
-                return
+        report_candidates = self._report_candidate_set()
+        if not ordered_results:
+            return
         output_dir = str(self.report_output_dir) if self.report_output_dir else None
         self._run_action(
             "report",
@@ -3497,7 +3494,6 @@ class MainWindow(QMainWindow):
                 "task": self.session.task,
                 "results": ordered_results,
                 "candidates": report_candidates,
-                "report_kind": report_kind,
                 "output_dir": output_dir,
             },
             "正在生成报告",
@@ -3641,6 +3637,11 @@ class MainWindow(QMainWindow):
                 self.session.pending_confirmation = "screen_candidates"
                 self._refresh_design_views()
 
+        elif sender == "FLOW" and event_type == "quantity_requested":
+            self.session.pending_confirmation = payload.get("confirmation_id")
+            self.session.stage = "awaiting_candidate_count" if self.session.pending_confirmation == "candidate_count" else "awaiting_screen_count"
+            self._update_button_states()
+
         elif sender == "FLOW" and event_type == "screening_summary":
             ranked_candidates = payload.get("ranked_candidates")
             if isinstance(ranked_candidates, list) and ranked_candidates:
@@ -3678,7 +3679,7 @@ class MainWindow(QMainWindow):
             self._refresh_design_views()
 
     def _handle_finished(self, action: str, payload: dict) -> None:
-        if action in {"conversation_start", "conversation_continue"}:
+        if action in {"conversation_start", "conversation_continue", "conversation_quantity"}:
             session = PipelineSession.from_flow_state(payload["state"])
             self._apply_session(session)
             self._refresh_run_selector()
@@ -3701,6 +3702,9 @@ class MainWindow(QMainWindow):
             )
 
         elif action == "screen":
+            self.session.task = payload.get("task") or self.session.task
+            self.session.pending_confirmation = None
+            self.session.stage = "screened"
             ranked_candidates = payload.get("ranked_candidates")
             if isinstance(ranked_candidates, list) and ranked_candidates:
                 self.session.candidates = ranked_candidates
@@ -3724,7 +3728,7 @@ class MainWindow(QMainWindow):
             passed_count = sum(1 for item in payload["results"] if item.get("verdict") == "通过")
             self.chat_widget.add_message(
                 "SYSTEM",
-                f"手动入口：本轮 ABAQUS 校核完成，新增结果 {len(payload['results'])} 个，其中通过 {passed_count} 个。",
+                f"手动入口：ABAQUS 校核完成，返回结果 {len(payload['results'])} 个，其中通过 {passed_count} 个。",
             )
 
         elif action == "report":
@@ -3773,8 +3777,8 @@ class MainWindow(QMainWindow):
         task_payload = task_payload_from_request(task)
         material = task_payload.get("material_system", {})
         generated_count = len(self.session.candidates)
-        candidate_pool_target = requested_candidate_pool_size(task)
-        requested_top_k = requested_screen_top_k(task)
+        candidate_pool_target = requested_candidate_pool_size(task) or "待确认"
+        requested_top_k = requested_screen_top_k(task) or "待确认"
         effective_top_k = effective_screen_top_k(task, generated_count)
         return (
             "<h3>当前任务</h3>"

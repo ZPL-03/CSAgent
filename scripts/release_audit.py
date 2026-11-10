@@ -841,7 +841,7 @@ class ReleaseAudit:
                 time.sleep(0.01)
 
         def build_runtime_session() -> PipelineSession:
-            instruction = "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
+            instruction = "请设计复合材料耐压圆柱壳，工作压力 30 MPa，长度 500 mm，半径 100 mm，生成 6 个候选，初筛保留 3 个候选"
             task = TaskParser().parse_instruction(instruction)
             candidates = DOESampler().sample_candidates(task, n_samples=6, start_index=1, strict_solver_window=True)
             screened = ScreenerAgent().run({"task": task, "candidates": candidates})
@@ -869,7 +869,7 @@ class ReleaseAudit:
             window.chat_widget.clear()
             window.chat_widget.add_message(
                 "USER",
-                "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选",
+                "请设计复合材料耐压圆柱壳，工作压力 30 MPa，长度 500 mm，半径 100 mm，生成 6 个候选，初筛保留 3 个候选",
             )
             window.chat_widget.add_message(
                 "ORCHESTRATOR",
@@ -1067,14 +1067,16 @@ class ReleaseAudit:
         self.add("案例库编号", not errors, f"{len(paths)} 条案例连续且身份一致" if not errors else "; ".join(errors[:12]))
 
     def check_latest_report(self) -> None:
-        report_paths = sorted((ROOT / "data/results").glob("RUN_*/latest_report.md"))
+        report_paths = sorted(set((ROOT / "data/results").glob("RUN_*/latest_report.md")) |
+                              set((ROOT / "data/results").glob("RUN_*/overall_design_report.md")))
         if not report_paths:
             self.add("最新报告", True, "当前没有会话报告；报告属于运行时输出")
             return
         invalid = []
         for path in report_paths:
             text = path.read_text(encoding="utf-8")
-            if not text.startswith("# CSAgent 耐压壳设计报告") or "### 工程解释与制造建议" in text:
+            expected = "# CSAgent 总体设计方案报告" if path.name == "overall_design_report.md" else "# CSAgent 耐压壳设计报告"
+            if not text.startswith((expected, "# CSAgent 总体设计报告")) or "### 工程解释与制造建议" in text:
                 invalid.append(path.parent.name)
         self.add("最新报告", not invalid, f"{len(report_paths)} 组会话报告标题和工程解释后处理正确" if not invalid else ", ".join(invalid))
 

@@ -14,14 +14,19 @@ CSAgent 多智能体智能设计平台面向复合材料外压圆柱耐压壳智
 
 - 壳体类型：外压圆柱耐压壳 `CYLINDRICAL`
 - 几何变量：`length_mm`、`radius_mm`、`thickness_mm`
-- 铺层变量：`alpha_deg`、`beta_deg`、`imperfection_ratio`
+- 铺层变量：`alpha_deg`、`beta_deg`
+- 初始几何缺陷：`imperfection_ratio=0.008`（8‰），属于固定分析条件，不参与设计变量搜索；取值由 `config/param_ranges.yaml` 的 `analysis_assumptions` 管理
 - 材料体系：`T700/Epoxy`、`T800G/5228`、`M40J/TDE-85`、`IM7-8552`
-- 工况：外部静水压力 `external_pressure_MPa`
-- 目标：极限压力不低于 `ultimate_pressure_min_MPa`，并按面密度或质量目标排序
-- 流程参数：候选池总数和初筛保留数由自然语言明确指定
+- 工况：用户所需工作压力，内部保存为外部静水压力 `external_pressure_MPa`
+- 目标：有限元承载能力满足工作压力，并按厚度、面密度、质量或承压目标比较方案
+- 流程参数：采用用户指定的候选总数和预筛保留数；未指定时，分别在生成前、预筛前通过聊天询问
 - 候选来源初始比例：`LLM:案例迁移:DOE = 2:1:1`，实际来源统计以有效候选为准
 
-自然语言中明确给出的长度、半径、厚度、铺层角或缺陷比默认写入 `fixed_geometry`，作为候选生成和有限元输入必须满足的几何条件；只有字段附近出现“约、参考、附近、设计中心、左右”等参考语义时，对应字段才写入 `geometry_reference`，用于设计中心和几何包络。任务可直接给定外压，也可给定工作水深；水深按海水密度 `1025 kg/m³` 和重力加速度 `9.80665 m/s²` 换算表压。未单独给定极限压力目标时，目标采用当前服务外压，不使用固定 30 MPa 占位值。
+默认示例为“请设计复合材料耐压圆柱壳，工作压力 30 MPa，长度 500 mm，半径 100 mm，优先轻量化。”明确给出的长度、半径、厚度和铺层角作为固定约束；含“约、参考、附近”等语义的数值作为参考范围。未指定的几何尺寸由 LLM、案例迁移和 DOE 在工程参数域内形成候选，不要求用户补齐所有尺寸。初始几何缺陷统一取 8‰，与此冲突的输入会明确报错。任务也可给定工作水深，按海水密度 `1025 kg/m³` 和重力加速度 `9.80665 m/s²` 换算工作压力。校核目标默认等于工作压力，不要求用户另填极限压力；历史任务中明确指定的额外极限压力约束保留在任务契约中。
+
+总体设计方案报告输出为同一内容的 `overall_design_report.md/pdf`，依次包含设计需求、全部候选与生成依据、代理预筛结果及理由、有限元校核、最终推荐和工程建议。未校核候选不计入有限元通过统计；缺少完整容量或目标比较数据时不作最终推荐。工艺说明属于评审建议，不表示制造工艺已经验证。
+
+求解重试产生的设计修订保存在结果的 `solved_design` 中，案例回流和报告目标比较使用实际求解尺寸；初始候选及其生成依据单独保留。外部候选必须满足固定缺陷条件才能进入正式求解。
 
 ## LLM 后端
 
@@ -50,7 +55,7 @@ P_PBIPF = d1 * lg(Q) * t / R
         + d0
 ```
 
-其中 `Q` 为 ASME RD-1172 计算得到的线性屈曲压力，`Ir_permille` 为千分比缺陷值。候选合同中的 `imperfection_ratio` 以比例保存，例如 `0.005`；计算描述符时显式乘以 `1000` 转为 `5`。候选初筛阶段不调用 Abaqus；系统先用 `core/pressure_hull_profile.py` 计算 `asme_linear_buckling_pressure_MPa`，再作为 PBIPF 公式输入。公式系数和单位口径位于 `config/param_ranges.yaml`，层合板刚度由 `core/pressure_hull_profile.py` 按经典层合板理论计算。训练阶段的标准化只用于拟合输入，运行时使用工程描述符单位系数。
+其中 `Q` 为 ASME RD-1172 计算得到的线性屈曲压力，`Ir_permille` 为千分比缺陷值。候选合同中的 `imperfection_ratio` 以比例保存，当前候选为 `0.008`；计算描述符时显式乘以 `1000` 转为 `8`。候选初筛阶段不调用 Abaqus；系统先用 `core/pressure_hull_profile.py` 计算 `asme_linear_buckling_pressure_MPa`，再作为 PBIPF 公式输入。公式系数和单位口径位于 `config/param_ranges.yaml`，层合板刚度由 `core/pressure_hull_profile.py` 按经典层合板理论计算。训练阶段的标准化只用于拟合输入，运行时使用工程描述符单位系数。
 
 ## 智能体
 
@@ -147,14 +152,14 @@ D:\anaconda3\envs\AGENT\python.exe scripts\run_natural_language_acceptance.py --
 批量生成初始案例：
 
 ```powershell
-D:\anaconda3\envs\AGENT\python.exe scripts\build_initial_cases.py --reset --count 5 --task-count 1 --pressures 30 --target-pressure 35
+D:\anaconda3\envs\AGENT\python.exe scripts\build_initial_cases.py --reset --count 5 --task-count 1 --pressures 30
 ```
 
 `--reset` 会清理现有案例、任务、报告、运行记录、求解输入输出、Abaqus 工件、案例记忆 collection 和代理公式校准文件，从空库重新计数；项目知识文档、知识图谱和项目检索 collection 保留。该操作会删除真实结果，应先核对并备份。初始案例使用参数范围内的拉丁超立方采样；`C<N>` 在求解前原子预占，`CASE_N` 只在完整结果入库时按顺序分配，两者独立。服务与目标压力全部铺层覆盖、渐进损伤输出或确认极限点证据不完整的结果只保留在求解记录中，不占案例号。批量建库使用 `--record-task` 时记录 `TASK_N` 台账；GUI 会话同时保留 `RUN_…`、`TASK_N`、`TMP_N` 追踪。
 
 ## 有限元说明
 
-自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出。进入 Abaqus 前，`core/fem_input_contract.py` 必须确认候选包含完整圆柱壳几何、显式逐层角度、材料参数、外压、边界、设计目标和稳定 `design_revision_id`；运行时脚本再次校验同一合同，不对缺失材料、铺层、几何或目标静默使用默认值。Riks 作业正常完成或具有匹配的后峰受控终止证据，且 ODB 载荷路径出现明确后峰下降时，才确认极限点；观测最大 LPF、未收敛末帧或达到增量上限不能写成极限压力。已收敛帧的各铺层应力按二维 Hashin 公式计算首次铺层失效起始压力和目标压力处失效指数，并保留单元号、铺层积分点和控制失效模式；该结果是损伤起始证据，不是渐进损伤极限强度。未运行渐进损伤模型时，几何非线性极限点、首次铺层失效与材料极限强度分开记录，不生成材料强度通过结论。求解日志、状态文件、输入文件和 ODB 作为审计证据保留。失败重试改变厚度、缺陷或分析设置时生成新的 `design_revision_id` 并记录 `parent_design_revision_id`，有限元结果按实际修订号回写。材料库覆盖 `T700/Epoxy`、`T800G/5228`、`M40J/TDE-85` 和 `IM7-8552`。
+自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出。进入 Abaqus 前，`core/fem_input_contract.py` 必须确认候选包含完整圆柱壳几何、显式逐层角度、材料参数、外压、边界、设计目标和稳定 `design_revision_id`；运行时脚本再次校验同一合同，不对缺失材料、铺层、几何或目标静默使用默认值。Riks 作业正常完成或具有匹配的后峰受控终止证据，且 ODB 载荷路径出现明确后峰下降时，才确认极限点；观测最大 LPF、未收敛末帧或达到增量上限不能写成极限压力。已收敛帧的各铺层应力按二维 Hashin 公式计算首次铺层失效起始压力和目标压力处失效指数，并保留单元号、铺层积分点和控制失效模式；该结果是损伤起始证据，不是渐进损伤极限强度。未运行渐进损伤模型时，几何非线性极限点、首次铺层失效与材料极限强度分开记录，不生成材料强度通过结论。求解日志、状态文件、输入文件和 ODB 作为审计证据保留。失败重试改变厚度或分析设置时生成新的 `design_revision_id` 并记录 `parent_design_revision_id`，有限元结果按实际修订号回写。材料库覆盖 `T700/Epoxy`、`T800G/5228`、`M40J/TDE-85` 和 `IM7-8552`。
 
 CS_LLM 的 FEM-ready 候选通过 `core/fem_candidate_transfer.py` 导入。导入器只接受完整 JSON 服务响应，复核合同版本、正式有限元表格 SHA256、候选数量和编号、每个 `design_revision_id`、候选来源、历史筛选角色、当前未求解状态、FEM 输入完整性和总体 `design_fingerprint`；Markdown 只用于展示，不参与机器输入。候选角色区分同几何历史基线、同几何探索和最近邻迁移探索，任何历史参考值都不能写成当前 Abaqus 通过结论。命令行入口为 `python scripts/import_csllm_fem_candidates.py <response.json>`，验证后的候选包写入 `data/io/`。`python scripts/run_csllm_fem_candidates.py <response.json> --candidate-id TMP_N` 将指定候选送入原有正式编号、仿真队列和 Abaqus 链路；求解完成后统一执行知识回流，保留 `design_revision_id`、源表行号、源表 SHA256、A/B/D 复算证据、边界实现和服务/目标压力 Hashin 证据。求解成功表示作业完成，设计是否通过由结果中的 `verdict` 和设计校核状态判定。
 

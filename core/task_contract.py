@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+import re
 from typing import Any, Dict, Iterable
 
 
@@ -21,10 +22,10 @@ DEFAULT_DESIGN_TARGETS = {
     "primary_objective": "最小壳体质量",
 }
 DEFAULT_SCREENING_PREFERENCES = {
-    "top_k_candidates": 5,
+    "top_k_candidates": None,
 }
 DEFAULT_CANDIDATE_GENERATION_PREFERENCES = {
-    "total_candidates": 10,
+    "total_candidates": None,
     "llm_candidates": None,
     "case_transfer_candidates": None,
     "doe_candidates": None,
@@ -79,11 +80,25 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
-def _safe_int(value: Any, default: int) -> int:
-    try:
-        return int(float(value))
-    except (TypeError, ValueError):
-        return default
+def validate_quantity(value: Any, field: str, available: int | None = None) -> int:
+    """校验显式数量，不把非法值截断或替换为默认值。"""
+    limits = {
+        "total_candidates": ("候选方案数量", 1, 60),
+        "top_k_candidates": ("预筛保留数量", 1, min(30, available if available is not None else 30)),
+        "llm_candidates": ("LLM 来源数量", 0, 60),
+        "case_transfer_candidates": ("案例迁移来源数量", 0, 60),
+        "doe_candidates": ("DOE 来源数量", 0, 60),
+    }
+    if field not in limits:
+        raise ValueError(f"不支持的数量字段：{field}。")
+    label, minimum, maximum = limits[field]
+    message = f"{label}需要输入 {minimum} 至 {maximum} 的整数。"
+    if isinstance(value, bool) or not isinstance(value, (int, str)) or not re.fullmatch(r"[0-9]+", str(value).strip()):
+        raise ValueError(message)
+    number = int(value)
+    if not minimum <= number <= maximum:
+        raise ValueError(message)
+    return number
 
 
 def _normalize_range(value: Any, fallback: list[float]) -> list[float]:
@@ -193,8 +208,6 @@ def normalize_load_conditions(load_conditions: Any) -> Dict[str, Any]:
         return normalized
 
     text = str(load_conditions or "").strip()
-    import re
-
     match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:MPa|兆帕)", text, flags=re.IGNORECASE)
     pressure = _safe_float(match.group(1), DEFAULT_EXTERNAL_PRESSURE_MPA) if match else DEFAULT_EXTERNAL_PRESSURE_MPA
     return load_condition_payload(DEFAULT_LOAD_TYPE, pressure)
@@ -270,7 +283,10 @@ def normalize_screening_preferences(preferences: Dict[str, Any] | None) -> Dict[
     if not isinstance(preferences, dict):
         return normalized
     top_k_value = preferences.get("top_k_candidates", normalized["top_k_candidates"])
-    normalized["top_k_candidates"] = int(max(1, min(_safe_int(top_k_value, normalized["top_k_candidates"]), 30)))
+    if top_k_value is None:
+        normalized["top_k_candidates"] = None
+        return normalized
+    normalized["top_k_candidates"] = validate_quantity(top_k_value, "top_k_candidates")
     return normalized
 
 
@@ -279,13 +295,15 @@ def normalize_candidate_generation_preferences(preferences: Dict[str, Any] | Non
     if not isinstance(preferences, dict):
         return normalized
     total_value = preferences.get("total_candidates", normalized["total_candidates"])
-    normalized["total_candidates"] = int(max(1, min(_safe_int(total_value, normalized["total_candidates"]), 60)))
+    normalized["total_candidates"] = (
+        None if total_value is None else validate_quantity(total_value, "total_candidates")
+    )
     explicit_sources = False
     for key in ["llm_candidates", "case_transfer_candidates", "doe_candidates"]:
         if preferences.get(key) is None:
             normalized[key] = None
             continue
-        normalized[key] = int(max(0, min(_safe_int(preferences.get(key), 0), 60)))
+        normalized[key] = validate_quantity(preferences[key], key)
         explicit_sources = True
     normalized["source_allocation_mode"] = (
         "explicit_counts" if explicit_sources else str(preferences.get("source_allocation_mode") or "ratio_2_1_1")
@@ -317,6 +335,7 @@ def normalize_task_payload(
     }
     normalized["design_targets"] = {
         **deepcopy(DEFAULT_DESIGN_TARGETS),
+        "ultimate_pressure_min_MPa": normalized["load_conditions"]["external_pressure_MPa"],
         **dict(normalized.get("design_targets", {})),
     }
 
@@ -367,8 +386,8 @@ def summarize_task(task: Dict[str, Any]) -> Dict[str, str]:
         "application": normalized_task["application"],
         "load_conditions": describe_load_conditions(normalized_task["load_conditions"]),
         "boundary_conditions": describe_boundary_conditions(normalized_task["boundary_conditions"]),
-        "candidate_pool": f"候选池目标 {normalized_task['candidate_generation_preferences']['total_candidates']} 个",
-        "top_k": f"初筛保留 Top-{normalized_task['screening_preferences']['top_k_candidates']}",
+        "candidate_pool": f"候选池目标 {normalized_task['candidate_generation_preferences']['total_candidates'] or '待确认'}",
+        "top_k": f"初筛保留 {normalized_task['screening_preferences']['top_k_candidates'] or '待确认'}",
         "objective": (
             f"P_ult >= {normalized_task['design_targets']['ultimate_pressure_min_MPa']} MPa，"
             f"{normalized_task['design_targets']['primary_objective']}"
@@ -376,19 +395,22 @@ def summarize_task(task: Dict[str, Any]) -> Dict[str, str]:
     }
 
 
-def requested_candidate_pool_size(task: Dict[str, Any] | None) -> int:
+def requested_candidate_pool_size(task: Dict[str, Any] | None) -> int | None:
     if not isinstance(task, dict) or not task:
         raise ValueError("缺少任务记录，无法读取候选池总数。")
     normalized_task = task_payload_from_request(task)
-    return int(normalized_task["candidate_generation_preferences"]["total_candidates"])
+    value = normalized_task["candidate_generation_preferences"]["total_candidates"]
+    return int(value) if value is not None else None
 
 
-def requested_screen_top_k(task: Dict[str, Any] | None) -> int:
+def requested_screen_top_k(task: Dict[str, Any] | None) -> int | None:
     if not isinstance(task, dict) or not task:
         raise ValueError("缺少任务记录，无法读取初筛保留数量。")
     normalized_task = task_payload_from_request(task)
-    return int(normalized_task["screening_preferences"]["top_k_candidates"])
+    value = normalized_task["screening_preferences"]["top_k_candidates"]
+    return int(value) if value is not None else None
 
 
 def effective_screen_top_k(task: Dict[str, Any] | None, available_count: int) -> int:
-    return max(0, min(requested_screen_top_k(task), max(int(available_count), 0)))
+    requested = requested_screen_top_k(task)
+    return max(0, min(requested, max(int(available_count), 0))) if requested is not None else 0
