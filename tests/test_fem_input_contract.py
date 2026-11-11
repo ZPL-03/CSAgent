@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import importlib.util
+from importlib.machinery import ModuleSpec
+import sys
 from copy import deepcopy
 from pathlib import Path
 
@@ -29,12 +31,12 @@ CS_LLM_ENGINE = (
 
 
 def _load_csllm_engine():
-    spec = importlib.util.spec_from_file_location("csllm_fem_ready_design_engine", CS_LLM_ENGINE)
-    if spec is None or spec.loader is None:
-        raise RuntimeError("无法加载 CS_LLM FEM-ready 引擎。")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    package_name = "_csllm_contract_scripts"
+    if package_name not in sys.modules:
+        spec = ModuleSpec(package_name, loader=None, is_package=True)
+        spec.submodule_search_locations = [str(CS_LLM_ENGINE.parent)]
+        sys.modules[package_name] = importlib.util.module_from_spec(spec)
+    return importlib.import_module(f"{package_name}.fem_ready_design_engine")
 
 
 def _generated_candidate() -> dict:
