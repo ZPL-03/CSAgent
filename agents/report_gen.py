@@ -64,6 +64,7 @@ class ReportGenAgent(BaseAgent):
             "screening_rank": candidate.get("screening_rank"),
             "screening_selected": candidate.get("screening_selected"),
             "surrogate_ultimate_pressure_MPa": candidate.get("surrogate_ultimate_pressure_MPa"),
+            "surrogate_prediction_status": candidate.get("surrogate_prediction_status"),
             "asme_linear_buckling_pressure_MPa": candidate.get("asme_linear_buckling_pressure_MPa"),
             "rank_score": candidate.get("rank_score"),
             "weight_kg_per_m2": candidate.get("surrogate_weight") or candidate.get("weight_kg_per_m2"),

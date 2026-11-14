@@ -1,4 +1,4 @@
-"""按数据集划分拟合压力预筛模型，输出交叉验证与测试误差。"""
+"""使用有限元 Q 拟合线性压力公式，分别评估回归与 ASME 代入误差。"""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 from scipy.stats import spearmanr
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
-from sklearn.model_selection import GroupKFold, GroupShuffleSplit
+from sklearn.model_selection import train_test_split
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -19,12 +19,8 @@ if str(ROOT) not in sys.path:
 
 from core.pressure_regression import fit_pressure_regression  # noqa: E402
 from core.surrogate_dataset import (  # noqa: E402
-    DATA, digest, load_dataset, runtime_features,
+    DATA, DESCRIPTORS, digest, load_dataset, load_regression_dataset, runtime_features,
 )
-
-
-def evaluate(coefficients: dict, features: np.ndarray) -> np.ndarray:
-    return features @ np.array([coefficients[f"d{i}"] for i in range(1, 4)]) + coefficients["d0"]
 
 
 def metrics(target: np.ndarray, prediction: np.ndarray) -> dict:
@@ -37,7 +33,9 @@ def metrics(target: np.ndarray, prediction: np.ndarray) -> dict:
         "count": len(target), "rmse_MPa": float(np.sqrt(mean_squared_error(target, prediction))),
         "mae_MPa": float(mean_absolute_error(target, prediction)), "r2": float(r2_score(target, prediction)) if len(target) > 1 else None,
         "mape_pct": float(np.mean(np.abs(relative)) * 100), "nonpositive_count": int(np.sum(prediction <= 0)),
-        "max_overprediction_MPa": float(max(0.0, np.max(prediction - target))), "max_overprediction_pct": float(max(0.0, np.max(relative) * 100)),
+        "min_prediction_MPa": float(np.min(prediction)),
+        "max_overprediction_MPa": float(max(0.0, np.max(prediction - target))),
+        "max_overprediction_pct": float(max(0.0, np.max(relative) * 100)),
     }
 
 
@@ -51,38 +49,8 @@ def screening_metrics(target: np.ndarray, prediction: np.ndarray) -> dict:
     return result
 
 
-def material_metrics(frame: pd.DataFrame, prediction: np.ndarray) -> dict:
-    return {str(material): screening_metrics(group.ultimate_pressure_MPa.to_numpy(), prediction[group.index.to_numpy()])
-            for material, group in frame.groupby("material")}
-
-
-def split_design_groups(groups: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    splitter = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=42)
-    training, testing = next(splitter.split(np.zeros(len(groups)), groups=groups))
-    if set(groups[training]) & set(groups[testing]):
-        raise ValueError("建模集与测试集存在共享设计")
-    return training, testing
-
-
-def cross_validate(x: np.ndarray, y: np.ndarray, groups: np.ndarray) -> tuple[dict, pd.DataFrame]:
-    splitter = GroupKFold(n_splits=5, shuffle=True, random_state=42)
-    predictions = {name: np.full(len(y), np.nan) for name in ("identity", "softplus")}
-    assignments = np.full(len(y), -1)
-    folds = []
-    for fold, (training, testing) in enumerate(splitter.split(x, y, groups)):
-        if set(groups[training]) & set(groups[testing]):
-            raise ValueError("交叉验证设计组交叉")
-        fold_report = {"fold": fold, "training_count": len(training), "testing_count": len(testing), "models": {}}
-        assignments[testing] = fold
-        for link in predictions:
-            model = fit_pressure_regression(x[training], y[training], link)
-            predictions[link][testing] = model.predict(x[testing])
-            fold_report["models"][link] = model.to_dict()
-        folds.append(fold_report)
-    report = {"folds": folds, "group_overlap_count": 0,
-              "metrics": {name: screening_metrics(y, value) for name, value in predictions.items()}}
-    return report, pd.DataFrame({"fold": assignments, "design_group": groups,
-                                 "target_MPa": y, **{name + "_MPa": value for name, value in predictions.items()}})
+def split_regression_rows(count: int) -> tuple[np.ndarray, np.ndarray]:
+    return train_test_split(np.arange(count), test_size=0.25, random_state=15)
 
 
 def main() -> None:
@@ -91,62 +59,56 @@ def main() -> None:
     args = parser.parse_args()
     if args.output.exists():
         raise ValueError("输出目录已存在，评估证据不覆盖")
-    dataset, metadata = load_dataset()
-    features, all_groups, feature_audit = runtime_features(dataset)
-    training, testing = split_design_groups(all_groups)
-    frame = dataset.iloc[training].reset_index(drop=True)
-    held_out = dataset.iloc[testing].reset_index(drop=True)
-    x, groups = features[training], all_groups[training]
-    y = frame.ultimate_pressure_MPa.to_numpy()
-    validation, rows = cross_validate(x, y, groups)
-    baseline_record = json.loads((DATA / "baseline_validation.json").read_text(encoding="utf-8"))
-    baseline_coefficients = baseline_record["coefficients"]
-    validation["baseline"] = screening_metrics(y, evaluate(baseline_coefficients, x))
-    eligible = [name for name, values in validation["metrics"].items() if values["nonpositive_count"] == 0]
-    if not eligible:
-        raise ValueError("所有回归链接均出现非正预测")
-    selected = min(eligible, key=lambda name: validation["metrics"][name]["rmse_MPa"])
-    model = fit_pressure_regression(x, y, selected)
-    # 测试集不参与链接选型和系数拟合。
-    hold_x, hold_groups = features[testing], all_groups[testing]
-    hold_y = held_out.ultimate_pressure_MPa.to_numpy()
-    predicted, baseline = model.predict(hold_x), evaluate(baseline_coefficients, hold_x)
-    hold_metrics = screening_metrics(hold_y, predicted)
-    baseline_metrics = screening_metrics(hold_y, baseline)
-    accepted = all(hold_metrics[name] < baseline_metrics[name] for name in ("rmse_MPa", "mae_MPa"))
-    accepted = accepted and hold_metrics["spearman"] >= baseline_metrics["spearman"] and hold_metrics["nonpositive_count"] == 0
+    # ASME 代入仅做应用评估，不参与系数求解。
+    regression, regression_metadata = load_regression_dataset()
+    x, y = regression[DESCRIPTORS].to_numpy(), regression.maxP.to_numpy()
+    training, testing = split_regression_rows(len(regression))
+    model = fit_pressure_regression(x[training], y[training])
+    predicted = model.predict(x)
+
+    deployment, _ = load_dataset()
+    deployment_x, groups, feature_audit = runtime_features(deployment)
+    deployed_prediction = model.predict(deployment_x)
+    deployment_target = deployment.ultimate_pressure_MPa.to_numpy()
     report = {
-        "schema_version": 2, "status": "validated_candidate" if accepted else "rejected_holdout_metrics",
-        "selection_rule": "五折分组验证中无非正预测的模型按 RMSE 选型；测试集 RMSE、MAE 严格优于基线，Spearman 不低于基线",
-        "published": False, "model": model.to_dict(), "baseline_coefficients": baseline_coefficients,
-        "baseline_formula_fingerprint": baseline_record["formula_fingerprint"], "dataset_sha256": metadata["sha256"],
-        "split": {"method": "GroupShuffleSplit", "random_state": 42, "test_group_fraction": 0.2,
-                  "group_fields": ["material_elastic_constants", "physical_layup", "length_mm", "inner_radius_mm", "thickness_mm"],
-                  "sample_count": len(dataset), "training_count": len(training), "testing_count": len(testing),
-                  "training_group_count": len(set(groups)), "testing_group_count": len(set(hold_groups)),
-                  "group_overlap_count": 0},
-        "cross_validation": validation, "testing": {"candidate": hold_metrics, "baseline": baseline_metrics},
-        "material_metrics": {
-            "cross_validation": material_metrics(frame, rows[selected + "_MPa"].to_numpy()),
-            "testing": material_metrics(held_out, predicted),
+        "schema_version": 3, "status": "evaluated", "hash_format": "utf8_lf", "model_type": "linear", "model": model.to_dict(),
+        "descriptor_contract": {
+            "training_q_source": "finite_element_eigenvalue", "prediction_q_source": "ASME_RD_1172",
+            "asme_radius_reference": "outer", "descriptor_radius_reference": "inner",
+            "imperfection_input": "permille", "imperfection_ratio_to_permille": 1000,
         },
-        "training_count": len(y), "training_feature_min": x.min(axis=0).tolist(), "training_feature_max": x.max(axis=0).tolist(),
-        "testing_outside_feature_range_count": int(np.sum(np.any((hold_x < x.min(axis=0)) | (hold_x > x.max(axis=0)), axis=1))),
+        "split": {"method": "train_test_split", "random_state": 15, "test_fraction": 0.25,
+                  "sample_count": len(regression), "training_count": len(training), "testing_count": len(testing)},
+        "regression_evaluation": {"q_source": regression_metadata["q_source"],
+            "training": screening_metrics(y[training], predicted[training]),
+            "testing": screening_metrics(y[testing], predicted[testing])},
+        "deployment_evaluation": {"q_source": "ASME_RD_1172", "population": "complete_dataset_not_independent_holdout",
+            "sample_count": len(deployment), "design_group_count": len(set(groups)),
+            "metrics": screening_metrics(deployment_target, deployed_prediction),
+            "materials": {str(material): screening_metrics(group.ultimate_pressure_MPa.to_numpy(), deployed_prediction[group.index.to_numpy()])
+                          for material, group in deployment.groupby("material")}},
+        "training_feature_min": x[training].min(axis=0).tolist(), "training_feature_max": x[training].max(axis=0).tolist(),
+        "deployment_outside_feature_range_count": int(np.sum(np.any((deployment_x < x[training].min(axis=0)) | (deployment_x > x[training].max(axis=0)), axis=1))),
         "stiffness_max_abs_error": feature_audit["stiffness_max_abs_error"],
-        "dataset_metadata_sha256": digest(DATA / "dataset_metadata.json"),
+        "data_hashes": {str(p.relative_to(ROOT)).replace("\\", "/"): digest(p) for p in (
+            DATA / "regression_dataset.csv", DATA / "regression_metadata.json", DATA / "design_dataset.csv", DATA / "dataset_metadata.json")},
         "code_hashes": {str(p.relative_to(ROOT)).replace("\\", "/"): digest(p) for p in (
             Path(__file__), ROOT / "core/surrogate_dataset.py", ROOT / "core/pressure_regression.py",
-            ROOT / "core/surrogate_model.py", ROOT / "core/pressure_hull_profile.py", ROOT / "abaqus/cylindrical_geometry.py")},
+            ROOT / "core/surrogate_model.py", ROOT / "core/io_utils.py", ROOT / "core/pressure_hull_profile.py", ROOT / "abaqus/cylindrical_geometry.py")},
     }
     args.output.mkdir(parents=True)
-    rows.insert(0, "sample_id", frame.sample_id)
-    rows.to_csv(args.output / "cross_validation.csv", index=False, encoding="utf-8")
-    pd.DataFrame({"sample_id": held_out.sample_id, "design_group": hold_groups, "target_MPa": hold_y,
-                  "candidate_MPa": predicted, "baseline_MPa": baseline}).to_csv(args.output / "testing.csv", index=False, encoding="utf-8")
+    partition = np.full(len(regression), "training", dtype=object)
+    partition[testing] = "testing"
+    pd.DataFrame({"source_row": np.arange(len(regression)) + 2, "partition": partition,
+                  "finite_element_Q_MPa": regression.Q, "target_MPa": y,
+                  "prediction_MPa": predicted}).to_csv(args.output / "regression_predictions.csv", index=False, encoding="utf-8")
+    pd.DataFrame({"sample_id": deployment.sample_id, "source_row": deployment.source_row,
+                  "target_MPa": deployment_target, "prediction_MPa": deployed_prediction,
+                  "nonpositive_prediction": deployed_prediction <= 0}).to_csv(args.output / "deployment_predictions.csv", index=False, encoding="utf-8")
     report["prediction_hashes"] = {p.name: digest(p) for p in sorted(args.output.glob("*.csv"))}
     (args.output / "report.json").write_text(json.dumps(report, ensure_ascii=False, allow_nan=False, indent=2), encoding="utf-8")
-    print(json.dumps({"status": report["status"], "model": report["model"], "cross_validation": validation["metrics"],
-                      "testing": report["testing"]}, ensure_ascii=False, indent=2))
+    print(json.dumps({"model": report["model"], "regression_evaluation": report["regression_evaluation"],
+                      "deployment_evaluation": report["deployment_evaluation"]["metrics"]}, ensure_ascii=False, indent=2))
 
 
 if __name__ == "__main__":

@@ -74,6 +74,8 @@ class KnowledgeAgent(BaseAgent):
             "surrogate_PBIPF_MPa": design.get("surrogate_PBIPF_MPa"),
             "surrogate_uncertainty_MPa": design.get("surrogate_uncertainty_MPa"),
             "surrogate_calibration_status": design.get("surrogate_calibration_status"),
+            "surrogate_prediction_status": design.get("surrogate_prediction_status"),
+            "screening_breakdown": dict(design.get("screening_breakdown", {})),
             "asme_linear_buckling_pressure_MPa": design.get("asme_linear_buckling_pressure_MPa"),
             "linear_buckling_source": design.get("linear_buckling_source"),
             "surrogate_weight": design.get("surrogate_weight"),

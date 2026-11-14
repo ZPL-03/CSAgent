@@ -52,19 +52,18 @@ PyQt6 桌面端默认为简体中文界面，“设置”页支持切换为 Engl
 
 ## PBIPF 公式
 
-快速筛选阶段使用 PBIPF 描述符和正值回归估计承载压力：
+快速筛选阶段使用 PBIPF 线性公式估计承载压力。系数拟合使用有限元线性屈曲压力，平台预测时使用 ASME RD-1172 估算的线性屈曲压力：
 
 ```text
-eta     = d1 * lg(Q) * t / R
+P       = d1 * lg(Q) * t / R
         + d2 * Q * D22 / (D33 - D12)
         + d3 * Q * Ir_permille * L / A22
         + d0
-P       = s * log(1 + exp(eta / s))
 ```
 
-其中 `Q` 为 ASME RD-1172 公式计算值，`Ir_permille` 为千分比缺陷值。候选合同中的 `imperfection_ratio` 以比例保存，项目分析值为 `0.008`；描述符计算乘以 `1000` 得到 `8`。几何字段通过 `radius_reference` 指定半径基准；ASME 公式使用外半径，PBIPF 描述符中的 `R` 使用中面半径。候选初筛不调用 Abaqus，层合板刚度和 `Q` 由 `core/pressure_hull_profile.py` 计算；系数及单位定义位于 `config/param_ranges.yaml`。
+`Ir_permille` 为千分比缺陷值。候选合同中的 `imperfection_ratio` 以比例保存，项目分析值为 `0.008`；描述符计算乘以 `1000` 得到 `8`。几何字段通过 `radius_reference` 指定半径基准；ASME 公式使用外半径，PBIPF 描述符中的 `R` 使用内半径。候选初筛不调用 Abaqus，层合板刚度和 ASME `Q` 由 `core/pressure_hull_profile.py` 计算；系数及单位定义位于 `config/param_ranges.yaml`。
 
-压力预筛数据保存在 `data/surrogate/design_dataset.csv`，共 5,857 条；`dataset_metadata.json` 记录字段、单位和来源。`scripts/fit_pressure_surrogate.py` 按结构分组划分建模集与测试集，使用运行时刚度与 ASME 描述符拟合模型，将划分记录和预测误差写入 `data/surrogate/validation/`。回归系数及尺度 `s` 位于 `config/param_ranges.yaml`，加载时核对参数、计算代码和验证数据指纹。超出描述符建模范围的预测在筛选说明中标记为外推。公式和误差定义见 [压力预筛模型](docs/压力预筛模型.md)。
+`data/surrogate/regression_dataset.csv` 的 4,269 条记录用于拟合与测试线性公式；`design_dataset.csv` 的 5,857 条完整记录用于评估平台 ASME 代入预测。两类评估分别保存在 `data/surrogate/validation/`，加载时核对系数、Q 定义、计算代码和数据指纹。非正预测保留原值并标记，不参与默认 Top-K 排名；人工仍可送有限元校核。超出描述符训练范围的预测标记为外推。公式与误差定义见 [压力预筛模型](docs/压力预筛模型.md)。
 
 案例比例校准只接受留一验证中 MAE、RMSE、MAPE 均降低的结果，并绑定公式源码与系数指纹。没有有效校准记录时，验证误差为 `null`；校准 RMSE 描述验证集误差，不是单个候选的置信区间。
 

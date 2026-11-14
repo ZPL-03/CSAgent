@@ -1,382 +1,163 @@
 {
-  "schema_version": 2,
-  "status": "validated_candidate",
-  "selection_rule": "五折分组验证中无非正预测的模型按 RMSE 选型；测试集 RMSE、MAE 严格优于基线，Spearman 不低于基线",
-  "published": false,
+  "schema_version": 3,
+  "status": "evaluated",
+  "hash_format": "utf8_lf",
+  "model_type": "linear",
   "model": {
     "coefficients": [
-      241.0683606942018,
-      0.004748560038667884,
-      -45.282458043755554
+      185.77317089347608,
+      0.004656012009242315,
+      -29.312096583264037
     ],
-    "intercept_MPa": -0.16404878602880046,
-    "link": "softplus",
-    "link_scale_MPa": 3.734439711539289
+    "intercept_MPa": -0.04158270972383349
   },
-  "baseline_coefficients": {
-    "q_method": "ASME_RD_1172",
-    "coefficient_basis": "project_engineering_descriptor_units",
-    "descriptor_definition": "D1=lg(Q_MPa)t_mm/R_mm; D2=Q_MPa*D22/(D33-D12); D3=Q_MPa*Ir_permille*L_mm/A22",
+  "descriptor_contract": {
+    "training_q_source": "finite_element_eigenvalue",
+    "prediction_q_source": "ASME_RD_1172",
+    "asme_radius_reference": "outer",
+    "descriptor_radius_reference": "inner",
     "imperfection_input": "permille",
-    "imperfection_ratio_to_permille": 1000,
-    "standardization_note": "运行时使用工程描述符单位系数，输入特征不执行二次标准化。",
-    "d1": 204.149746,
-    "d2": 0.00280336348,
-    "d3": -31.1711936,
-    "d0": 0.489754093,
-    "rmse_MPa": 6.111385,
-    "r2": 0.947551
+    "imperfection_ratio_to_permille": 1000
   },
-  "baseline_formula_fingerprint": "5f9b67348e1d13bdbd5f20e0afd5a07fb134c24187c757d4b246a726c706245d",
-  "dataset_sha256": "ac62a124cfa4efed995ecf64369473ad81d571cdde0f97740509ba5e9dc27ef6",
   "split": {
-    "method": "GroupShuffleSplit",
-    "random_state": 42,
-    "test_group_fraction": 0.2,
-    "group_fields": [
-      "material_elastic_constants",
-      "physical_layup",
-      "length_mm",
-      "inner_radius_mm",
-      "thickness_mm"
-    ],
-    "sample_count": 5857,
-    "training_count": 4685,
-    "testing_count": 1172,
-    "training_group_count": 4685,
-    "testing_group_count": 1172,
-    "group_overlap_count": 0
+    "method": "train_test_split",
+    "random_state": 15,
+    "test_fraction": 0.25,
+    "sample_count": 4269,
+    "training_count": 3201,
+    "testing_count": 1068
   },
-  "cross_validation": {
-    "folds": [
-      {
-        "fold": 0,
-        "training_count": 3748,
-        "testing_count": 937,
-        "models": {
-          "identity": {
-            "coefficients": [
-              235.07247137313848,
-              0.004723016514049049,
-              -43.30424474094343
-            ],
-            "intercept_MPa": 0.5857300545663975,
-            "link": "identity",
-            "link_scale_MPa": null
-          },
-          "softplus": {
-            "coefficients": [
-              240.1744399789939,
-              0.00467323675802787,
-              -44.409073273902635
-            ],
-            "intercept_MPa": -0.11423723007168718,
-            "link": "softplus",
-            "link_scale_MPa": 3.6048928660732065
-          }
-        }
-      },
-      {
-        "fold": 1,
-        "training_count": 3748,
-        "testing_count": 937,
-        "models": {
-          "identity": {
-            "coefficients": [
-              234.05036848635527,
-              0.0049758066499360366,
-              -44.48502698868456
-            ],
-            "intercept_MPa": 0.6754918987782972,
-            "link": "identity",
-            "link_scale_MPa": null
-          },
-          "softplus": {
-            "coefficients": [
-              239.6868838618382,
-              0.004923150950117177,
-              -45.79845376207277
-            ],
-            "intercept_MPa": -0.07365772005616833,
-            "link": "softplus",
-            "link_scale_MPa": 3.674563914175384
-          }
-        }
-      },
-      {
-        "fold": 2,
-        "training_count": 3748,
-        "testing_count": 937,
-        "models": {
-          "identity": {
-            "coefficients": [
-              232.9471787589442,
-              0.004837844056050459,
-              -42.528773381345886
-            ],
-            "intercept_MPa": 0.6414261546004028,
-            "link": "identity",
-            "link_scale_MPa": null
-          },
-          "softplus": {
-            "coefficients": [
-              237.63735497205948,
-              0.004794364676183623,
-              -43.5902009886815
-            ],
-            "intercept_MPa": 0.005330196694210088,
-            "link": "softplus",
-            "link_scale_MPa": 3.506220021456813
-          }
-        }
-      },
-      {
-        "fold": 3,
-        "training_count": 3748,
-        "testing_count": 937,
-        "models": {
-          "identity": {
-            "coefficients": [
-              235.5043920937236,
-              0.004863349682460887,
-              -44.36780770080164
-            ],
-            "intercept_MPa": 0.554277130550652,
-            "link": "identity",
-            "link_scale_MPa": null
-          },
-          "softplus": {
-            "coefficients": [
-              241.2493163202823,
-              0.0048099189254350505,
-              -45.6640485712542
-            ],
-            "intercept_MPa": -0.23237254143153052,
-            "link": "softplus",
-            "link_scale_MPa": 3.8366322627730742
-          }
-        }
-      },
-      {
-        "fold": 4,
-        "training_count": 3748,
-        "testing_count": 937,
-        "models": {
-          "identity": {
-            "coefficients": [
-              239.99578658129516,
-              0.004607276376880566,
-              -45.40177245286819
-            ],
-            "intercept_MPa": 0.48835435004091465,
-            "link": "identity",
-            "link_scale_MPa": null
-          },
-          "softplus": {
-            "coefficients": [
-              246.61406912280177,
-              0.004550088868108573,
-              -46.941175802473985
-            ],
-            "intercept_MPa": -0.42552503932757446,
-            "link": "softplus",
-            "link_scale_MPa": 4.064951388493067
-          }
-        }
-      }
-    ],
-    "group_overlap_count": 0,
-    "metrics": {
-      "identity": {
-        "count": 4685,
-        "rmse_MPa": 6.583023476859528,
-        "mae_MPa": 3.790995460412788,
-        "r2": 0.9368896812198603,
-        "mape_pct": 15.917736312982372,
-        "nonpositive_count": 65,
-        "max_overprediction_MPa": 64.72027357591934,
-        "max_overprediction_pct": 144.05527283907645,
-        "spearman": 0.9847424669565124,
-        "top_decile_recall": 0.8059701492537313
-      },
-      "softplus": {
-        "count": 4685,
-        "rmse_MPa": 6.5554814239113375,
-        "mae_MPa": 3.695713132334721,
-        "r2": 0.9374166584158765,
-        "mape_pct": 11.72333290745141,
-        "nonpositive_count": 0,
-        "max_overprediction_MPa": 65.14668469480183,
-        "max_overprediction_pct": 145.48941015025096,
-        "spearman": 0.9846421334755158,
-        "top_decile_recall": 0.8059701492537313
-      }
-    },
-    "baseline": {
-      "count": 4685,
-      "rmse_MPa": 9.907107506531249,
-      "mae_MPa": 6.326550286666025,
-      "r2": 0.8570634427465719,
-      "mape_pct": 20.091158739555365,
-      "nonpositive_count": 54,
-      "max_overprediction_MPa": 34.75470350829707,
-      "max_overprediction_pct": 97.89372414371998,
-      "spearman": 0.9831054829761993,
-      "top_decile_recall": 0.8081023454157783
-    }
-  },
-  "testing": {
-    "candidate": {
-      "count": 1172,
-      "rmse_MPa": 6.288432130524661,
-      "mae_MPa": 3.80807785156687,
-      "r2": 0.9451669260421373,
-      "mape_pct": 11.064170482032361,
-      "nonpositive_count": 0,
-      "max_overprediction_MPa": 38.28577661556361,
-      "max_overprediction_pct": 83.55091510070153,
-      "spearman": 0.9852671130878783,
-      "top_decile_recall": 0.847457627118644
-    },
-    "baseline": {
-      "count": 1172,
-      "rmse_MPa": 10.3835373593059,
-      "mae_MPa": 6.782859878540957,
-      "r2": 0.8504974856423835,
-      "mape_pct": 18.77613053228468,
-      "nonpositive_count": 8,
-      "max_overprediction_MPa": 19.97035581118726,
-      "max_overprediction_pct": 51.70825892883869,
-      "spearman": 0.9827588477845038,
-      "top_decile_recall": 0.8135593220338984
-    }
-  },
-  "material_metrics": {
-    "cross_validation": {
-      "IM7-8552": {
-        "count": 732,
-        "rmse_MPa": 7.701665268789582,
-        "mae_MPa": 4.193721451633306,
-        "r2": 0.9356077169614931,
-        "mape_pct": 10.452428322852144,
-        "nonpositive_count": 0,
-        "max_overprediction_MPa": 52.47945058060757,
-        "max_overprediction_pct": 103.01529078116916,
-        "spearman": 0.9825454350092302,
-        "top_decile_recall": 0.8108108108108109
-      },
-      "M40J/TDE-85": {
-        "count": 837,
-        "rmse_MPa": 7.223412232131502,
-        "mae_MPa": 4.205715265440647,
-        "r2": 0.908896355325335,
-        "mape_pct": 11.115302166961667,
-        "nonpositive_count": 0,
-        "max_overprediction_MPa": 65.14668469480183,
-        "max_overprediction_pct": 137.94565437676556,
-        "spearman": 0.9764009001359633,
-        "top_decile_recall": 0.7619047619047619
-      },
-      "T700/Epoxy": {
-        "count": 2373,
-        "rmse_MPa": 5.791292715845855,
-        "mae_MPa": 3.169912375626118,
-        "r2": 0.9328578602915544,
-        "mape_pct": 12.894781303675337,
-        "nonpositive_count": 0,
-        "max_overprediction_MPa": 49.91460512699359,
-        "max_overprediction_pct": 145.48941015025096,
-        "spearman": 0.9853921756981893,
-        "top_decile_recall": 0.8319327731092437
-      },
-      "T800G/5228": {
-        "count": 743,
-        "rmse_MPa": 6.829472113050224,
-        "mae_MPa": 4.309860266296085,
-        "r2": 0.949536050404368,
-        "mape_pct": 9.918994874446295,
-        "nonpositive_count": 0,
-        "max_overprediction_MPa": 21.273158706211746,
-        "max_overprediction_pct": 40.68312889460148,
-        "spearman": 0.9931547294793138,
-        "top_decile_recall": 0.88
-      }
+  "regression_evaluation": {
+    "q_source": "finite_element_eigenvalue",
+    "training": {
+      "count": 3201,
+      "rmse_MPa": 5.133107137278573,
+      "mae_MPa": 3.06317453386595,
+      "r2": 0.9605476108052414,
+      "mape_pct": 12.639121031857947,
+      "nonpositive_count": 21,
+      "min_prediction_MPa": -3.5584826563288146,
+      "max_overprediction_MPa": 59.38987696652542,
+      "max_overprediction_pct": 102.98810168318728,
+      "spearman": 0.9902709653994369,
+      "top_decile_recall": 0.8598130841121495
     },
     "testing": {
+      "count": 1068,
+      "rmse_MPa": 5.042441872483573,
+      "mae_MPa": 3.0165189853301873,
+      "r2": 0.9605698807834118,
+      "mape_pct": 12.691677165534362,
+      "nonpositive_count": 11,
+      "min_prediction_MPa": -2.6795807301013403,
+      "max_overprediction_MPa": 43.33686576152787,
+      "max_overprediction_pct": 93.69547905377522,
+      "spearman": 0.9901150610113552,
+      "top_decile_recall": 0.8691588785046729
+    }
+  },
+  "deployment_evaluation": {
+    "q_source": "ASME_RD_1172",
+    "population": "complete_dataset_not_independent_holdout",
+    "sample_count": 5857,
+    "design_group_count": 5857,
+    "metrics": {
+      "count": 5857,
+      "rmse_MPa": 7.883273978842711,
+      "mae_MPa": 5.325830076081731,
+      "r2": 0.9104881416830022,
+      "mape_pct": 20.271444930064064,
+      "nonpositive_count": 83,
+      "min_prediction_MPa": -5.00108876197815,
+      "max_overprediction_MPa": 51.74225439310452,
+      "max_overprediction_pct": 113.90259195416321,
+      "spearman": 0.9845944477115781,
+      "top_decile_recall": 0.810580204778157
+    },
+    "materials": {
       "IM7-8552": {
-        "count": 187,
-        "rmse_MPa": 7.778499845995734,
-        "mae_MPa": 4.611161837839671,
-        "r2": 0.9314526573473905,
-        "mape_pct": 10.154798400139539,
+        "count": 919,
+        "rmse_MPa": 8.506796945756475,
+        "mae_MPa": 5.950115570515284,
+        "r2": 0.9208700091526344,
+        "mape_pct": 15.126608311828251,
         "nonpositive_count": 0,
-        "max_overprediction_MPa": 34.596106512076474,
-        "max_overprediction_pct": 72.082051128804,
-        "spearman": 0.9803933802884104,
-        "top_decile_recall": 0.7368421052631579
+        "min_prediction_MPa": 0.2455116553451821,
+        "max_overprediction_MPa": 42.09263213000546,
+        "max_overprediction_pct": 82.23077332168046,
+        "spearman": 0.9830304230632343,
+        "top_decile_recall": 0.7717391304347826
       },
       "M40J/TDE-85": {
-        "count": 200,
-        "rmse_MPa": 6.746667417588525,
-        "mae_MPa": 4.176056399684036,
-        "r2": 0.9301214169776457,
-        "mape_pct": 10.470993012614983,
+        "count": 1037,
+        "rmse_MPa": 8.117698353019646,
+        "mae_MPa": 5.797004384407656,
+        "r2": 0.888019019531058,
+        "mape_pct": 17.871147057505997,
         "nonpositive_count": 0,
-        "max_overprediction_MPa": 38.28577661556361,
-        "max_overprediction_pct": 76.14264074286125,
-        "spearman": 0.9794494862371561,
-        "top_decile_recall": 0.85
+        "min_prediction_MPa": 1.0916842573144472,
+        "max_overprediction_MPa": 51.74225439310452,
+        "max_overprediction_pct": 109.10035647892566,
+        "spearman": 0.9765809684260528,
+        "top_decile_recall": 0.75
       },
       "T700/Epoxy": {
-        "count": 555,
-        "rmse_MPa": 5.461243558968557,
-        "mae_MPa": 3.2555803815885977,
-        "r2": 0.9371476338314735,
-        "mape_pct": 12.460756604146821,
-        "nonpositive_count": 0,
-        "max_overprediction_MPa": 32.26837525524826,
-        "max_overprediction_pct": 83.55091510070153,
-        "spearman": 0.9849076695322443,
-        "top_decile_recall": 0.7857142857142857
+        "count": 2928,
+        "rmse_MPa": 6.552927804349763,
+        "mae_MPa": 4.2984897192255165,
+        "r2": 0.9132375522095683,
+        "mape_pct": 23.5884573278406,
+        "nonpositive_count": 83,
+        "min_prediction_MPa": -5.00108876197815,
+        "max_overprediction_MPa": 39.07777820022544,
+        "max_overprediction_pct": 113.90259195416321,
+        "spearman": 0.9843875889063549,
+        "top_decile_recall": 0.825938566552901
       },
       "T800G/5228": {
-        "count": 230,
-        "rmse_MPa": 6.384453187772082,
-        "mae_MPa": 4.168354724529887,
-        "r2": 0.9588048270736615,
-        "mape_pct": 8.949312983875442,
+        "count": 973,
+        "rmse_MPa": 10.309652256120575,
+        "mae_MPa": 7.3255489226969175,
+        "r2": 0.8869638184412888,
+        "mape_pct": 17.707212088657815,
         "nonpositive_count": 0,
-        "max_overprediction_MPa": 5.187657719744493,
-        "max_overprediction_pct": 38.49709595627206,
-        "spearman": 0.9940358862705547,
-        "top_decile_recall": 0.9565217391304348
+        "min_prediction_MPa": 0.037472179631164074,
+        "max_overprediction_MPa": 17.353694625120028,
+        "max_overprediction_pct": 18.686252533869613,
+        "spearman": 0.9929865826708927,
+        "top_decile_recall": 0.8673469387755102
       }
     }
   },
-  "training_count": 4685,
   "training_feature_min": [
-    -0.013535897819127713,
-    1.7690351438950338,
-    0.001846453840793515
+    -0.004224585,
+    3.418554223,
+    0.003410682
   ],
   "training_feature_max": [
-    0.49465082440889746,
-    19009.648124560037,
-    0.9492948423616568
+    0.598918946,
+    16065.88361,
+    1.185448237
   ],
-  "testing_outside_feature_range_count": 0,
+  "deployment_outside_feature_range_count": 22,
   "stiffness_max_abs_error": 0.04999990324722603,
-  "dataset_metadata_sha256": "05c013b7126fde98d25d13f1bd99a0c8a27a4c7a53da8ca57c06337068e66ec5",
+  "data_hashes": {
+    "data/surrogate/regression_dataset.csv": "ffb1741194e252fa96ddc6d8b57285a565198900d6a02850625118101f63b218",
+    "data/surrogate/regression_metadata.json": "c1352e6846e7b68da20043b829d7e03d3ea344452e168aad38b8691eb075e230",
+    "data/surrogate/design_dataset.csv": "e16d3faba94806d185d41f2f82d587310991a67b25a90656ca7b5a95cb328589",
+    "data/surrogate/dataset_metadata.json": "bd361ed8049f735600a666e62296c9a6507357fec1c0846b6c404ec4683b0ef4"
+  },
   "code_hashes": {
-    "scripts/fit_pressure_surrogate.py": "eee458987702460dd92f92f7286488ba4c2d9d43bb952e72eab6ebf78d66588c",
-    "core/surrogate_dataset.py": "07bf15c995eba94d603710eb28bd37eaee227055b5896f6041a503220432f04d",
-    "core/pressure_regression.py": "7d2ca3c54c0c10a16a975fdea6df80192d8aa6c413e79f32c268fd733e92a38a",
-    "core/surrogate_model.py": "788928432fb600a19fd1ce006f13fc4a660c971315701a5328ce09f710ee594a",
-    "core/pressure_hull_profile.py": "9cb77e18c207034d4eaf1cf9376c164384de2c82684198e195f89edaa80be8cb",
+    "scripts/fit_pressure_surrogate.py": "a2730617844e167726e523e47370548bac2e00d0909601b7d2c94863a28cd2f1",
+    "core/surrogate_dataset.py": "6bd7beff8cef1c048d40636609a94914ec716d8c7b906b7ef4ab8b2f7ba573d1",
+    "core/pressure_regression.py": "6b7a3d47650ddbaa17a075face662986aebeddca7db3c0e16e227ec086a0c71f",
+    "core/surrogate_model.py": "8436ec879013df3a029073a79f6b9d971158de68f0d4b02462aa9590a754ecbe",
+    "core/io_utils.py": "9aca114cfdc50dee9ef2c3748f6e7c5647f3e9eba4f1f34b8de26f131839d39a",
+    "core/pressure_hull_profile.py": "f0cdc8a5f67bd8874e2b3d141246d4b816c4af59b4900be3a844cbaebc9436ad",
     "abaqus/cylindrical_geometry.py": "53036cc812958dac3c04d738678e913ea3b07e4b726664ef66ced6ac0076eef4"
   },
   "prediction_hashes": {
-    "cross_validation.csv": "012a4caa33e452a781905e6d6910846e3137acf869cf408d26f0d88145671132",
-    "testing.csv": "81f9545b15d8806793c6c39cae4f17d11d9554a49a3d2e2ceeced784e233a85f"
+    "deployment_predictions.csv": "098bbf8bf1507d61027ad766cda0d5f8b58ae11d99ffa4e2ada20611bdcb0695",
+    "regression_predictions.csv": "2d3483429400aae4110700f1a3ccb7fdc6e8605e9f832761c85035952af24ec2"
   }
 }

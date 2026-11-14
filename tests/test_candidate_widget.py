@@ -83,6 +83,26 @@ def test_candidate_widget_renders_generation_audit() -> None:
         app.processEvents()
 
 
+def test_nonpositive_prediction_remains_visible_and_manually_selectable() -> None:
+    app = _app()
+    widget = CandidateWidget()
+    candidate = _candidate()
+    candidate.update(surrogate_ultimate_pressure_MPa=-3.558, surrogate_prediction_status="nonpositive",
+                     screening_selected=False, screening_rank=None, rank_score=None,
+                     selection_reason="线性估计非正，不参与预筛排名，可人工选择有限元校核。")
+    try:
+        widget.update_candidates([candidate])
+        assert float(widget.table.item(0, 2).text()) == candidate["surrogate_ultimate_pressure_MPa"]
+        assert widget.table.item(0, 6).text() == "预筛非正"
+        assert widget.table.item(0, 6).toolTip() == candidate["selection_reason"]
+        assert widget.selected_candidates()[0]["candidate_id"] == "TMP_1"
+        widget.update_candidates([candidate], {"TMP_1": {"candidate_id": "C1", "status": "success", "verdict": "通过"}})
+        assert widget.table.item(0, 6).text() == "success"
+    finally:
+        widget.close()
+        app.processEvents()
+
+
 def test_candidate_widget_metrics_span_above_table_and_detail() -> None:
     app = _app()
     widget = CandidateWidget()

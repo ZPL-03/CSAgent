@@ -38,12 +38,17 @@ def test_perfect_geometry_and_signed_stiffness_are_preserved():
     assert stiffness["D12"] == stiffness["D"][0][1] < 0
 
 
-@pytest.mark.parametrize("coefficient,value", [("d0", -1), ("d0", 0), ("d1", float("inf")), ("d2", True)])
-def test_invalid_formula_result_or_coefficient_is_not_clipped(coefficient, value):
+@pytest.mark.parametrize("coefficient,value", [("d1", float("inf")), ("d2", True)])
+def test_invalid_formula_coefficient_is_rejected(coefficient, value):
     coefficients = dict(d0=1.0, d1=0.0, d2=0.0, d3=0.0)
     coefficients[coefficient] = value
     with pytest.raises(ValueError):
         surrogate._evaluate_pbipf(coefficients, _descriptors())
+
+
+@pytest.mark.parametrize("pressure", [-1.0, 0.0])
+def test_nonpositive_formula_result_is_preserved(pressure):
+    assert surrogate._evaluate_pbipf(dict(d0=pressure, d1=0.0, d2=0.0, d3=0.0), _descriptors()) == pressure
 
 
 def test_batch_and_single_inference_reject_missing_values(tmp_path):
@@ -81,7 +86,7 @@ def test_accepted_calibration_is_bound_to_formula_and_coefficients(tmp_path, mon
 
 
 @pytest.mark.parametrize("field,value", [("scale", 0), ("scale", float("inf")),
-                                        ("bias_MPa", None), ("uncertainty_MPa", -1)])
+                                        ("bias_MPa", None), ("bias_MPa", 1.0), ("uncertainty_MPa", -1)])
 def test_accepted_calibration_requires_valid_values(tmp_path, field, value):
     manager = surrogate.SurrogateModelManager(models_dir=tmp_path)
     payload = dict(calibration_status="accepted", scale=1.5, bias_MPa=0.0, uncertainty_MPa=1.0,
@@ -104,8 +109,8 @@ def test_prediction_without_validation_keeps_error_unknown(tmp_path):
     assert manager.formula_prediction(_candidate(1), apply_calibration=False).uncertainty_MPa is None
 
 
-@pytest.mark.parametrize("field,value", [("d1", 999.0), ("link_scale_MPa", 1.0),
-                                        ("q_method", "FEA"), ("imperfection_ratio_to_permille", 1)])
+@pytest.mark.parametrize("field,value", [("d1", 999.0), ("model_type", "unknown"), ("training_q_source", "ASME_RD_1172"),
+                                        ("descriptor_radius_reference", "middle_surface"), ("q_method", "FEA"), ("imperfection_ratio_to_permille", 1)])
 def test_runtime_regression_parameters_are_bound_to_validation(field, value):
     parameters = dict(surrogate._coefficients()["PBIPF"])
     parameters[field] = value
@@ -113,7 +118,26 @@ def test_runtime_regression_parameters_are_bound_to_validation(field, value):
         surrogate._validate_regression_report(parameters)
 
 
-def test_runtime_pressure_matches_validated_positive_regression(tmp_path):
+def test_validation_report_survives_lf_checkout_and_rejects_changed_code(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    root = Path(surrogate.__file__).resolve().parents[1]
+    parameters = dict(surrogate._coefficients()["PBIPF"])
+    report = surrogate._validate_regression_report(parameters)
+    paths = set(report["code_hashes"]) | set(report["data_hashes"]) | {parameters["validation_report"]}
+    for relative in paths:
+        destination = tmp_path / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text((root / relative).read_text(encoding="utf-8-sig"), encoding="utf-8", newline="\n")
+    monkeypatch.setattr(surrogate, "__file__", str(tmp_path / "core/surrogate_model.py"))
+    assert surrogate._validate_regression_report(parameters) == report
+    changed = tmp_path / "core/pressure_regression.py"
+    changed.write_text(changed.read_text(encoding="utf-8") + "\n# 校验测试\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="计算代码"):
+        surrogate._validate_regression_report(parameters)
+
+
+def test_runtime_pressure_matches_fem_trained_linear_regression(tmp_path):
     import numpy as np
     from core.pressure_regression import PressureRegression
     from core.surrogate_dataset import load_dataset, row_to_candidate, runtime_features
@@ -123,11 +147,36 @@ def test_runtime_pressure_matches_validated_positive_regression(tmp_path):
     features, _, _ = runtime_features(low_pressure)
     manager = surrogate.SurrogateModelManager(models_dir=tmp_path)
     parameters = manager.validation_report["model"]
-    model = PressureRegression(tuple(parameters["coefficients"]), parameters["intercept_MPa"], parameters["link"], parameters["link_scale_MPa"])
+    model = PressureRegression(tuple(parameters["coefficients"]), parameters["intercept_MPa"])
     predicted = np.array([manager.formula_prediction(row_to_candidate(row)).ultimate_pressure_MPa for _, row in low_pressure.iterrows()])
-    assert np.all(predicted > 0)
+    assert np.any(predicted < 0)
     assert predicted == pytest.approx(model.predict(features))
-    assert manager.formula_prediction(_candidate(1)).model_validation["link"] == "softplus"
+    validation = manager.formula_prediction(_candidate(1)).model_validation
+    assert validation["model_type"] == "linear"
+    assert validation["training_q_source"] == "finite_element_eigenvalue"
+    assert validation["prediction_q_source"] == "ASME_RD_1172"
+    candidate = row_to_candidate(low_pressure.iloc[0])
+    assert manager.predict([surrogate.candidate_to_features(candidate)])[0] == pytest.approx(manager.formula_prediction(candidate).ultimate_pressure_MPa)
+
+
+def test_nonpositive_estimate_is_audited_and_not_selected(tmp_path):
+    from core.surrogate_dataset import load_dataset, row_to_candidate
+
+    frame, _ = load_dataset()
+    invalid = row_to_candidate(frame.sort_values("ultimate_pressure_MPa").iloc[0])
+    invalid["candidate_id"] = "TMP_2"
+    invalid["material_system"]["density_kg_per_m3"] = _candidate(1)["material_system"]["density_kg_per_m3"]
+    agent = ScreenerAgent()
+    agent.model_manager = surrogate.SurrogateModelManager(models_dir=tmp_path)
+    task = {"screening_preferences": {"top_k_candidates": 2}}
+    ranked = agent.rank_candidates(task, [invalid, _candidate(1)])
+    rejected = next(candidate for candidate in ranked if candidate["candidate_id"] == "TMP_2")
+    assert rejected["surrogate_ultimate_pressure_MPa"] < 0
+    assert rejected["surrogate_prediction_status"] == "nonpositive"
+    assert rejected["rank_score"] is None and rejected["screening_rank"] is None
+    assert rejected["screening_selected"] is False
+    assert len([candidate for candidate in ranked if candidate["screening_selected"]]) == 1
+    assert agent.run({"task": {"screening_preferences": {"top_k_candidates": 1}}, "candidates": [invalid]}) == []
 
 
 def test_prediction_uses_accepted_validation_error_without_historical_floor(tmp_path):
@@ -153,5 +202,3 @@ def test_screening_rank_does_not_use_global_validation_error(tmp_path, monkeypat
         agent.pressure_weight * result["surrogate_ultimate_pressure_MPa"]
         - agent.weight_penalty * result["surrogate_weight"], 4)
     assert "uncertainty_component" not in result["screening_breakdown"]
-    assert "不确定度" not in result["screening_summary"]
-    assert ("RMSE=未提供" in result["screening_summary"]) == (validation_error is None)

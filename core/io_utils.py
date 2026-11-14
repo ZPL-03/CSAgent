@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +21,11 @@ def write_json(path: Path, data: Any) -> None:
 
 def read_text(path: Path) -> str:
     return path.read_text(encoding="utf-8")
+
+
+def text_file_sha256(path: Path) -> str:
+    """按 UTF-8、LF 换行且无 BOM 的文本内容计算指纹。"""
+    return hashlib.sha256(path.read_text(encoding="utf-8-sig").encode("utf-8")).hexdigest()
 
 
 def write_text(path: Path, content: str) -> None:

@@ -60,11 +60,11 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
         tool_name="screen_candidates",
         responsibility="计算 ASME RD-1172 线性屈曲压力和 PBIPF 极限压力，按评分公式排序。",
         input_contract="task 字典、candidates 列表。",
-        output_contract="screened_candidates 列表；数量由当前任务 top_k 和候选池实际数量共同确定。",
+        output_contract="screened_candidates 列表；数量由当前任务 top_k 和有效预测数量共同确定。",
         llm_policy="不调用 LLM。",
         memory_policy="写入 workflow_snapshots 中的 candidates、evaluated_candidates、screen_summary 和排序字段；不删除未入选候选。",
         event_policy="发出 screening_started、screening_completed、tool_completed 或 node_failed 事件。",
-        failure_policy="候选缺少必要工程字段时按规则诊断剔除或抛出确定性错误，不使用 LLM 补数。",
+        failure_policy="缺少必要工程字段时报错；非正线性估计保留原值和诊断，不参与排名，可人工送检。",
     ),
     AgentContract(
         node_name="evaluate_candidates",

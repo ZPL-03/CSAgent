@@ -297,7 +297,7 @@ class CandidateWidget(QWidget):
             screening_selected = candidate.get("screening_selected")
             status_value = result.get("status", "未校核") if result else "未校核"
             if screening_selected is False and not result:
-                status_value = "未入选Top-K"
+                status_value = "预筛非正" if candidate.get("surrogate_prediction_status") == "nonpositive" else "未入选Top-K"
             values = [
                 candidate.get("display_name", candidate.get("candidate_id", "")),
                 generation_label,
@@ -313,7 +313,7 @@ class CandidateWidget(QWidget):
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 if screening_selected is False and not result:
                     item.setForeground(QColor("#8796aa"))
-                    item.setToolTip("未进入默认 Top-K 校核队列；仍可人工选择进入 FEM 校核。")
+                    item.setToolTip(candidate.get("selection_reason") or "未进入默认 Top-K 校核队列；仍可人工选择进入 FEM 校核。")
                 if col == 0:
                     item.setToolTip(f"会话编号: {candidate.get('candidate_id')} | 正式编号: {archive_id}")
                 self.table.setItem(row, col, item)

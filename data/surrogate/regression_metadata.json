@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "dataset_file": "regression_dataset.csv",
+  "hash_format": "utf8_lf",
+  "sha256": "ffb1741194e252fa96ddc6d8b57285a565198900d6a02850625118101f63b218",
+  "sample_count": 4269,
+  "q_source": "finite_element_eigenvalue",
+  "radius_reference": "inner",
+  "units": {
+    "pressure": "MPa",
+    "geometry": "mm",
+    "imperfection": "permille",
+    "A": "N/mm",
+    "D": "N mm"
+  },
+  "target_column": "maxP",
+  "descriptor_columns": ["D1", "D2", "D3"]
+}

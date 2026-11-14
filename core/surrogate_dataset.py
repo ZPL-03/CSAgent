@@ -10,6 +10,7 @@ import numpy as np
 import pandas as pd
 
 from abaqus.cylindrical_geometry import shell_radii
+from core.io_utils import text_file_sha256 as digest
 from core.pressure_hull_profile import compute_laminate_stiffness, estimate_linear_buckling_feature_q, parse_layup_sequence
 from core.surrogate_model import _pbipf_descriptors
 
@@ -19,10 +20,6 @@ STIFFNESS_COMPONENTS = (
     "A11", "A12", "A22", "A33", "B11", "B12", "B13", "B22", "B23", "B33",
     "D11", "D12", "D13", "D22", "D23", "D33",
 )
-
-
-def digest(path: Path) -> str:
-    return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
 def row_to_candidate(row: pd.Series) -> dict:
@@ -42,7 +39,7 @@ def design_group(candidate: dict) -> str:
 def load_dataset(directory: Path = DATA) -> tuple[pd.DataFrame, dict]:
     metadata = json.loads((directory / "dataset_metadata.json").read_text(encoding="utf-8"))
     path = directory / "design_dataset.csv"
-    if metadata.get("dataset_file") != path.name or metadata.get("sha256") != digest(path):
+    if metadata.get("hash_format") != "utf8_lf" or metadata.get("dataset_file") != path.name or metadata.get("sha256") != digest(path):
         raise ValueError("压力数据集与元数据指纹不一致")
     frame = pd.read_csv(path, encoding="utf-8")
     if len(frame) != metadata.get("sample_count") or frame.sample_id.duplicated().any():
@@ -67,7 +64,40 @@ def load_dataset(directory: Path = DATA) -> tuple[pd.DataFrame, dict]:
     return frame, metadata
 
 
+def load_regression_dataset(directory: Path = DATA) -> tuple[pd.DataFrame, dict]:
+    """核验有限元 Q 训练表及其工程单位描述符。"""
+    metadata = json.loads((directory / "regression_metadata.json").read_text(encoding="utf-8"))
+    path = directory / "regression_dataset.csv"
+    if metadata.get("hash_format") != "utf8_lf" or metadata.get("dataset_file") != path.name or metadata.get("sha256") != digest(path):
+        raise ValueError("线性拟合数据与元数据指纹不一致")
+    if metadata.get("q_source") != "finite_element_eigenvalue" or metadata.get("radius_reference") != "inner":
+        raise ValueError("线性拟合要求有限元特征根 Q 和内半径")
+    if metadata.get("target_column") != "maxP" or metadata.get("descriptor_columns") != DESCRIPTORS:
+        raise ValueError("线性拟合的目标或描述符字段不一致")
+    frame = pd.read_csv(path, encoding="utf-8-sig")
+    required = {"maxP", "Q", "QF", "t", "R", "L", "A22", "D12", "D22", "D33", *DESCRIPTORS}
+    if len(frame) != metadata.get("sample_count") or not required <= set(frame.columns):
+        raise ValueError("线性拟合数据的样本数或字段不一致")
+    if not np.isfinite(frame[list(required)].to_numpy(dtype=float)).all():
+        raise ValueError("线性拟合数据含非有限数值")
+    computed = []
+    for row in frame.itertuples(index=False):
+        if row.maxP <= 0:
+            raise ValueError("线性拟合压力目标必须为正")
+        values = _pbipf_descriptors(
+            {"imperfection_ratio_to_permille": 1000}, q_value=row.Q,
+            length_mm=row.L, radius_mm=row.R, thickness_mm=row.t, imperfection_ratio=row.QF / 1000,
+            a22=row.A22, d12=row.D12, d22=row.D22, d33=row.D33,
+        )
+        computed.append([values[name] for name in DESCRIPTORS])
+    # 表内三个描述符的小数舍入精度不同，按列核对绝对误差。
+    if np.any(np.abs(frame[DESCRIPTORS].to_numpy() - np.array(computed)) > [5.1e-10, 5.1e-6, 5.1e-10]):
+        raise ValueError("线性拟合描述符与有限元 Q、几何或刚度不一致")
+    return frame, metadata
+
+
 def runtime_features(frame: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, dict]:
+    """复算刚度并生成 ASME Q 对应的平台预测描述符。"""
     if frame.empty or not set(STIFFNESS_COMPONENTS) <= set(frame.columns):
         raise ValueError("刚度核对需要非空数据和全部 16 个源表分量")
     features, groups, errors = [], [], []
@@ -82,7 +112,7 @@ def runtime_features(frame: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, dict]
         q = estimate_linear_buckling_feature_q(geometry, stiffness, material)
         values = _pbipf_descriptors(
             {"imperfection_ratio_to_permille": 1000}, q_value=q,
-            length_mm=geometry["length_mm"], radius_mm=shell_radii(geometry)["middle_surface"],
+            length_mm=geometry["length_mm"], radius_mm=shell_radii(geometry)["inner"],
             thickness_mm=geometry["thickness_mm"], imperfection_ratio=geometry["imperfection_ratio"],
             a22=stiffness["A22"], d12=stiffness["D12"], d22=stiffness["D22"], d33=stiffness["D33"],
         )
@@ -92,6 +122,6 @@ def runtime_features(frame: pd.DataFrame) -> tuple[np.ndarray, np.ndarray, dict]
         raise ValueError("ABD 复算与源表的差异超出一位小数舍入误差")
     return np.array(features), np.array(groups), {
         "stiffness_max_abs_error": max(errors), "q_source": "ASME_RD_1172",
-        "asme_radius_reference": "outer", "descriptor_radius_reference": "middle_surface",
+        "asme_radius_reference": "outer", "descriptor_radius_reference": "inner",
         "imperfection_unit": "permille",
     }

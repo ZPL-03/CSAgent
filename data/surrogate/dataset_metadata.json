@@ -1,7 +1,8 @@
 {
   "schema_version": 1,
   "dataset_file": "design_dataset.csv",
-  "sha256": "ac62a124cfa4efed995ecf64369473ad81d571cdde0f97740509ba5e9dc27ef6",
+  "hash_format": "utf8_lf",
+  "sha256": "e16d3faba94806d185d41f2f82d587310991a67b25a90656ca7b5a95cb328589",
   "sample_count": 5857,
   "units": {
     "pressure": "MPa",

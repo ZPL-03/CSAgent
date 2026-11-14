@@ -36,6 +36,7 @@ class ScreenerAgent(BaseAgent):
         )
 
     def rank_candidates(self, task: Dict, candidates: List[Dict]) -> List[Dict]:
+        """返回全量候选，仅让正值估计参与排名和默认 Top-K。"""
         requested_top_k = effective_screen_top_k(task, len(candidates))
         if requested_top_k <= 0:
             raise ValueError("代理模型初筛缺少有效 Top-K 数量或候选池为空。")
@@ -50,6 +51,8 @@ class ScreenerAgent(BaseAgent):
             updated["surrogate_PBIPF_MPa"] = round(float(prediction["PBIPF_MPa"]), 3)
             updated["surrogate_uncertainty_MPa"] = prediction["uncertainty_MPa"]
             updated["surrogate_calibration_status"] = prediction["calibration_status"]
+            updated["surrogate_prediction_status"] = prediction["prediction_status"]
+            eligible = prediction["prediction_status"] == "positive"
             updated["asme_linear_buckling_pressure_MPa"] = round(
                 float(prediction["asme_linear_buckling_pressure_MPa"]), 3
             )
@@ -62,10 +65,10 @@ class ScreenerAgent(BaseAgent):
                     - self.weight_penalty * updated["surrogate_weight"]
                 ),
                 4,
-            )
+            ) if eligible else None
             updated["screening_breakdown"] = {
                 "formula": self.score_formula_text,
-                "pressure_component": round(self.pressure_weight * updated["surrogate_ultimate_pressure_MPa"], 4),
+                "pressure_component": round(self.pressure_weight * updated["surrogate_ultimate_pressure_MPa"], 4) if eligible else None,
                 "weight_component": round(self.weight_penalty * updated["surrogate_weight"], 4),
                 "surrogate_detail": prediction,
             }
@@ -74,22 +77,29 @@ class ScreenerAgent(BaseAgent):
             updated["screening_summary"] = (
                 f"描述符回归压力估计={updated['surrogate_ultimate_pressure_MPa']} MPa，"
                 f"ASME RD-1172线性屈曲压力={updated['asme_linear_buckling_pressure_MPa']} MPa，"
-                f"模型五折验证 RMSE={prediction['model_validation']['cross_validation_rmse_MPa']:.3f} MPa，"
+                f"公式测试 RMSE={prediction['model_validation']['regression_testing_rmse_MPa']:.3f} MPa，"
+                f"ASME代入评估 RMSE={prediction['model_validation']['deployment_rmse_MPa']:.3f} MPa，"
                 f"校准留一验证 RMSE={validation_text}，"
                 f"校准状态={updated['surrogate_calibration_status']}，"
-                f"面密度={updated['surrogate_weight']} kg/m^2，"
-                f"按 {self.score_formula_text} 得分 {updated['rank_score']}。"
+                f"面密度={updated['surrogate_weight']} kg/m^2。"
             )
+            if eligible:
+                updated["screening_summary"] += f" 按 {self.score_formula_text} 得分 {updated['rank_score']}。"
+            else:
+                updated["screening_summary"] += " 线性估计非正，不参与预筛排名，可人工选择有限元校核。"
             if prediction["model_validation"]["outside_descriptor_range"]:
-                updated["screening_summary"] += " 描述符超出建模数据范围，排序使用外推估计。"
+                updated["screening_summary"] += " 描述符超出拟合训练范围，估计属于外推。"
             enriched.append(updated)
 
-        enriched.sort(key=lambda item: item["rank_score"], reverse=True)
-        selected_ids = {str(candidate.get("candidate_id")) for candidate in enriched[:requested_top_k]}
+        enriched.sort(key=lambda item: (item["rank_score"] is not None, item["rank_score"] if item["rank_score"] is not None else 0), reverse=True)
+        eligible_candidates = [candidate for candidate in enriched if candidate["rank_score"] is not None]
+        selected_ids = {str(candidate.get("candidate_id")) for candidate in eligible_candidates[:requested_top_k]}
         for index, candidate in enumerate(enriched, start=1):
-            candidate["screening_rank"] = index
+            candidate["screening_rank"] = index if candidate["rank_score"] is not None else None
             candidate["screening_selected"] = str(candidate.get("candidate_id")) in selected_ids
-            if candidate["screening_selected"]:
+            if candidate["rank_score"] is None:
+                candidate["selection_reason"] = candidate["screening_summary"]
+            elif candidate["screening_selected"]:
                 candidate["selection_reason"] = (
                     f"Top-{index} 入选：{candidate['screening_summary']} "
                     "当前排序靠前，适合优先进入真实有限元校核。"
