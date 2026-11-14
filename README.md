@@ -28,7 +28,11 @@ LLM 可以提出不同的缺陷比，原始提案保存在来源审计中，生�
 
 总体设计方案报告输出为同一内容的 `overall_design_report.md/pdf`，依次包含设计需求、全部候选与生成依据、代理预筛结果及理由、有限元校核、最终推荐和工程建议。未校核候选不计入有限元通过统计；缺少完整容量或目标比较数据时不作最终推荐。工艺说明属于评审建议，不表示制造工艺已经验证。
 
-求解重试产生的设计修订保存在结果的 `solved_design` 中，案例回流和报告目标比较使用实际求解尺寸；初始候选及其生成依据单独保留。外部候选必须满足固定缺陷条件才能进入正式求解。
+求解重试产生的设计修订保存在结果的 `solved_design` 中，案例回流和报告目标比较使用实际求解尺寸；初始候选及其生成依据单独保留。外部源表候选在校验来源指纹后，转换为项目固定缺陷和损伤分析配置；来源输入、历史结果及父修订号保留，条件变化后的历史结果不用于当前设计通过判定。
+
+候选铺层支持显式角度、正负角、重复组和中面对称记号。未知角度、未闭合括号、冲突的层序字段及无效重复次数会被拒绝；正负角均衡按层数判定。提案未给铺层时可由项目模板和角度参数装配，并记录模板来源；已有铺层不因规则失败而替换为其他模板。
+
+`geometry.radius_reference` 标明 `radius_mm` 是内半径（`inner`）、中面半径（`middle_surface`）或外半径（`outer`）。自然语言任务保留用户指定的基准，源表候选使用内半径；未标明基准的项目记录按中面半径解释。Abaqus 壳网格、截面质量和三维显示通过同一换算函数取得实际内、中面、外半径。初始几何缺陷幅值按项目缺陷比乘以中面半径计算。半径基准参与设计修订指纹，历史案例的输入及结果保持原样。
 
 ## LLM 后端
 
@@ -48,16 +52,21 @@ PyQt6 桌面端默认为简体中文界面，“设置”页支持切换为 Engl
 
 ## PBIPF 公式
 
-快速筛选阶段使用 PBIPF 公式预测极限压力：
+快速筛选阶段使用 PBIPF 描述符和正值回归估计承载压力：
 
 ```text
-P_PBIPF = d1 * lg(Q) * t / R
+eta     = d1 * lg(Q) * t / R
         + d2 * Q * D22 / (D33 - D12)
         + d3 * Q * Ir_permille * L / A22
         + d0
+P       = s * log(1 + exp(eta / s))
 ```
 
-其中 `Q` 为 ASME RD-1172 计算得到的线性屈曲压力，`Ir_permille` 为千分比缺陷值。候选合同中的 `imperfection_ratio` 以比例保存，当前候选为 `0.008`；计算描述符时显式乘以 `1000` 转为 `8`。候选初筛阶段不调用 Abaqus；系统先用 `core/pressure_hull_profile.py` 计算 `asme_linear_buckling_pressure_MPa`，再作为 PBIPF 公式输入。公式系数和单位口径位于 `config/param_ranges.yaml`，层合板刚度由 `core/pressure_hull_profile.py` 按经典层合板理论计算。训练阶段的标准化只用于拟合输入，运行时使用工程描述符单位系数。
+其中 `Q` 为 ASME RD-1172 公式计算值，`Ir_permille` 为千分比缺陷值。候选合同中的 `imperfection_ratio` 以比例保存，项目分析值为 `0.008`；描述符计算乘以 `1000` 得到 `8`。几何字段通过 `radius_reference` 指定半径基准；ASME 公式使用外半径，PBIPF 描述符中的 `R` 使用中面半径。候选初筛不调用 Abaqus，层合板刚度和 `Q` 由 `core/pressure_hull_profile.py` 计算；系数及单位定义位于 `config/param_ranges.yaml`。
+
+压力预筛数据保存在 `data/surrogate/design_dataset.csv`，共 5,857 条；`dataset_metadata.json` 记录字段、单位和来源。`scripts/fit_pressure_surrogate.py` 按结构分组划分建模集与测试集，使用运行时刚度与 ASME 描述符拟合模型，将划分记录和预测误差写入 `data/surrogate/validation/`。回归系数及尺度 `s` 位于 `config/param_ranges.yaml`，加载时核对参数、计算代码和验证数据指纹。超出描述符建模范围的预测在筛选说明中标记为外推。公式和误差定义见 [压力预筛模型](docs/压力预筛模型.md)。
+
+案例比例校准只接受留一验证中 MAE、RMSE、MAPE 均降低的结果，并绑定公式源码与系数指纹。没有有效校准记录时，验证误差为 `null`；校准 RMSE 描述验证集误差，不是单个候选的置信区间。
 
 ## 智能体
 
@@ -106,7 +115,7 @@ P_PBIPF = d1 * lg(Q) * t / R
 - `knowledge/runtime/kg/relations.jsonl`：知识图谱关系
 - `knowledge/runtime/manifest.json`：用户增量文档数、chunk 数、向量索引数、实体关系数、检索验证结果、分块参数、去重键和最近一次入库流水线状态
 
-内置包生成于北京时间 2026-11-02，包含 173,228 个 RAG 文本块、2,219 个实体、250,606 条关系和 1,931 条来源元数据；具体版本、计数和 SHA256 以 `provenance/manifest.json` 为准。内置检索使用只读 SQLite 连接和内存映射向量矩阵，不把全量文本载入 Python 扫描。查询使用与索引一致的 BGE-M3 归一化 CLS 编码、1024 token 窗口、128 token 重叠及去重 token 加权汇总，BM25 与语义候选通过 RRF 融合并按文献去重。模型按需在后台加载；缺失模型或编码失败明确报错，不用哈希向量冒充语义检索。用户增量仍使用独立 Chroma collection，入库流水线与内置索引状态分别显示。
+内置包包含 173,228 个 RAG 文本块、2,219 个实体、250,606 条关系和 1,931 条来源元数据；具体版本、计数和 SHA256 以 `provenance/manifest.json` 为准。内置检索使用只读 SQLite 连接和内存映射向量矩阵，不把全量文本载入 Python 扫描。查询使用与索引一致的 BGE-M3 归一化 CLS 编码、1024 token 窗口、128 token 重叠及去重 token 加权汇总，BM25 与语义候选通过 RRF 融合并按文献去重。模型按需在后台加载；缺失模型或编码失败明确报错，不用哈希向量冒充语义检索。用户增量仍使用独立 Chroma collection，入库流水线与内置索引状态分别显示。
 
 知识包校验与同步：
 
@@ -117,7 +126,7 @@ python -B scripts/sync_builtin_knowledge.py --source <知识包目录> --archive
 
 同步校验文件哈希、实际记录数、文本块身份和图谱证据引用，只更新 `knowledge/csllm`，不覆盖用户增量、案例或求解工件。
 
-正式案例库包含 11 条完整真实 Abaqus 工况记录，服务压力覆盖 5、10、15、20、30、40、50、60、70、80 MPa，保留 44 份 ODB 及对应输入和损伤模型工件。四种材料的高承压结构在当前模型内的容量峰值分别为 150.224333、159.733045、114.094859、183.470576 MPa；这些数值不代表试验认证或额定工作压力。案例工况、编号和结果边界见 [项目状态](docs/项目状态.md#当前案例库)；同一结构在不同压力下的记录不等同于独立几何样本。
+任务和案例库初始为空。案例由实际有限元校核结果建立，入库要求完整的逐层应力、损伤输出、已确认的容量极限点及对应求解工件。编号和入库条件见 [项目状态](docs/项目状态.md#案例库)。
 
 资料入库流程为“MinerU / Docling 文档解析 -> 语义分块 -> BGE-M3 向量化索引 -> KG 实体/关系抽取 -> 检索验证 / 证据引用”。PDF、DOCX、PPTX 和图片优先调用 MinerU，失败后尝试 Docling；PDF 会先检查文本层，文本层充足时使用 MinerU pipeline 文本路由，文本层稀疏或扫描型资料使用 MinerU high-accuracy 路由；外部解析器不可用时，PDF 使用 PyMuPDF 文本层解析，DOCX、PPTX、Excel、文本、Markdown、CSV、TSV 和工程文本使用本项目解析器。RAG 分块使用 `chunk_token_size`、`chunk_overlap_tokens` 和 `min_chunk_tokens` 控制 token 窗口、重叠上下文和小块合并；完全相同的 chunk 按 `content_hash` 去重。去重后的用户增量 chunk 写入 `knowledge/runtime/rag/rag_chunks.jsonl`，并同步写入 `knowledge/chroma_db` 中的 `csdm_cph_project_knowledge` collection。向量后端按 `rag.embedding_model=BAAI/bge-m3` 读取本地模型，优先使用 `rag.embedding_cache_dir`，找不到完整快照时只读取当前用户 Hugging Face 本地缓存，不触发下载；两处都没有可用快照时明确记录失败，不使用哈希向量替代。入库服务的 `vector_ready` 只表示用户增量 collection 实际写入成功且数量大于 0；GUI 汇总内置与用户增量向量状态，入库失败仍通过流水线和警告显示。增量向量不可用时保留其 JSONL/BM25 和 KG 检索，manifest 记录失败摘要。KG 写出用户增量实体、关系和统计文件；新资料入库时保留其他上传资料的 RAG chunk、实体和关系，并按文档编号替换同一资料的旧记录。检索验证会确认当前资料的文本块可命中、图谱关系引用有效 chunk，并把证据样本写入 manifest。
 
@@ -129,7 +138,7 @@ GUI 的“监控”页提供最近运行记录下拉框、刷新运行记录和�
 
 ## 启动
 
-仓库中的正式 ODB、内置 RAG 压缩文件、SQLite 索引和向量矩阵使用 Git LFS 保存。首次检出后执行 `git lfs install` 和 `git lfs pull`，确保工作目录中是完整文件，而不是 LFS 指针文本。运行生成的 INP、ODB、子程序和监测证据保存在各候选作业目录；不能把有效求解工件当作普通缓存清理。
+内置 RAG 压缩文件、SQLite 索引和向量矩阵使用 Git LFS 保存。首次检出后执行 `git lfs install` 和 `git lfs pull`，确保工作目录中是完整文件，而不是 LFS 指针文本。运行生成的 INP、ODB、子程序和监测证据保存在各候选作业目录；不能把有效求解工件当作普通缓存清理。
 
 ```powershell
 D:\anaconda3\envs\AGENT\python.exe main.py
@@ -142,6 +151,16 @@ Windows 进程在导入核心模块时将未配置的 `MKL_THREADING_LAYER` 设�
 ```powershell
 D:\anaconda3\envs\AGENT\python.exe scripts\check_env.py
 ```
+
+缓存清理先预览目标，再显式执行。发布审计只检查残留，不删除文件：
+
+```powershell
+python -B scripts/clean_artifacts.py
+python -B scripts/clean_artifacts.py --apply
+python -B scripts/release_audit.py
+```
+
+自动清理范围为 Python、pytest 和 Ruff 缓存。求解工件仅在显式提供 `--candidate-id C<N>`、没有案例引用且不存在作业锁时允许删除；正式案例、资料库、模型权重和浏览器登录状态不属于缓存。
 
 多条自然语言输入端到端验收：
 

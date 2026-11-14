@@ -6,7 +6,6 @@ import argparse
 import tempfile
 import json
 import re
-import shutil
 import subprocess
 import sys
 import time
@@ -138,28 +137,25 @@ class ReleaseAudit:
         self.items.append(AuditItem(name=name, passed=passed, detail=detail))
 
     def run(self) -> int:
-        try:
-            self.check_clean_residuals()
-            self.check_cache_absent()
-            self.check_env_ignored()
-            self.check_product_identity()
-            self.check_agent_runtime_contract()
-            self.check_runtime_knowledge_paths()
-            self.check_builtin_knowledge_integrity()
-            self.check_runtime_knowledge_status_contract()
-            self.check_knowledge_pipeline_contract()
-            self.check_knowledge_file_type_contract()
-            self.check_gui_workbench_contract()
-            self.check_async_runtime_contract()
-            if self.with_gui_render:
-                self.check_gui_render_contract()
-            self.check_ui_assets()
-            self.check_cases()
-            self.check_latest_report()
-            if self.with_llm_health:
-                self.check_llm_health()
-        finally:
-            self._remove_python_caches()
+        self.check_clean_residuals()
+        self.check_cache_absent()
+        self.check_env_ignored()
+        self.check_product_identity()
+        self.check_agent_runtime_contract()
+        self.check_runtime_knowledge_paths()
+        self.check_builtin_knowledge_integrity()
+        self.check_runtime_knowledge_status_contract()
+        self.check_knowledge_pipeline_contract()
+        self.check_knowledge_file_type_contract()
+        self.check_gui_workbench_contract()
+        self.check_async_runtime_contract()
+        if self.with_gui_render:
+            self.check_gui_render_contract()
+        self.check_ui_assets()
+        self.check_cases()
+        self.check_latest_report()
+        if self.with_llm_health:
+            self.check_llm_health()
 
         for item in self.items:
             status = "PASS" if item.passed else "FAIL"
@@ -191,20 +187,10 @@ class ReleaseAudit:
         self.add("产品关键词", not hits, "产品命名、模型名称、运行路径和报告标题一致" if not hits else "; ".join(hits[:12]))
 
     def check_cache_absent(self) -> None:
-        self._remove_python_caches()
-        caches = [path.relative_to(ROOT).as_posix() for path in ROOT.rglob("__pycache__")]
-        pytest_cache = ROOT / ".pytest_cache"
-        if pytest_cache.exists():
-            caches.append(".pytest_cache")
-        self.add("本地运行产物", not caches, "无 Python 测试缓存目录" if not caches else ", ".join(caches[:12]))
+        from scripts.clean_artifacts import python_cache_paths
 
-    def _remove_python_caches(self) -> None:
-        for path in ROOT.rglob("__pycache__"):
-            if path.is_dir():
-                shutil.rmtree(path, ignore_errors=True)
-        pytest_cache = ROOT / ".pytest_cache"
-        if pytest_cache.exists():
-            shutil.rmtree(pytest_cache, ignore_errors=True)
+        caches = sorted({path.relative_to(ROOT).as_posix() for path in python_cache_paths(ROOT) if path.exists()})
+        self.add("本地运行产物", not caches, "无 Python、pytest 和 Ruff 缓存" if not caches else ", ".join(caches[:12]))
 
     def _git_output(self, args: list[str]) -> subprocess.CompletedProcess[str] | None:
         try:
@@ -881,7 +867,7 @@ class ReleaseAudit:
             )
             window.chat_widget.add_message(
                 "SCREENER",
-                "代理模型初筛已完成，候选按 PBIPF 预测极限压力、面密度和公式不确定度排序。",
+                "代理模型初筛已完成，候选按 PBIPF 预测极限压力和面密度排序。",
             )
             window._handle_runtime_state_event("node_completed", "parse_task", "parse_task")
             window._handle_runtime_state_event("tool_completed", "generate_candidates", "candidate_generator")
@@ -1019,7 +1005,12 @@ class ReleaseAudit:
         case_dir = ROOT / "data/cases"
         paths = sorted(case_dir.glob("CASE_*.json"), key=lambda item: int(item.stem.split("_")[1]))
         if not paths:
-            self.add("案例库编号", False, "data/cases 为空")
+            library_paths = list((ROOT / "knowledge/case_library").glob("CASE_*.json"))
+            self.add(
+                "案例库编号",
+                not library_paths,
+                "案例库为空，尚无有限元入库记录" if not library_paths else "迁移案例缺少对应的正式有限元记录",
+            )
             return
 
         errors: list[str] = []

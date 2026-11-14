@@ -1,6 +1,8 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from core.fem_result_semantics import (
     is_passed_design_check,
     normalize_result_semantics,
@@ -82,6 +84,29 @@ def test_linear_buckling_pressure_is_not_capacity_training_target():
     assert record_to_training_sample({"design": {}, "abaqus_results": results}) is None
 
 
+@pytest.mark.parametrize("results", [
+    {},
+    {"status": "success", "linear_buckling_pressure_MPa": 30.0},
+    {"status": "failed", "ultimate_pressure_MPa": 30.0},
+    {"status": "success", "ultimate_pressure_MPa": 30.0,
+     "verification_scope": "composite_cylindrical_shell_submodel"},
+])
+def test_case_retrieval_keeps_unknown_capacity_after_comparable_verified_cases(monkeypatch, results):
+    retriever = CaseRetriever(use_vector_index=False)
+    task = {"design_targets": {"ultimate_pressure_min_MPa": 30.0}}
+    design = {"hull_type": "CYLINDRICAL", "geometry": {"length_mm": 500.0}}
+    records = [
+        {"case_id": "unknown", "design": design, "abaqus_results": results},
+        {"case_id": "verified", "design": design,
+         "abaqus_results": {"status": "success", "ultimate_pressure_MPa": 40.0}},
+    ]
+    monkeypatch.setattr(retriever, "_load_records", lambda: iter(records))
+    ranked = retriever.retrieve_similar_cases(task, top_k=2)
+    assert [record["case_id"] for record in ranked] == ["verified", "unknown"]
+    assert retriever._score(task, records[0]) == retriever._score(task, {"design": design})
+    assert records[0]["abaqus_results"] == results
+
+
 def test_verified_capacity_pressure_accepts_completed_capacity_evidence():
     results = {
         "status": "success",
@@ -92,6 +117,31 @@ def test_verified_capacity_pressure_accepts_completed_capacity_evidence():
 
     assert is_passed_design_check(results)
     assert verified_capacity_pressure(results) == 80.0
+
+
+def test_case_retrieval_compares_equal_radius_references():
+    retriever = CaseRetriever(use_vector_index=False)
+    task = {"radius_reference": "inner", "geometry_envelope": {"radius_mm": [150, 150]}}
+    scores = []
+    for reference, radius in [("inner", 150), ("middle_surface", 155), ("outer", 160)]:
+        record = {"design": {"geometry": {"radius_reference": reference, "radius_mm": radius,
+                                           "thickness_mm": 10, "imperfection_ratio": 0.008}}}
+        scores.append(retriever._score(task, record))
+    assert scores == [0.0, 0.0, 0.0]
+
+
+def test_case_retrieval_does_not_invent_unknown_dimensions_or_pressure_targets():
+    retriever = CaseRetriever(use_vector_index=False)
+    record = {"design": {"geometry": {"imperfection_ratio": 0.008}},
+              "abaqus_results": {"status": "success", "ultimate_pressure_MPa": 100.0}}
+    assert retriever._geometry_center({}) == {"imperfection_ratio": 0.008}
+    assert retriever._score({}, record) == 0
+    assert retriever._score({"geometry_envelope": {"length_mm": [600, 600]}}, record) == float("inf")
+
+
+def test_case_retrieval_uses_project_defect_setting():
+    retriever = CaseRetriever(use_vector_index=False)
+    assert retriever._geometry_center({"geometry_envelope": {"imperfection_ratio": [0.001, 0.01]}})["imperfection_ratio"] == 0.008
 
 
 def test_shell_pass_and_capacity_require_full_ply_and_damage_evidence():
@@ -119,7 +169,12 @@ def test_training_record_loader_excludes_target_only_and_failed_results(tmp_path
         encoding="utf-8",
     )
     (cases / "CASE_3.json").write_text(
-        '{"design": {}, "abaqus_results": {"status": "success", "ultimate_pressure_MPa": 80.0}}',
+        json.dumps({"design": {
+            "geometry": {"length_mm": 500, "radius_mm": 100, "thickness_mm": 10,
+                         "alpha_deg": 40, "beta_deg": 70, "imperfection_ratio": 0.008},
+            "layup": {"layup": "[90_4/(±40/±70)_8/90_4]"},
+            "material_system": {"E1_GPa": 100, "E2_GPa": 10, "G12_GPa": 5, "nu12": 0.3},
+        }, "abaqus_results": {"status": "success", "ultimate_pressure_MPa": 80.0}}),
         encoding="utf-8",
     )
 

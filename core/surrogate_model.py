@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Sequence
 
 from core.config_loader import load_param_ranges
+from abaqus.cylindrical_geometry import positive_number, shell_radii
 from core.fem_result_semantics import verified_capacity_pressure
 from core.io_utils import read_json
 from core.paths import CASES_DIR, MODELS_DIR
+from core.pressure_regression import PressureRegression
 from core.pressure_hull_profile import (
     CANONICAL_GEOMETRY_ORDER,
     compute_laminate_stiffness,
@@ -48,16 +52,64 @@ FEATURE_ORDER = [
 ]
 
 
-def _safe_float(value: Any, default: float = 0.0) -> float:
+def _finite_number(value: Any, field: str) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{field} 必须为有限数值")
     try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{field} 必须为有限数值") from exc
+    if not math.isfinite(number):
+        raise ValueError(f"{field} 必须为有限数值")
+    return number
 
 
+@lru_cache(maxsize=1)
 def _coefficients() -> Dict[str, Dict[str, Any]]:
     payload = load_param_ranges()
-    return dict(payload.get("surrogate_coefficients", {}))
+    coefficients = dict(payload.get("surrogate_coefficients", {}))
+    pbipf = coefficients.get("PBIPF", {})
+    _validate_regression_report(pbipf)
+    return coefficients
+
+
+def _validate_regression_report(pbipf: Dict[str, Any]) -> Dict[str, Any]:
+    root = Path(__file__).resolve().parents[1]
+    path = (root / str(pbipf.get("validation_report", ""))).resolve()
+    if not path.is_relative_to(root) or not path.is_file():
+        raise ValueError("压力回归缺少项目内验证报告")
+    report = json.loads(path.read_text(encoding="utf-8"))
+    if report.get("status") != "validated_candidate" or pbipf.get("q_method") != "ASME_RD_1172":
+        raise ValueError("压力回归验证状态或 Q 定义不一致")
+    if pbipf.get("imperfection_input") != "permille" or pbipf.get("imperfection_ratio_to_permille") != 1000:
+        raise ValueError("压力回归缺陷单位与描述符定义不一致")
+    model = report.get("model", {})
+    expected = {
+        "coefficients": [pbipf.get(name) for name in ("d1", "d2", "d3")],
+        "intercept_MPa": pbipf.get("d0"), "link": pbipf.get("link"),
+        "link_scale_MPa": pbipf.get("link_scale_MPa"),
+    }
+    if model != expected:
+        raise ValueError("压力回归参数与验证报告不一致")
+    required = {"core/pressure_regression.py", "core/pressure_hull_profile.py", "abaqus/cylindrical_geometry.py", "core/surrogate_model.py"}
+    hashes = report.get("code_hashes", {})
+    if not required <= hashes.keys():
+        raise ValueError("压力回归报告缺少计算代码指纹")
+    for name in required:
+        if hashlib.sha256((root / name).read_bytes()).hexdigest() != hashes[name]:
+            raise ValueError(f"压力回归计算代码与验证报告不一致：{name}")
+    dataset = root / "data/surrogate/design_dataset.csv"
+    if hashlib.sha256(dataset.read_bytes()).hexdigest() != report.get("dataset_sha256"):
+        raise ValueError("压力回归数据与验证报告不一致")
+    return report
+
+
+def _formula_fingerprint() -> str:
+    root = Path(__file__).resolve().parents[1]
+    sources = {name: hashlib.sha256((root / name).read_bytes()).hexdigest() for name in (
+        "core/surrogate_model.py", "core/pressure_regression.py", "core/pressure_hull_profile.py", "abaqus/cylindrical_geometry.py")}
+    payload = {"sources": sources, "coefficients": _coefficients()}
+    return hashlib.sha256(json.dumps(payload, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
 
 
 def _pbipf_descriptors(
@@ -78,29 +130,41 @@ def _pbipf_descriptors(
     候选合同把缺陷保存为比例值；PBIPF 公式的第三个描述符使用千分比值。
     两者的转换集中在这里，避免单条和批量预测使用不同口径。
     """
-    ratio_to_permille_value = pbipf.get("imperfection_ratio_to_permille")
-    ratio_to_permille = _safe_float(ratio_to_permille_value, 0.0)
-    if ratio_to_permille <= 0:
-        raise ValueError("PBIPF 配置缺少有效的 imperfection_ratio_to_permille")
-    imperfection_permille = max(float(imperfection_ratio), 1e-9) * ratio_to_permille
-    d_delta = float(d33) - float(d12)
-    if abs(d_delta) < 1e-9:
-        d_delta = math.copysign(1e-9, d_delta or 1.0)
-    return {
-        "D1": math.log10(max(float(q_value), 1e-6)) * float(thickness_mm) / max(float(radius_mm), 1e-9),
-        "D2": float(q_value) * float(d22) / d_delta,
-        "D3": float(q_value) * imperfection_permille * float(length_mm) / max(float(a22), 1e-9),
+    ratio_to_permille = positive_number(pbipf.get("imperfection_ratio_to_permille"), "imperfection_ratio_to_permille")
+    q = positive_number(q_value, "Q")
+    length = positive_number(length_mm, "length_mm")
+    radius = positive_number(radius_mm, "radius_mm")
+    thickness = positive_number(thickness_mm, "thickness_mm")
+    a22 = positive_number(a22, "A22")
+    d22 = positive_number(d22, "D22")
+    d33 = positive_number(d33, "D33")
+    d12 = _finite_number(d12, "D12")
+    imperfection = _finite_number(imperfection_ratio, "imperfection_ratio")
+    if imperfection < 0:
+        raise ValueError("imperfection_ratio 不能为负数")
+    d_delta = d33 - d12
+    if abs(d_delta) <= 1e-12 * max(abs(d33), abs(d12)):
+        raise ValueError("PBIPF 描述符在 D33-D12 接近零时无定义")
+    descriptors = {
+        "D1": math.log10(q) * thickness / radius,
+        "D2": q * d22 / d_delta,
+        "D3": q * imperfection * ratio_to_permille * length / a22,
     }
+    return {name: _finite_number(value, name) for name, value in descriptors.items()}
 
 
 def _evaluate_pbipf(pbipf: Dict[str, Any], descriptors: Dict[str, float]) -> float:
-    """使用已计算的工程单位描述符评估 PBIPF 公式。"""
+    """按工程单位描述符和配置链接计算预筛压力。"""
     try:
-        coefficients = [float(pbipf[name]) for name in ("d1", "d2", "d3", "d0")]
+        coefficients = [_finite_number(pbipf[name], name) for name in ("d1", "d2", "d3", "d0")]
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError("PBIPF 配置必须包含 d1、d2、d3 和 d0") from exc
     d1, d2, d3, d0 = coefficients
-    return d1 * descriptors["D1"] + d2 * descriptors["D2"] + d3 * descriptors["D3"] + d0
+    import numpy as np
+
+    model = PressureRegression((d1, d2, d3), d0, str(pbipf.get("link", "identity")), pbipf.get("link_scale_MPa"))
+    pressure = model.predict(np.array([[descriptors[name] for name in ("D1", "D2", "D3")]]))[0]
+    return positive_number(pressure, "PBIPF_MPa")
 
 
 def _error_metrics(targets: Sequence[float], predictions: Sequence[float]) -> Dict[str, float]:
@@ -121,11 +185,13 @@ def _error_metrics(targets: Sequence[float], predictions: Sequence[float]) -> Di
 
 
 def _fit_positive_scale(predictions: Sequence[float], targets: Sequence[float]) -> float:
+    if not predictions or len(predictions) != len(targets):
+        raise ValueError("比例校准需要数量一致的非空预测与目标")
+    predictions = [positive_number(value, "prediction") for value in predictions]
+    targets = [positive_number(value, "target") for value in targets]
     denominator = sum(float(prediction) ** 2 for prediction in predictions)
-    if denominator <= 1e-12:
-        return 1.0
     numerator = sum(float(prediction) * float(target) for prediction, target in zip(predictions, targets))
-    return max(numerator / denominator, 1e-9)
+    return positive_number(numerator / denominator, "calibration.scale")
 
 
 def _leave_one_out_scale_predictions(predictions: Sequence[float], targets: Sequence[float]) -> List[float]:
@@ -145,12 +211,13 @@ def candidate_to_features(candidate: Dict[str, Any], task: Dict[str, Any] | None
     boundary_source = task.get("boundary_conditions", {}) if task else candidate.get("boundary_conditions", {})
     load_conditions = normalize_load_conditions(load_source)
     boundary_conditions = normalize_boundary_conditions(boundary_source)
-    stiffness = compute_laminate_stiffness(layup, material, _safe_float(geometry.get("thickness_mm"), 10.0))
+    stiffness = compute_laminate_stiffness(layup, material, positive_number(geometry.get("thickness_mm"), "thickness_mm"))
     q_value = estimate_linear_buckling_feature_q(geometry, stiffness, material, boundary_conditions)
 
     geom_features = geometry_to_feature_vector(geometry)
     feature_map = {
         **{CANONICAL_GEOMETRY_ORDER[i]: geom_features[i] for i in range(len(CANONICAL_GEOMETRY_ORDER))},
+        "radius_mm": shell_radii(geometry)["middle_surface"],
         "ply_count": float(layup.get("ply_count", 0.0)),
         "A22": float(stiffness["A22"]),
         "B23": float(stiffness["B23"]),
@@ -168,7 +235,10 @@ def candidate_to_features(candidate: Dict[str, Any], task: Dict[str, Any] | None
         "nu12": float(material.get("nu12", 0.0)),
     }
     active_feature_order = list(feature_order or FEATURE_ORDER)
-    return [float(feature_map.get(name, 0.0)) for name in active_feature_order]
+    unknown = set(active_feature_order) - feature_map.keys()
+    if unknown:
+        raise ValueError(f"未知代理模型特征：{sorted(unknown)}")
+    return [_finite_number(feature_map[name], name) for name in active_feature_order]
 
 
 def _ultimate_pressure_from_results(results: Dict[str, Any]) -> float | None:
@@ -191,11 +261,12 @@ class FormulaPrediction:
     ultimate_pressure_MPa: float
     linear_buckling_pressure_MPa: float
     linear_buckling_source: str
-    uncertainty_MPa: float
+    uncertainty_MPa: float | None
     calibration_status: str
     descriptors: Dict[str, float]
     imperfection_input: str
     stiffness: Dict[str, Any]
+    model_validation: Dict[str, Any]
 
     def to_dict(self) -> Dict[str, Any]:
         return {
@@ -206,6 +277,7 @@ class FormulaPrediction:
             "linear_buckling_source": self.linear_buckling_source,
             "uncertainty_MPa": self.uncertainty_MPa,
             "calibration_status": self.calibration_status,
+            "model_validation": self.model_validation,
             "PBIPF_descriptors": self.descriptors,
             "PBIPF_imperfection_input": self.imperfection_input,
             "stiffness_terms": {
@@ -214,33 +286,42 @@ class FormulaPrediction:
                 "D12": self.stiffness["D12"],
                 "D22": self.stiffness["D22"],
                 "D33": self.stiffness["D33"],
-                "B23_raw": self.stiffness["B23_raw"],
             },
         }
 
 
 class SurrogateModelManager:
-    """以 PBIPF 符号公式为主，仅应用通过留一验证的全局比例校准。"""
+    """使用验证报告对应的压力回归，并应用已接受的案例比例校准。"""
 
     def __init__(self, models_dir: Path | None = None, case_dir: Path | None = None) -> None:
         self.models_dir = models_dir or MODELS_DIR
         self.case_dir = case_dir or CASES_DIR
         self.models_dir.mkdir(parents=True, exist_ok=True)
         self.calibration_path = self.models_dir / "pressure_hull_surrogate_calibration.json"
+        self.validation_report = _validate_regression_report(_coefficients()["PBIPF"])
 
     def _load_calibration(self) -> Dict[str, Any]:
         if not self.calibration_path.exists():
             return {"bias_MPa": 0.0, "scale": 1.0, "uncertainty_MPa": None, "calibration_status": "not_available"}
         try:
             payload = json.loads(self.calibration_path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return {"bias_MPa": 0.0, "scale": 1.0, "uncertainty_MPa": None, "calibration_status": "invalid"}
+        except (OSError, json.JSONDecodeError) as exc:
+            raise ValueError(f"代理模型校准文件不可读取：{self.calibration_path}") from exc
+        if not isinstance(payload, dict):
+            raise ValueError("代理模型校准文件必须是对象")
         status = str(payload.get("calibration_status") or "legacy_unverified")
+        if status not in {"accepted", "rejected", "legacy_unverified"}:
+            raise ValueError(f"未知代理模型校准状态：{status}")
         accepted = status == "accepted"
+        if accepted and payload.get("formula_fingerprint") != _formula_fingerprint():
+            raise ValueError("校准记录与当前公式、刚度计算或系数不一致")
+        uncertainty = _finite_number(payload.get("uncertainty_MPa"), "calibration.uncertainty_MPa") if accepted else None
+        if uncertainty is not None and uncertainty < 0:
+            raise ValueError("校准误差不能为负数")
         return {
-            "bias_MPa": _safe_float(payload.get("bias_MPa"), 0.0) if accepted else 0.0,
-            "scale": (_safe_float(payload.get("scale"), 1.0) or 1.0) if accepted else 1.0,
-            "uncertainty_MPa": payload.get("uncertainty_MPa") if accepted else None,
+            "bias_MPa": _finite_number(payload.get("bias_MPa"), "calibration.bias_MPa") if accepted else 0.0,
+            "scale": positive_number(payload.get("scale"), "calibration.scale") if accepted else 1.0,
+            "uncertainty_MPa": uncertainty,
             "calibration_status": status,
         }
 
@@ -256,21 +337,21 @@ class SurrogateModelManager:
         geometry = dict(candidate.get("geometry", {}))
         material = dict(candidate.get("material_system", {}))
         layup = normalize_layup(candidate.get("layup", {}), geometry)
-        stiffness = compute_laminate_stiffness(layup, material, _safe_float(geometry.get("thickness_mm"), 10.0))
+        stiffness = compute_laminate_stiffness(layup, material, positive_number(geometry.get("thickness_mm"), "thickness_mm"))
         boundary_conditions = normalize_boundary_conditions(candidate.get("boundary_conditions", {}))
-        q_value = max(estimate_linear_buckling_feature_q(geometry, stiffness, material, boundary_conditions), 1e-6)
+        q_value = estimate_linear_buckling_feature_q(geometry, stiffness, material, boundary_conditions)
         q_source = "ASME RD-1172线性屈曲公式"
         coefficients = _coefficients()
         pbipf = coefficients.get("PBIPF", {})
 
-        length = max(_safe_float(geometry.get("length_mm"), 500.0), 1e-9)
-        radius = max(_safe_float(geometry.get("radius_mm"), 100.0), 1e-9)
-        thickness = max(_safe_float(geometry.get("thickness_mm"), 10.0), 1e-9)
-        imperfection = max(_safe_float(geometry.get("imperfection_ratio"), 0.005), 1e-9)
-        a22 = max(float(stiffness["A22"]), 1e-9)
+        length = geometry.get("length_mm")
+        radius = shell_radii(geometry)["middle_surface"]
+        thickness = geometry.get("thickness_mm")
+        imperfection = geometry.get("imperfection_ratio")
+        a22 = float(stiffness["A22"])
         d12 = float(stiffness["D12"])
-        d22 = max(float(stiffness["D22"]), 1e-9)
-        d33 = max(float(stiffness["D33"]), 1e-9)
+        d22 = float(stiffness["D22"])
+        d33 = float(stiffness["D33"])
         descriptors = _pbipf_descriptors(
             pbipf,
             q_value=q_value,
@@ -290,22 +371,27 @@ class SurrogateModelManager:
             if apply_calibration
             else {"bias_MPa": 0.0, "scale": 1.0, "uncertainty_MPa": None, "calibration_status": "disabled"}
         )
-        pbipf_pressure = max(pbipf_pressure * calibration["scale"] + calibration["bias_MPa"], 0.1)
-        ultimate_pressure = max(pbipf_pressure, 0.1)
-        uncertainty = max(
-            _safe_float(pbipf.get("rmse_MPa"), 5.04),
-            _safe_float(calibration.get("uncertainty_MPa"), 0.0),
-        )
+        ultimate_pressure = positive_number(pbipf_pressure * calibration["scale"] + calibration["bias_MPa"], "calibrated_PBIPF_MPa")
+        uncertainty = calibration["uncertainty_MPa"]
         return FormulaPrediction(
-            pbipf_MPa=round(float(pbipf_pressure), 3),
-            ultimate_pressure_MPa=round(float(ultimate_pressure), 3),
+            pbipf_MPa=float(ultimate_pressure),
+            ultimate_pressure_MPa=float(ultimate_pressure),
             linear_buckling_pressure_MPa=round(float(q_value), 6),
             linear_buckling_source=q_source,
-            uncertainty_MPa=round(float(uncertainty), 3),
+            uncertainty_MPa=round(float(uncertainty), 3) if uncertainty is not None else None,
             calibration_status=str(calibration.get("calibration_status") or "not_available"),
             descriptors={key: round(float(value), 12) for key, value in descriptors.items()},
             imperfection_input=str(pbipf.get("imperfection_input") or "permille"),
             stiffness=stiffness,
+            model_validation={
+                "link": pbipf["link"],
+                "cross_validation_rmse_MPa": self.validation_report["cross_validation"]["metrics"][pbipf["link"]]["rmse_MPa"],
+                "testing_rmse_MPa": self.validation_report["testing"]["candidate"]["rmse_MPa"],
+                "outside_descriptor_range": any(
+                    not low <= descriptors[name] <= high
+                    for name, low, high in zip(("D1", "D2", "D3"), self.validation_report["training_feature_min"], self.validation_report["training_feature_max"])
+                ),
+            },
         )
 
     def train_from_records(self, records: Sequence[Dict[str, Any]]) -> Dict[str, Any]:
@@ -332,10 +418,11 @@ class SurrogateModelManager:
         applied_scale = candidate_scale if accepted else 1.0
         uncertainty = validation_metrics["rmse_MPa"] if accepted else baseline_metrics["rmse_MPa"]
         summary = {
-            "selected_model": "PBIPF_ASME_RD_1172",
+            "selected_model": "ASME_descriptor_pressure_regression",
             "training_size": len(targets),
             "calibration_status": "accepted" if accepted else "rejected",
             "calibration_method": "positive_scale_leave_one_out",
+            "formula_fingerprint": _formula_fingerprint(),
             "bias_MPa": 0.0,
             "scale": round(applied_scale, 6),
             "candidate_scale": round(candidate_scale, 6),
@@ -351,61 +438,29 @@ class SurrogateModelManager:
         self.calibration_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         return summary
 
-    def train(self, feature_rows: Sequence[Sequence[float]], targets: Sequence[float]) -> Dict[str, Any]:
-        if len(targets) < 3:
-            raise RuntimeError("代理模型校准至少需要 3 条目标数据")
-        target_mean = sum(float(value) for value in targets) / len(targets)
-        summary = {
-            "selected_model": "PBIPF_ASME_RD_1172",
-            "training_size": len(targets),
-            "calibration_status": "not_applicable",
-            "calibration_method": "external_targets_without_formula_validation",
-            "bias_MPa": 0.0,
-            "scale": 1.0,
-            "target_mean_MPa": round(target_mean, 6),
-            "feature_order": FEATURE_ORDER,
-            "linear_buckling_model": "ASME_RD_1172",
-        }
-        self.calibration_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
-        return summary
-
     def predict(self, feature_rows: Sequence[Sequence[float]]) -> List[float]:
         coefficients = _coefficients().get("PBIPF", {})
         calibration = self._load_calibration()
-        index_by_name = {name: index for index, name in enumerate(FEATURE_ORDER)}
-
-        def value(row: Sequence[float], name: str, default: float) -> float:
-            index = index_by_name.get(name)
-            if index is None or index >= len(row):
-                return default
-            return _safe_float(row[index], default)
-
         predictions: List[float] = []
         for row in feature_rows:
-            q_value = max(value(row, "asme_linear_buckling_pressure_MPa", 1e-6), 1e-6)
-            length = max(value(row, "length_mm", 500.0), 1e-9)
-            radius = max(value(row, "radius_mm", 100.0), 1e-9)
-            thickness = max(value(row, "thickness_mm", 10.0), 1e-9)
-            imperfection = max(value(row, "imperfection_ratio", 0.005), 1e-9)
-            a22 = max(value(row, "A22", 1.0), 1e-9)
-            d12 = value(row, "D12", 0.0)
-            d22 = max(value(row, "D22", 1.0), 1e-9)
-            d33 = max(value(row, "D33", 1.0), 1e-9)
+            if len(row) != len(FEATURE_ORDER):
+                raise ValueError(f"代理模型特征需要 {len(FEATURE_ORDER)} 项，实际为 {len(row)} 项")
+            values = {name: _finite_number(value, name) for name, value in zip(FEATURE_ORDER, row)}
             descriptors = _pbipf_descriptors(
                 coefficients,
-                q_value=q_value,
-                length_mm=length,
-                radius_mm=radius,
-                thickness_mm=thickness,
-                imperfection_ratio=imperfection,
-                a22=a22,
-                d12=d12,
-                d22=d22,
-                d33=d33,
+                q_value=values["asme_linear_buckling_pressure_MPa"],
+                length_mm=values["length_mm"],
+                radius_mm=values["radius_mm"],
+                thickness_mm=values["thickness_mm"],
+                imperfection_ratio=values["imperfection_ratio"],
+                a22=values["A22"],
+                d12=values["D12"],
+                d22=values["D22"],
+                d33=values["D33"],
             )
             pressure = _evaluate_pbipf(coefficients, descriptors)
-            pressure = max(pressure * calibration["scale"] + calibration["bias_MPa"], 0.1)
-            predictions.append(round(float(pressure), 3))
+            pressure = positive_number(pressure * calibration["scale"] + calibration["bias_MPa"], "calibrated_PBIPF_MPa")
+            predictions.append(pressure)
         return predictions
 
     def predict_candidates(self, candidates: Iterable[Dict[str, Any]], task: Dict[str, Any] | None = None) -> List[float]:

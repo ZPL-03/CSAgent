@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from pathlib import Path
 from typing import Dict, Iterable, List
 
+from abaqus.cylindrical_geometry import positive_number, radius_reference, shell_radii
 from core.case_memory import CaseMemoryIndex, is_transferable_case
-from core.config_loader import load_app_config
+from core.config_loader import fixed_imperfection_ratio, load_app_config
+from core.fem_result_semantics import verified_capacity_pressure
 from core.io_utils import read_json
 from core.paths import CASE_LIBRARY_DIR, CASES_DIR
 from core.task_contract import equivalent_in_plane_load, normalize_boundary_conditions, normalize_load_conditions
@@ -101,20 +104,15 @@ class CaseRetriever:
 
     def _geometry_center(self, task: Dict) -> Dict[str, float]:
         envelope = task.get("geometry_envelope", {})
-
-        def center(key: str, default: float) -> float:
+        centers = {"imperfection_ratio": fixed_imperfection_ratio()}
+        for key in ("length_mm", "radius_mm", "thickness_mm"):
             value = envelope.get(key)
-            try:
-                return (float(value[0]) + float(value[1])) / 2.0
-            except Exception:
-                return default
-
-        return {
-            "length_mm": center("length_mm", 500.0),
-            "radius_mm": center("radius_mm", 100.0),
-            "thickness_mm": center("thickness_mm", 10.0),
-            "imperfection_ratio": center("imperfection_ratio", 0.005),
-        }
+            if value is None:
+                continue
+            if not isinstance(value, (list, tuple)) or len(value) != 2:
+                raise ValueError(f"geometry_envelope.{key} 需要上下限")
+            centers[key] = sum(positive_number(item, key) for item in value) / 2.0
+        return centers
 
     def _hull_type(self, payload: Dict) -> str:
         return str(payload.get("hull_type") or "CYLINDRICAL")
@@ -140,13 +138,6 @@ class CaseRetriever:
             return 2
         return -1
 
-    def _result_pressure(self, record: Dict, fallback: float) -> float:
-        results = record.get("abaqus_results", {})
-        for key in ["ultimate_pressure_MPa", "failure_pressure_MPa", "collapse_pressure_MPa", "linear_buckling_pressure_MPa"]:
-            if results.get(key) is not None:
-                return float(results.get(key) or fallback)
-        return fallback
-
     def _score(self, task: Dict, record: Dict) -> float:
         design = record.get("design", {})
         geometry = design.get("geometry", {})
@@ -156,24 +147,33 @@ class CaseRetriever:
             equivalent_in_plane_load(task.get("load_conditions", {}))
             - equivalent_in_plane_load(design.get("load_conditions", {}))
         )
-        length_gap = abs(float(geometry.get("length_mm", geometry_center["length_mm"])) - geometry_center["length_mm"])
-        radius_gap = abs(float(geometry.get("radius_mm", geometry_center["radius_mm"])) - geometry_center["radius_mm"])
-        thickness_gap = abs(float(geometry.get("thickness_mm", geometry_center["thickness_mm"])) - geometry_center["thickness_mm"])
-        imperfection_gap = abs(
-            float(geometry.get("imperfection_ratio", geometry_center["imperfection_ratio"]))
-            - geometry_center["imperfection_ratio"]
-        )
-        target_pressure = float(design_targets.get("ultimate_pressure_min_MPa", 30.0) or 30.0)
-        result_pressure = self._result_pressure(record, target_pressure)
-        pressure_gap = abs(result_pressure - target_pressure)
-        return (
-            load_gap * 1.0
-            + length_gap * 0.02
-            + radius_gap * 0.08
-            + thickness_gap * 1.5
-            + imperfection_gap * 1000.0
-            + pressure_gap * 2.0
-        )
+        geometry_gap = 0.0
+        weights = {"length_mm": 0.02, "radius_mm": 0.08, "thickness_mm": 1.5, "imperfection_ratio": 1000.0}
+        for key, center in geometry_center.items():
+            if geometry.get(key) is None:
+                return float("inf")
+            if key == "imperfection_ratio":
+                value = float(geometry[key])
+                if isinstance(geometry[key], bool) or not math.isfinite(value) or value < 0:
+                    raise ValueError("imperfection_ratio 必须为非负有限数值")
+            else:
+                value = positive_number(geometry[key], key)
+            if key == "radius_mm" and radius_reference(geometry) != radius_reference(task):
+                if geometry.get("thickness_mm") is None:
+                    return float("inf")
+                value = shell_radii(geometry)[radius_reference(task)]
+            geometry_gap += abs(value - center) * weights[key]
+        target = design_targets.get("ultimate_pressure_min_MPa")
+        target_pressure = positive_number(target, "ultimate_pressure_min_MPa") if target is not None else None
+        result_pressure = verified_capacity_pressure(record.get("abaqus_results", {}))
+        pressure_gap = abs(result_pressure - target_pressure) if result_pressure is not None and target_pressure is not None else 0.0
+        return load_gap + geometry_gap + pressure_gap * 2.0
+
+    def _ranking_key(self, item: RetrievedCase) -> tuple:
+        # 容量未知的案例仍可作为几何参考，但不与已有容量证据的案例比较压力距离。
+        capacity_unknown = verified_capacity_pressure(item.record.get("abaqus_results", {})) is None
+        return (-item.match_level, capacity_unknown, item.score,
+                item.vector_rank if item.vector_rank is not None else float("inf"))
 
     def _vector_rank_map(self, task: Dict, top_k: int, transferable_only: bool = False) -> Dict[str, int]:
         memory = self.case_memory
@@ -262,13 +262,7 @@ class CaseRetriever:
                 if len(ranked) >= top_k:
                     break
 
-        ranked.sort(
-            key=lambda item: (
-                -item.match_level,
-                item.score,
-                item.vector_rank if item.vector_rank is not None else 10**9,
-            )
-        )
+        ranked.sort(key=self._ranking_key)
         return [item.record for item in ranked[:top_k]]
 
     def retrieve_transferable_cases(self, task: Dict, top_k: int = 5) -> List[Dict]:
@@ -291,7 +285,7 @@ class CaseRetriever:
                     vector_rank=rank,
                 )
             )
-        ranked.sort(key=lambda item: (item.score, item.vector_rank if item.vector_rank is not None else 10**9))
+        ranked.sort(key=self._ranking_key)
         return [item.record for item in ranked[:top_k]]
 
     def transfer_candidates(self, task: Dict, top_k: int = 2) -> List[Dict]:

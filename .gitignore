@@ -22,6 +22,7 @@ Thumbs.db
 # 运行产物
 data/io/
 data/tasks/
+data/cases/
 data/abaqus_runs/
 data/results/latest_report.md
 data/results/latest_report.pdf
@@ -36,6 +37,7 @@ data/results/run_audit_*.md
 data/results/RUN_*/
 data/runtime/
 knowledge/chroma_db/
+knowledge/case_library/
 knowledge/runtime/
 models/embedding_cache/
 
@@ -53,20 +55,6 @@ abaqus/build_*.py
 *.prt
 *.sim
 *.rec
-
-# 已跟踪的正式 FEM 可视化工件
-!data/abaqus_runs/
-!data/abaqus_runs/**/
-!data/abaqus_runs/**/*.inp
-!data/abaqus_runs/**/*.odb
-!data/abaqus_runs/**/*_mode1.json
-data/abaqus_runs/**/*.fil
-data/abaqus_runs/**/candidate_input.json
-data/abaqus_runs/**/*.dat
-data/abaqus_runs/**/*.msg
-data/abaqus_runs/**/*.sta
-data/abaqus_runs/**/*.log
-data/abaqus_runs/**/*.exception
 
 # 日志
 *.log

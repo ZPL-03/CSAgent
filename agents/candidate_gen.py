@@ -528,31 +528,6 @@ class CandidateGenAgent(BaseAgent):
         geometry["imperfection_ratio"] = fixed_imperfection_ratio()
         return geometry
 
-    def _repair_layup_if_needed(self, layup: Dict[str, Any], geometry: Dict[str, float]) -> Dict[str, Any]:
-        candidate = {
-            "geometry": geometry,
-            "layup": layup,
-            "hull_type": "CYLINDRICAL",
-        }
-        rule_check = self.rule_checker.run(candidate, strict_solver_window=False, hull_type="CYLINDRICAL")
-        details = rule_check.get("details", {})
-        if (
-            details.get("layup_defined", True)
-            and details.get("ply_count_ok", True)
-            and details.get("balanced", True)
-            and details.get("angle_range_ok", True)
-        ):
-            return layup
-        template_name = str(layup.get("template_name") or "BASE_90_AB")
-        if template_name not in {"BASE_90_AB", "NO_OUTER_90", "BENCHMARK_A"}:
-            template_name = "BASE_90_AB"
-        return normalize_layup(
-            {
-                "template_name": template_name,
-                "layup": layup_pattern(geometry["alpha_deg"], geometry["beta_deg"], template_name),
-            },
-            geometry,
-        )
 
     def _normalize_candidate(self, task: Dict[str, Any], raw: Dict[str, Any], index: int, source: str) -> Dict[str, Any]:
         source_defect = (raw.get("geometry") or {}).get("imperfection_ratio")
@@ -566,11 +541,14 @@ class CandidateGenAgent(BaseAgent):
             )
         geometry = normalize_geometry(hull_type, raw.get("geometry"))
         geometry = self._repair_geometry_by_task(task, hull_type, geometry, index)
+        geometry["radius_reference"] = task_payload["radius_reference"]
         raw_layup = raw.get("layup", {})
         if not raw_layup:
             raw_layup = {"layup": layup_pattern(geometry["alpha_deg"], geometry["beta_deg"])}
-        layup = normalize_layup(raw_layup, geometry)
-        layup = self._repair_layup_if_needed(layup, geometry)
+        try:
+            layup = normalize_layup(raw_layup, geometry)
+        except ValueError as exc:
+            raise SchemaValidationError(f"{source} 候选铺层无效：{exc}") from exc
         material_system = self._resolve_material_system(task, raw.get("material_system"), index)
 
         candidate_id = format_temp_candidate_id(index)
@@ -595,6 +573,7 @@ class CandidateGenAgent(BaseAgent):
                 "proposed_imperfection_ratio": source_defect,
                 **(raw.get("provenance") or {}),
                 "fixed_analysis_conditions": {"imperfection_ratio": fixed_imperfection_ratio()},
+                "layup_origin": "proposal" if raw.get("layup") else "project_template_from_angles",
             },
             "llm_output_excerpt": _sanitize_llm_output_excerpt(raw.get("llm_output_excerpt")),
             "material_system": material_system,

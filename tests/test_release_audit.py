@@ -6,14 +6,71 @@ import sys
 from pathlib import Path
 import os
 
+import pytest
+
 
 ROOT = Path(__file__).resolve().parent.parent
 
 
 def _clean_test_caches() -> None:
-    for path in ROOT.rglob("__pycache__"):
-        shutil.rmtree(path, ignore_errors=True)
-    shutil.rmtree(ROOT / ".pytest_cache", ignore_errors=True)
+    from scripts.clean_artifacts import python_cache_paths, remove_path
+
+    for path in python_cache_paths():
+        remove_path(path)
+
+
+def test_release_audit_reports_caches_without_removing_them(monkeypatch, tmp_path):
+    from scripts import release_audit
+
+    paths = [tmp_path / "__pycache__", tmp_path / ".pytest_cache", tmp_path / ".ruff_cache"]
+    for path in paths:
+        path.mkdir()
+    bytecode = tmp_path / "module.pyc"
+    bytecode.write_bytes(b"cached")
+    monkeypatch.setattr(release_audit, "ROOT", tmp_path)
+    audit = release_audit.ReleaseAudit()
+    audit.check_cache_absent()
+    assert not audit.items[-1].passed
+    assert all(path.exists() for path in [*paths, bytecode])
+    assert "module.pyc" in audit.items[-1].detail
+
+
+@pytest.mark.parametrize("create_directories", [False, True])
+def test_release_audit_accepts_empty_case_store(monkeypatch, tmp_path, create_directories):
+    from scripts import release_audit
+
+    if create_directories:
+        (tmp_path / "data/cases").mkdir(parents=True)
+        (tmp_path / "knowledge/case_library").mkdir(parents=True)
+    monkeypatch.setattr(release_audit, "ROOT", tmp_path)
+    audit = release_audit.ReleaseAudit()
+    audit.check_cases()
+    assert audit.items[-1].passed
+    assert "案例库为空" in audit.items[-1].detail
+
+
+def test_release_audit_rejects_orphan_migration_case(monkeypatch, tmp_path):
+    from scripts import release_audit
+
+    library = tmp_path / "knowledge/case_library"
+    library.mkdir(parents=True)
+    (library / "CASE_1.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(release_audit, "ROOT", tmp_path)
+    audit = release_audit.ReleaseAudit()
+    audit.check_cases()
+    assert not audit.items[-1].passed
+
+
+def test_release_audit_rejects_incomplete_case_record(monkeypatch, tmp_path):
+    from scripts import release_audit
+
+    cases = tmp_path / "data/cases"
+    cases.mkdir(parents=True)
+    (cases / "CASE_1.json").write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(release_audit, "ROOT", tmp_path)
+    audit = release_audit.ReleaseAudit()
+    audit.check_cases()
+    assert not audit.items[-1].passed
 
 
 def test_release_audit_passes_without_network() -> None:

@@ -325,6 +325,9 @@ def normalize_task_payload(
     normalized["load_conditions"] = normalize_load_conditions(normalized.get("load_conditions"))
     normalized["boundary_conditions"] = normalize_boundary_conditions(normalized.get("boundary_conditions"))
     normalized["geometry_envelope"] = normalize_geometry_envelope(normalized.get("geometry_envelope"))
+    from abaqus.cylindrical_geometry import radius_reference
+
+    normalized["radius_reference"] = radius_reference(normalized)
     normalized["candidate_generation_preferences"] = normalize_candidate_generation_preferences(
         normalized.get("candidate_generation_preferences")
     )

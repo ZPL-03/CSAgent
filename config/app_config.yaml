@@ -41,7 +41,6 @@ pipeline:
   screening_score:
     pressure_weight: 1.0
     weight_penalty: 0.12
-    uncertainty_penalty: 0.2
 
 rag:
   embedding_model: BAAI/bge-m3

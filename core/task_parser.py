@@ -122,6 +122,17 @@ class TaskParser:
     def _extract_boundary_conditions(self, text: str) -> Dict[str, Any]:
         return normalize_boundary_conditions(text)
 
+    def _extract_radius_reference(self, text: str) -> str:
+        references = {
+            "inner": r"内半径|内部半径|inner\s+radius",
+            "outer": r"外半径|外部半径|outer\s+radius",
+            "middle_surface": r"中面半径|平均半径|mean\s+radius|mid(?:dle)?[-\s]?surface\s+radius",
+        }
+        matches = [name for name, pattern in references.items() if re.search(pattern, text, re.IGNORECASE)]
+        if len(matches) > 1:
+            raise ValueError("任务包含多个半径基准，请指定用于设计约束的一个半径。")
+        return matches[0] if matches else "middle_surface"
+
     def _geometry_patterns(self) -> Dict[str, list[str]]:
         connector = (
             r"(?:\s*(?:为|是|=|:|：|固定|保持|限定|锁定|指定|严格采用|必须|等于|不变|"
@@ -412,6 +423,7 @@ class TaskParser:
             "load_conditions": load_conditions,
             "boundary_conditions": self._extract_boundary_conditions(text),
             "geometry_envelope": self._extract_geometry_envelope(text),
+            "radius_reference": self._extract_radius_reference(text),
             "candidate_generation_preferences": self._extract_candidate_generation_preferences(text),
             "screening_preferences": {"top_k_candidates": self._extract_top_k_candidates(text)},
             "material_system": {

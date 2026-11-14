@@ -8,7 +8,8 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List
 
-from core.fem_input_contract import validate_fem_input
+from core.config_loader import fixed_imperfection_ratio, load_app_config
+from core.fem_input_contract import attach_design_revision, validate_fem_input
 from core.io_utils import read_json, write_json
 from core.id_utils import next_task_id
 from core.paths import IO_DIR
@@ -144,9 +145,10 @@ def validate_fem_ready_response(response: Dict[str, Any]) -> List[Dict[str, Any]
 def import_fem_ready_response(path: Path, output_path: Path | None = None) -> Dict[str, Any]:
     """从 UTF-8 JSON 文件导入并保存已验证的机器候选包。"""
     response = read_json(path)
-    candidates = validate_fem_ready_response(response)
+    candidates = [adapt_imported_candidate(candidate) for candidate in validate_fem_ready_response(response)]
     result = response["result"]
-    target = output_path or IO_DIR / f"imported_fem_{result['design_fingerprint']}.json"
+    fingerprint = _fingerprint({"request": result["request"], "source_table": result["source_table"], "candidates": candidates})
+    target = output_path or IO_DIR / f"imported_fem_{fingerprint}.json"
     payload = {
         "status": "validated",
         "generation_mode": FEM_READY_GENERATION_MODE,
@@ -154,11 +156,45 @@ def import_fem_ready_response(path: Path, output_path: Path | None = None) -> Di
         "source_table": deepcopy(result["source_table"]),
         "request": deepcopy(result["request"]),
         "candidate_count": len(candidates),
-        "design_fingerprint": result["design_fingerprint"],
+        "source_design_fingerprint": result["design_fingerprint"],
+        "design_fingerprint": fingerprint,
         "candidates": candidates,
     }
     write_json(target, payload)
     return {"path": str(target), "payload": payload}
+
+
+def adapt_imported_candidate(candidate: Dict[str, Any]) -> Dict[str, Any]:
+    """将来源设计转换为项目分析条件，保留来源输入和历史结果。"""
+    issues = validate_fem_input(candidate)
+    if issues:
+        raise FEMCandidateTransferError("来源候选输入无效：" + ", ".join(issues))
+    adapted = deepcopy(candidate)
+    conditions = {"imperfection_ratio": fixed_imperfection_ratio(), "radius_reference": "inner"}
+    analysis = adapted.setdefault("analysis", {})
+    use_subroutine = bool(load_app_config()["abaqus"].get("use_user_subroutine", False))
+    changed = (any(adapted["geometry"].get(key) != value for key, value in conditions.items())
+               or analysis.get("use_user_subroutine") != use_subroutine)
+    provenance = adapted.setdefault("provenance", {})
+    provenance["source_design_revision_id"] = candidate["design_revision_id"]
+    provenance["source_geometry"] = deepcopy(candidate["geometry"])
+    provenance["source_analysis"] = deepcopy(candidate.get("analysis", {}))
+    provenance["fixed_analysis_conditions"] = conditions
+    adapted["geometry"].update(conditions)
+    analysis["use_user_subroutine"] = use_subroutine
+    if changed:
+        provenance["source_screening"] = deepcopy(candidate.get("screening", {}))
+        adapted["screening"] = {
+            "candidate_role": "analysis_condition_transfer_exploration",
+            "historical_reference_comparison": "not_applicable_after_analysis_condition_transfer",
+            "current_abaqus_status": "not_run",
+            "current_design_verdict": "pending",
+        }
+    adapted = attach_design_revision(adapted)
+    issues = validate_fem_input(adapted)
+    if issues:
+        raise FEMCandidateTransferError("项目分析输入无效：" + ", ".join(issues))
+    return adapted
 
 
 def build_fem_ready_task_record(payload: Dict[str, Any]) -> Dict[str, Any]:
@@ -180,6 +216,7 @@ def build_fem_ready_task_record(payload: Dict[str, Any]) -> Dict[str, Any]:
     task_payload = {
         "application": str(request.get("structure_form") or "复合材料外压圆柱耐压壳"),
         "hull_type": "CYLINDRICAL",
+        "radius_reference": "inner",
         "load_conditions": deepcopy(request.get("load_conditions") or {}),
         "boundary_conditions": deepcopy(request.get("boundary_conditions") or {}),
         "geometry_envelope": {

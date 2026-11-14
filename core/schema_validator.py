@@ -10,7 +10,7 @@ from core.paths import SCHEMA_DIR
 
 try:
     from jsonschema import Draft202012Validator
-except Exception:
+except ImportError:
     Draft202012Validator = Any  # type: ignore[assignment]
     _JSONSCHEMA_AVAILABLE = False
 else:
@@ -36,8 +36,6 @@ def get_validator(schema_name: str) -> Draft202012Validator:
 
 
 def validate_or_raise(schema_name: str, payload: Dict[str, Any]) -> None:
-    if not _JSONSCHEMA_AVAILABLE:
-        return
     validator = get_validator(schema_name)
     errors = sorted(validator.iter_errors(payload), key=lambda err: list(err.path))
     if errors:

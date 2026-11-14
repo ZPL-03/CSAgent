@@ -625,7 +625,7 @@ class ReportGenAgent(BaseAgent):
             lines.extend([
                 "", f"### 排名 {candidate['screening_rank']}：{candidate.get('session_candidate_id') or candidate.get('candidate_id')}",
                 f"- 默认送检：{'是' if candidate.get('screening_selected') else '否'}",
-                f"- PBIPF 预测极限压力：{self._field_text(candidate.get('surrogate_ultimate_pressure_MPa'))} MPa",
+                f"- 预筛估计承载压力：{self._field_text(candidate.get('surrogate_ultimate_pressure_MPa'))} MPa",
                 f"- 面密度：{self._field_text(candidate.get('surrogate_weight') or candidate.get('weight_kg_per_m2'))} kg/m^2",
                 f"- 综合得分：{self._field_text(candidate.get('rank_score'))}",
                 f"- 筛选依据：{candidate.get('screening_summary') or '-'}",

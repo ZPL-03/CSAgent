@@ -10,6 +10,11 @@ import os
 import re
 import traceback
 
+if __package__:
+    from .cylindrical_geometry import shell_radii
+else:
+    from cylindrical_geometry import shell_radii
+
 try:
     text_type = unicode
     binary_type = str
@@ -205,7 +210,7 @@ def validate_runtime_candidate(candidate):
         raise ValueError("missing or invalid FEM field: hull_type")
     geometry = require_mapping(candidate.get("geometry"), "geometry")
     length = require_float(geometry.get("length_mm"), "geometry.length_mm")
-    radius = require_float(geometry.get("radius_mm"), "geometry.radius_mm")
+    radius = shell_radii(geometry)["middle_surface"]
     thickness = require_float(geometry.get("thickness_mm"), "geometry.thickness_mm")
     require_float(geometry.get("alpha_deg"), "geometry.alpha_deg")
     require_float(geometry.get("beta_deg"), "geometry.beta_deg")
@@ -410,10 +415,8 @@ def postbuckling_reference_pressure(linear_pressure):
 
 
 def imperfection_amplitude_mm(geometry):
-    radius = require_float(geometry.get("radius_mm"), "geometry.radius_mm")
-    thickness = require_float(geometry.get("thickness_mm"), "geometry.thickness_mm")
     ratio = require_float(geometry.get("imperfection_ratio"), "geometry.imperfection_ratio")
-    return max(ratio * (radius + 0.5 * thickness), 1.0e-6)
+    return ratio * shell_radii(geometry)["middle_surface"]
 
 
 def enable_field_degradation(model, material_name, material):

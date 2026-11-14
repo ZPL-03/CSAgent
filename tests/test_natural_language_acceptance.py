@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from collections.abc import Iterable
+from copy import deepcopy
 
 import pytest
 
@@ -14,29 +14,23 @@ from core.task_contract import (
     task_payload_from_request,
 )
 from workflow.event_store import WorkflowEventStore
-from scripts.run_natural_language_acceptance import _select_instruction_cases
+from scripts.run_natural_language_acceptance import (
+    _assert_unique_candidates as _assert_unique,
+    _candidate_signature,
+    _select_instruction_cases,
+)
 
 
-def _signature(candidate: dict) -> tuple:
-    geometry = candidate.get("geometry") or {}
-    material = candidate.get("material_system") or {}
-    layup = candidate.get("layup") or {}
-    return (
-        candidate.get("hull_type"),
-        material.get("material_key") or material.get("name"),
-        tuple(
-            (key, round(float(value), 6 if key == "imperfection_ratio" else 3))
-            for key, value in sorted(geometry.items())
-            if value is not None
-        ),
-        layup.get("template_name"),
-        layup.get("layup"),
-    )
-
-
-def _assert_unique(candidates: Iterable[dict]) -> None:
-    signatures = [_signature(candidate) for candidate in candidates]
-    assert len(signatures) == len(set(signatures))
+def test_acceptance_signature_preserves_radius_reference():
+    candidate = {"hull_type": "CYLINDRICAL", "material_system": {"name": "T700/Epoxy"},
+                 "geometry": {"radius_mm": 150, "radius_reference": "inner", "imperfection_ratio": 0.008},
+                 "layup": {"layup": "[45/-45]"}}
+    alternate = deepcopy(candidate)
+    alternate["geometry"]["radius_reference"] = "middle_surface"
+    assert _candidate_signature(candidate) != _candidate_signature(alternate)
+    _assert_unique([candidate, alternate])
+    with pytest.raises(AssertionError, match="重复"):
+        _assert_unique([candidate, deepcopy(candidate)])
 
 
 def _patch_deterministic_downstream(monkeypatch, orchestrator: OrchestratorAgent, tmp_path) -> None:

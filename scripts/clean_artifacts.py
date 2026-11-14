@@ -1,4 +1,4 @@
-"""清理 Python 缓存、Abaqus 会话残留和异常工件。"""
+"""列出并清理 Python 缓存及明确指定的无案例引用求解工件。"""
 
 from __future__ import annotations
 
@@ -13,14 +13,14 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.paths import ABAQUS_DIR, ABAQUS_RUNS_DIR, CASES_DIR, DATA_DIR, RESULTS_DIR, RUNTIME_DIR
+from core.paths import ABAQUS_DIR, ABAQUS_RUNS_DIR, CASES_DIR, DATA_DIR  # noqa: E402
 
 
 IO_DIR = DATA_DIR / "io"
 
 
 def candidate_artifact_paths(candidate_id: str) -> list[Path]:
-    normalized = str(candidate_id).strip()
+    normalized = str(candidate_id)
     if not re.fullmatch(r"C[1-9][0-9]*", normalized):
         raise ValueError(f"无效求解编号：{candidate_id}")
     return [
@@ -33,31 +33,19 @@ def candidate_artifact_paths(candidate_id: str) -> list[Path]:
     ]
 
 
-def purge_business_records(candidate_ids: list[str]) -> None:
-    """只清理没有案例引用的求解工件，避免破坏案例证据链。"""
+def unreferenced_candidate_paths(candidate_ids: list[str]) -> list[Path]:
+    """拒绝案例引用和带有作业锁的候选。"""
     referenced = {json.loads(path.read_text(encoding="utf-8")).get("candidate_id")
                   for path in CASES_DIR.glob("CASE_*.json")}
     if referenced.intersection(candidate_ids):
         raise ValueError("求解工件仍被案例引用，不允许单独删除")
+    paths = []
     for candidate_id in candidate_ids:
-        for path in candidate_artifact_paths(candidate_id):
-            remove_path(path)
-
-
-def purge_problem_prefixes(prefixes: list[str]) -> None:
-    candidate_ids = [item.strip() for item in prefixes]
-    for candidate_id in candidate_ids:
-        candidate_artifact_paths(candidate_id)
-    purge_business_records(candidate_ids)
-
-    for path in RESULTS_DIR.glob("batch_summary_*.json"):
-        text = path.read_text(encoding="utf-8") if path.exists() else ""
-        payload = json.loads(text)
-        records = payload if isinstance(payload, list) else payload.get("records", [])
-        if any(record.get("candidate_id") in candidate_ids for record in records):
-            remove_path(path)
-
-
+        candidate_paths = candidate_artifact_paths(candidate_id)
+        if any((ABAQUS_RUNS_DIR / candidate_id).rglob("*.lck")) or (ABAQUS_DIR / f"{candidate_id}.lck").exists():
+            raise ValueError(f"候选 {candidate_id} 存在作业锁，不能清理")
+        paths.extend(candidate_paths)
+    return paths
 
 
 def remove_path(path: Path) -> None:
@@ -72,56 +60,25 @@ def remove_path(path: Path) -> None:
         path.unlink(missing_ok=True)
 
 
-def clean_python_caches() -> None:
-    """清理 Python 缓存目录。"""
-    for path in ROOT.rglob("__pycache__"):
-        remove_path(path)
-    remove_path(ROOT / ".pytest_cache")
-    for path in ROOT.rglob("*.pyc"):
-        remove_path(path)
-
-
-def clean_abaqus_session_files() -> None:
-    """清理 Abaqus 会话文件和临时 build 脚本。"""
-    for pattern in ("abaqus.rpy*", "abaqus*.rec"):
-        for path in ABAQUS_DIR.glob(pattern):
-            remove_path(path)
-        for path in ABAQUS_RUNS_DIR.rglob(pattern):
-            remove_path(path)
-
-    for path in ABAQUS_DIR.glob("build_*.py"):
-        remove_path(path)
-
-    residual_patterns = (
-        "*.lck",
-        "*.023",
-        "*.com",
-        "*.jnl",
-        "*.prt",
-        "*.sim",
-        "*.odb_f",
-    )
-    for pattern in residual_patterns:
-        for path in ABAQUS_RUNS_DIR.rglob(pattern):
-            remove_path(path)
-
-
-def clean_gui_audit_artifacts() -> None:
-    """清理 GUI 渲染审计保留的临时截图目录。"""
-    remove_path(RUNTIME_DIR / "release_gui_audit")
+def python_cache_paths(root: Path | None = None) -> list[Path]:
+    root = root or ROOT
+    return [*root.rglob("__pycache__"), root / ".pytest_cache", root / ".ruff_cache", *root.rglob("*.pyc")]
 
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--purge-prefix", action="append", default=[])
     parser.add_argument("--candidate-id", action="append", default=[])
+    parser.add_argument("--apply", action="store_true", help="执行清理；省略时只列出目标")
     args = parser.parse_args()
-
-    clean_python_caches()
-    clean_abaqus_session_files()
-    clean_gui_audit_artifacts()
-    purge_business_records(args.candidate_id)
-    purge_problem_prefixes(args.purge_prefix)
+    paths = sorted(set(python_cache_paths() + unreferenced_candidate_paths(args.candidate_id)))
+    targets = [path for path in paths if path.exists() and not any(parent in paths for parent in path.parents)]
+    for path in targets:
+        if path.is_symlink() or not path.resolve().is_relative_to(ROOT.resolve()) or path.resolve() == ROOT.resolve():
+            raise ValueError(f"不允许清理越界路径：{path}")
+    print(json.dumps({"apply": args.apply, "targets": [str(path) for path in targets]}, ensure_ascii=False))
+    if args.apply:
+        for path in targets:
+            remove_path(path)
     return 0
 
 

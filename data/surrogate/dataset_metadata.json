@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "dataset_file": "design_dataset.csv",
+  "sha256": "ac62a124cfa4efed995ecf64369473ad81d571cdde0f97740509ba5e9dc27ef6",
+  "sample_count": 5857,
+  "units": {
+    "pressure": "MPa",
+    "geometry": "mm",
+    "imperfection_permille": "permille",
+    "A": "N/mm",
+    "B": "N",
+    "D": "N mm"
+  },
+  "radius_reference": "inner",
+  "layup_order": "inner_to_outer",
+  "source_flag_definition": null,
+  "sources": {
+    "complete_source_results": {
+      "sha256": "95ab8a7d7b6f41232321ed3ad8b1df7cad72053f08b3873fba42dfc02ae509c1",
+      "row_number_base": 2
+    }
+  },
+  "field_mapping": {
+    "complete_source_results": {
+      "geometry_columns_1based": {
+        "thickness_mm": 4,
+        "inner_radius_mm": 5,
+        "length_mm": 6,
+        "alpha_deg": 7,
+        "beta_deg": 8
+      },
+      "nu12_column_1based": 11,
+      "G12_MPa_column_1based": 12
+    }
+  },
+  "stiffness_max_abs_error": 0.04999990324722603
+}

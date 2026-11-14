@@ -9,6 +9,7 @@ import re
 from typing import Any, Dict, Iterable
 
 from core.config_loader import load_material_db
+from abaqus.cylindrical_geometry import shell_radii
 from core.pressure_hull_profile import sequence_is_balanced, sequence_is_symmetric
 
 
@@ -84,6 +85,10 @@ def validate_fem_input(candidate: Dict[str, Any], material_db: Dict[str, Any] | 
     else:
         for field in ("length_mm", "radius_mm", "thickness_mm", "alpha_deg", "beta_deg", "imperfection_ratio"):
             _finite_positive(geometry.get(field), f"geometry.{field}", issues)
+        try:
+            shell_radii(geometry)
+        except ValueError:
+            issues.append("geometry.radius_reference_or_dimensions")
 
     layup = candidate.get("layup")
     if not isinstance(layup, dict):

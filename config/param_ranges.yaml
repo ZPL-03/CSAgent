@@ -49,9 +49,10 @@ surrogate_coefficients:
     imperfection_input: permille
     imperfection_ratio_to_permille: 1000
     standardization_note: "运行时使用工程描述符单位系数，输入特征不执行二次标准化。"
-    d1: 204.149746
-    d2: 0.00280336348
-    d3: -31.1711936
-    d0: 0.489754093
-    rmse_MPa: 6.111385
-    r2: 0.947551
+    link: softplus
+    link_scale_MPa: 3.734439711539289
+    validation_report: data/surrogate/validation/report.json
+    d1: 241.0683606942018
+    d2: 0.004748560038667884
+    d3: -45.282458043755554
+    d0: -0.16404878602880046

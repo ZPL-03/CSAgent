@@ -38,6 +38,7 @@
       "properties": {
         "length_mm": {"type": "number"},
         "radius_mm": {"type": "number"},
+        "radius_reference": {"type": "string", "enum": ["inner", "middle_surface", "outer"]},
         "thickness_mm": {"type": "number"},
         "alpha_deg": {"type": "number"},
         "beta_deg": {"type": "number"},

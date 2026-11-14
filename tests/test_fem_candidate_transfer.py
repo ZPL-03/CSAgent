@@ -9,6 +9,8 @@ from core.fem_candidate_transfer import (
     FEM_SOURCE_TABLE_SHA256,
     build_fem_ready_task_record,
     validate_fem_ready_response,
+    adapt_imported_candidate,
+    import_fem_ready_response,
 )
 from core.fem_input_contract import attach_design_revision
 
@@ -103,6 +105,38 @@ def test_valid_fem_ready_response_imports_without_markdown_parsing() -> None:
 
     assert [item["candidate_id"] for item in candidates] == ["TMP_1", "TMP_2"]
     assert len({item["design_revision_id"] for item in candidates}) == 2
+
+
+def test_analysis_adaptation_preserves_source_and_invalidates_historical_equivalence():
+    from core.config_loader import load_app_config
+    from core.fem_input_contract import validate_fem_input
+
+    source = _candidate(1)
+    source["geometry"]["imperfection_ratio"] = 0.003
+    source["analysis"]["use_user_subroutine"] = False
+    source = attach_design_revision(source)
+    original = deepcopy(source)
+    adapted = adapt_imported_candidate(source)
+    assert source == original
+    assert adapted["geometry"]["imperfection_ratio"] == 0.008
+    assert adapted["geometry"]["radius_reference"] == "inner"
+    assert adapted["analysis"]["use_user_subroutine"] == load_app_config()["abaqus"]["use_user_subroutine"]
+    assert adapted["parent_design_revision_id"] == source["design_revision_id"]
+    assert adapted["design_revision_id"] != source["design_revision_id"]
+    assert adapted["provenance"]["source_geometry"] == source["geometry"]
+    assert adapted["provenance"]["historical_fem_reference"] == source["provenance"]["historical_fem_reference"]
+    assert adapted["screening"]["candidate_role"] == "analysis_condition_transfer_exploration"
+    assert validate_fem_input(adapted) == []
+
+
+def test_import_separates_source_and_analysis_fingerprints(tmp_path):
+    response = _response()
+    path = tmp_path / "source.json"
+    path.write_text(json.dumps(response), encoding="utf-8")
+    imported = import_fem_ready_response(path, tmp_path / "imported.json")["payload"]
+    assert imported["source_design_fingerprint"] == response["result"]["design_fingerprint"]
+    assert imported["design_fingerprint"] != imported["source_design_fingerprint"]
+    assert json.loads(path.read_text(encoding="utf-8")) == response
 
 
 def test_validated_response_builds_machine_task_without_markdown_parsing(monkeypatch) -> None:

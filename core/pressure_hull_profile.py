@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 
 from core.config_loader import load_param_ranges as _load_param_ranges_raw
 from core.config_loader import fixed_imperfection_ratio
+from abaqus.cylindrical_geometry import positive_number, radius_reference, shell_radii
 
 
 HULL_TYPES = ["CYLINDRICAL"]
@@ -43,6 +44,7 @@ DEFAULT_GEOMETRY = {
 GEOMETRY_LABELS = {
     "length_mm": "壳体长度 L (mm)",
     "radius_mm": "壳体半径 R (mm)",
+    "radius_reference": "半径基准",
     "thickness_mm": "壳体厚度 t (mm)",
     "alpha_deg": "铺层角 α (deg)",
     "beta_deg": "铺层角 β (deg)",
@@ -154,11 +156,13 @@ def missing_geometry_params(raw_geom: Dict[str, Any] | None, hull_type: str = "C
     return [key for key in required_geometry_params(hull_type) if key not in provided]
 
 
-def normalize_geometry(hull_type: str, raw_geom: Dict[str, Any] | None) -> Dict[str, float]:
+def normalize_geometry(hull_type: str, raw_geom: Dict[str, Any] | None) -> Dict[str, Any]:
     """补齐并规范候选几何。"""
     geometry = default_geometry(hull_type)
     geometry.update(canonical_geometry_values(raw_geom))
-    return {key: round(float(value), 6) for key, value in geometry.items()}
+    normalized = {key: round(float(value), 6) for key, value in geometry.items()}
+    normalized["radius_reference"] = radius_reference(raw_geom or {})
+    return normalized
 
 
 @lru_cache(maxsize=8)
@@ -194,8 +198,8 @@ def solver_safe_window_keys(hull_type: str = "CYLINDRICAL") -> Dict[str, tuple[f
 
 
 def layup_pattern(alpha_deg: float, beta_deg: float, template_name: str = "BASE_90_AB") -> str:
-    alpha = int(round(float(alpha_deg)))
-    beta = int(round(float(beta_deg)))
+    alpha = f"{float(alpha_deg):g}"
+    beta = f"{float(beta_deg):g}"
     if template_name == "NO_OUTER_90":
         return f"[(±{alpha}/±{beta})_10]"
     if template_name == "BENCHMARK_A":
@@ -212,81 +216,62 @@ def layup_template_name_from_pc(pc_value: Any) -> str | None:
     return LAYUP_TEMPLATE_BY_PC.get(pc)
 
 
-def _expand_token(token: str, alpha_deg: float, beta_deg: float) -> List[float]:
-    token = token.strip()
-    token = token.replace("alpha", str(alpha_deg)).replace("α", str(alpha_deg))
-    token = token.replace("beta", str(beta_deg)).replace("β", str(beta_deg))
-    token = token.replace("deg", "").replace("°", "")
-    token = token.replace("−", "-").replace("－", "-")
-    if not token:
-        return []
-    if token.startswith("±") or token.startswith("+/-"):
-        number = token[1:] if token.startswith("±") else token[3:]
-        angle = _safe_float(number, 45.0)
-        return [angle, -angle]
-    if token.startswith("+-"):
-        angle = _safe_float(token[2:], 45.0)
-        return [angle, -angle]
-    return [_safe_float(token, 0.0)]
-
-
-def _expand_layup_item(token: str, alpha_deg: float, beta_deg: float) -> List[float]:
-    token = token.strip()
-    repeat = 1
-    match = re.match(r"(.+?)_([0-9]+)$", token)
-    if match:
-        token = match.group(1)
-        repeat = int(match.group(2))
-    return _expand_token(token, alpha_deg, beta_deg) * max(repeat, 1)
-
-
-def _expand_group(group: str, repeat: int, alpha_deg: float, beta_deg: float) -> List[float]:
-    items: List[float] = []
-    for raw in group.split("/"):
-        items.extend(_expand_layup_item(raw, alpha_deg, beta_deg))
-    return items * max(repeat, 1)
-
-
 def parse_layup_sequence(layup_text: str, alpha_deg: float = 40.0, beta_deg: float = 70.0) -> List[float]:
-    """展开简写铺层表达式。"""
+    """展开角度、正负角、重复组和中面对称记号；未知记号不转换为物理层。"""
     text = str(layup_text or "").strip()
-    if not text:
-        text = layup_pattern(alpha_deg, beta_deg)
-    text = text.strip("[] ")
-    result: List[float] = []
+    text = text.replace("alpha", str(alpha_deg)).replace("α", str(alpha_deg))
+    text = text.replace("beta", str(beta_deg)).replace("β", str(beta_deg))
+    text = text.replace("+/-", "±").replace("+-", "±")
+    text = text.replace("−", "-").replace("－", "-").replace("deg", "").replace("°", "")
+    text = re.sub(r"\s+", "", text)
     index = 0
-    while index < len(text):
-        if text[index] == "/":
+
+    def parse_group(closing: str | None = None, depth: int = 0) -> List[float]:
+        nonlocal index
+        if depth > 32:
+            raise ValueError("铺层嵌套深度超过解析上限。")
+        sequence: List[float] = []
+        while index < len(text):
+            char = text[index]
+            if char in "[(":
+                index += 1
+                item = parse_group("]" if char == "[" else ")", depth + 1)
+            else:
+                match = re.match(r"(±)?([+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?)", text[index:])
+                if not match:
+                    raise ValueError(f"铺层在位置 {index + 1} 包含无效角度或记号。")
+                angle = float(match.group(2))
+                if not math.isfinite(angle):
+                    raise ValueError("铺层角度必须是有限数值。")
+                item = [angle, -angle] if match.group(1) else [angle]
+                index += len(match.group(0))
+            suffix = re.match(r"(?:_([1-9]\d*|[sS])|([sS]))", text[index:])
+            if suffix:
+                value = suffix.group(1) or suffix.group(2)
+                if value.lower() == "s":
+                    item = item + list(reversed(item))
+                else:
+                    repeat = int(value)
+                    if len(item) * repeat > 10000:
+                        raise ValueError("展开层数超过解析上限 10000。")
+                    item = item * repeat
+                index += len(suffix.group(0))
+            sequence.extend(item)
+            if len(sequence) > 10000:
+                raise ValueError("展开层数超过解析上限 10000。")
+            if index == len(text):
+                if closing is not None:
+                    raise ValueError("铺层括号未闭合。")
+                return sequence
+            if closing is not None and text[index] == closing:
+                index += 1
+                return sequence
+            if text[index] != "/":
+                raise ValueError(f"铺层在位置 {index + 1} 缺少分隔符或括号不匹配。")
             index += 1
-            continue
-        if text[index] == "(":
-            end = text.find(")", index)
-            if end < 0:
-                break
-            group = text[index + 1:end]
-            repeat = 1
-            after = end + 1
-            match = re.match(r"_([0-9]+)", text[after:])
-            if match:
-                repeat = int(match.group(1))
-                after += len(match.group(0))
-            elif text[after:].startswith("_s"):
-                after += 2
-            result.extend(_expand_group(group, repeat, alpha_deg, beta_deg))
-            index = after
-            continue
-        next_sep = text.find("/", index)
-        if next_sep < 0:
-            next_sep = len(text)
-        token = text[index:next_sep]
-        repeat = 1
-        match = re.match(r"(.+?)_([0-9]+)$", token)
-        if match:
-            token = match.group(1)
-            repeat = int(match.group(2))
-        result.extend(_expand_token(token, alpha_deg, beta_deg) * max(repeat, 1))
-        index = next_sep + 1
-    return result or [90.0, 90.0, 90.0, 90.0, alpha_deg, -alpha_deg, beta_deg, -beta_deg]
+        raise ValueError("铺层为空或分隔符后缺少角度。")
+
+    return parse_group()
 
 
 def normalize_layup(raw_layup: Any, geometry: Dict[str, Any] | None = None) -> Dict[str, Any]:
@@ -297,12 +282,33 @@ def normalize_layup(raw_layup: Any, geometry: Dict[str, Any] | None = None) -> D
     if isinstance(raw_layup, dict):
         pc_template = layup_template_name_from_pc(raw_layup.get("PC", raw_layup.get("pc_label")))
         template = str(raw_layup.get("template_name") or raw_layup.get("template") or pc_template or "BASE_90_AB")
-        text = str(raw_layup.get("layup") or raw_layup.get("skin_layup") or layup_pattern(alpha, beta, template))
         alpha = _safe_float(raw_layup.get("alpha_deg"), alpha)
         beta = _safe_float(raw_layup.get("beta_deg"), beta)
+        text = str(raw_layup.get("layup") or raw_layup.get("skin_layup") or "")
+        raw_angles = raw_layup.get("angles_deg")
+        if raw_angles is not None:
+            if not isinstance(raw_angles, list) or not raw_angles or any(
+                isinstance(angle, bool) or not isinstance(angle, (float, int)) or not math.isfinite(angle)
+                for angle in raw_angles
+            ):
+                raise ValueError("angles_deg 必须是非空有限数值数组。")
+            for field in ("layup", "skin_layup"):
+                value = raw_layup.get(field)
+                if value and value != "explicit":
+                    parsed = parse_layup_sequence(value, alpha, beta)
+                    if len(parsed) != len(raw_angles) or any(abs(a - b) > 1e-6 for a, b in zip(parsed, raw_angles)):
+                        raise ValueError("铺层文本与 angles_deg 的物理层顺序不一致。")
+            for field, expected in (("ply_count", len(raw_angles)), ("symmetric", sequence_is_symmetric(raw_angles)), ("balanced", sequence_is_balanced(raw_angles))):
+                if field in raw_layup and (type(raw_layup[field]) is not type(expected) or raw_layup[field] != expected):
+                    raise ValueError(f"{field} 与物理层序不一致。")
+            text = render_explicit_layup(raw_angles)
+        if not text:
+            if not any(raw_layup.get(field) for field in ("template_name", "template", "PC", "pc_label")):
+                raise ValueError("缺少铺层文本、物理层数组或模板名称。")
+            text = layup_pattern(alpha, beta, template)
     else:
         template = "BASE_90_AB"
-        text = str(raw_layup or layup_pattern(alpha, beta, template))
+        text = str(raw_layup or "")
 
     sequence = parse_layup_sequence(text, alpha, beta)
     total = max(len(sequence), 1)
@@ -359,6 +365,7 @@ def expand_layup_for_fem(raw_layup: Any, geometry: Dict[str, Any] | None = None)
     """把候选铺层统一为 Abaqus 输入所需的逐层显式表示。"""
     geometry = geometry or {}
     raw = dict(raw_layup) if isinstance(raw_layup, dict) else {"layup": str(raw_layup or "")}
+    normalized = normalize_layup(raw, geometry)
     explicit_text = all(
         isinstance(raw.get(field), str)
         and not re.search(r"±|\]s|_\d+", raw[field])
@@ -389,10 +396,7 @@ def expand_layup_for_fem(raw_layup: Any, geometry: Dict[str, Any] | None = None)
         angles = []
 
     if not angles:
-        alpha = _safe_float(raw.get("alpha_deg"), _safe_float(geometry.get("alpha_deg"), 40.0))
-        beta = _safe_float(raw.get("beta_deg"), _safe_float(geometry.get("beta_deg"), 70.0))
-        text = str(raw.get("layup") or raw.get("skin_layup") or layup_pattern(alpha, beta, str(raw.get("template_name") or "BASE_90_AB")))
-        angles = [round(float(angle), 3) for angle in parse_layup_sequence(text, alpha, beta)]
+        angles = normalized["angles_deg"]
 
     total_thickness = _safe_float(geometry.get("thickness_mm"), 0.0)
     count = max(len(angles), 1)
@@ -416,12 +420,20 @@ def expand_layup_for_fem(raw_layup: Any, geometry: Dict[str, Any] | None = None)
 
 
 def _qbar(angle_deg: float, material: Dict[str, Any]) -> List[List[float]]:
-    e1 = _safe_float(material.get("E1_GPa"), 102.0) * 1000.0
-    e2 = _safe_float(material.get("E2_GPa"), 7.0) * 1000.0
-    g12 = _safe_float(material.get("G12_GPa"), 3.35) * 1000.0
-    nu12 = _safe_float(material.get("nu12"), 0.16)
-    nu21 = nu12 * e2 / max(e1, 1e-9)
-    denom = max(1.0 - nu12 * nu21, 1e-9)
+    values = []
+    for key in ("E1_GPa", "E2_GPa", "G12_GPa", "nu12"):
+        value = material.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError(f"material.{key} 必须是有限数值。")
+        values.append(float(value))
+    e1, e2, g12 = (value * 1000.0 for value in values[:3])
+    nu12 = values[3]
+    if any(not math.isfinite(value) or value <= 0 for value in (e1, e2, g12)):
+        raise ValueError("单层弹性模量必须为正有限数值。")
+    nu21 = nu12 * e2 / e1
+    denom = 1.0 - nu12 * nu21
+    if not math.isfinite(denom) or denom <= 0:
+        raise ValueError("单层面内柔度矩阵不满足正定性。")
     q11 = e1 / denom
     q22 = e2 / denom
     q12 = nu12 * e2 / denom
@@ -449,6 +461,8 @@ def _qbar(angle_deg: float, material: Dict[str, Any]) -> List[List[float]]:
 
 def compute_laminate_stiffness(layup: Dict[str, Any], material: Dict[str, Any], thickness_mm: float) -> Dict[str, Any]:
     """按经典层合板理论计算 A/B/D 刚度矩阵。"""
+    if isinstance(thickness_mm, bool) or not isinstance(thickness_mm, (int, float)) or not math.isfinite(thickness_mm) or thickness_mm <= 0:
+        raise ValueError("层合板总厚度必须是正有限数值。")
     normalized = normalize_layup(layup, {"alpha_deg": layup.get("alpha_deg"), "beta_deg": layup.get("beta_deg")})
     angles = normalized["angles_deg"]
     ply_count = max(len(angles), 1)
@@ -468,23 +482,15 @@ def compute_laminate_stiffness(layup: Dict[str, Any], material: Dict[str, Any], 
                 b[i][j] += 0.5 * q[i][j] * (z_top ** 2 - z_bot ** 2)
                 d[i][j] += (1.0 / 3.0) * q[i][j] * (z_top ** 3 - z_bot ** 3)
 
-    a22 = abs(a[1][1])
-    b23_raw = abs(b[1][2])
-    d12 = abs(d[0][1])
-    d22 = abs(d[1][1])
-    d33 = abs(d[2][2])
-    # 对称铺层 B 项接近零时，使用弱耦合等效量保证符号公式数值稳定。
-    b23 = max(b23_raw, 1e-3 * math.sqrt(max(a22 * d33, 1e-9)))
     return {
         "A": a,
         "B": b,
         "D": d,
-        "A22": a22,
-        "B23": b23,
-        "D12": d12,
-        "D22": d22,
-        "D33": d33,
-        "B23_raw": b23_raw,
+        "A22": a[1][1],
+        "B23": b[1][2],
+        "D12": d[0][1],
+        "D22": d[1][1],
+        "D33": d[2][2],
     }
 
 
@@ -498,9 +504,9 @@ def estimate_asme_rd1172_linear_buckling_q(
     import numpy as np
 
     _ = material, boundary_conditions
-    length = max(_safe_float(geometry.get("length_mm"), 500.0), 1e-9)
-    radius = max(_safe_float(geometry.get("radius_mm"), 100.0), 1e-9)
-    thickness = max(_safe_float(geometry.get("thickness_mm"), 10.0), 1e-9)
+    length = positive_number(geometry.get("length_mm"), "geometry.length_mm")
+    radius = shell_radii(geometry)["outer"]
+    thickness = positive_number(geometry.get("thickness_mm"), "geometry.thickness_mm")
     a = np.array(stiffness.get("A", []), dtype=float)
     b = np.array(stiffness.get("B", []), dtype=float)
     d = np.array(stiffness.get("D", []), dtype=float)
@@ -508,14 +514,16 @@ def estimate_asme_rd1172_linear_buckling_q(
         raise ValueError("ASME RD-1172 Q 计算缺少 3x3 A/B/D 刚度矩阵")
 
     abd = np.vstack((np.hstack((a, b)), np.hstack((b, d))))
+    if not np.isfinite(abd).all() or not np.allclose(abd, abd.T, rtol=1e-10, atol=1e-8):
+        raise ValueError("ASME RD-1172 Q 计算要求有限、对称的 ABD 刚度矩阵")
     try:
+        np.linalg.cholesky(abd)
         inverse_abd = np.linalg.inv(abd)
     except np.linalg.LinAlgError as exc:
-        raise ValueError("ASME RD-1172 Q 计算的 ABD 刚度矩阵不可逆") from exc
+        raise ValueError("ASME RD-1172 Q 计算要求正定的 ABD 刚度矩阵") from exc
 
-    eps = 1e-12
-    bending_aa = max(abs(float(inverse_abd[3][3])), eps)
-    bending_hh = max(abs(float(inverse_abd[4][4])), eps)
+    bending_aa = positive_number(inverse_abd[3][3], "ABD_inverse[4,4]")
+    bending_hh = positive_number(inverse_abd[4][4], "ABD_inverse[5,5]")
     coupling = float(inverse_abd[4][3])
     vx = -coupling / bending_aa
     vy = -coupling / bending_hh
@@ -523,15 +531,12 @@ def estimate_asme_rd1172_linear_buckling_q(
     ehf = 12.0 / (thickness ** 3 * bending_hh)
 
     a12 = float(a[0][1])
-    eat_denom = max(abs(a12 * thickness), eps)
-    eat = (float(a[0][0]) * float(a[1][1]) - a12 ** 2) / eat_denom
-    vxy = max(1.0 - vx * vy, eps)
-    eaf = max(eaf, eps)
-    ehf = max(ehf, eps)
-    eat = max(eat, eps)
+    # Lee & Sohn (2024), Eq. (2a): E_at 的分母为 A22*t；Eq. (2) 使用外径 Do。
+    eat = positive_number((float(a[0][0]) * float(a[1][1]) - a12 ** 2) / (float(a[1][1]) * thickness), "E_at")
+    vxy = positive_number(1.0 - vx * vy, "1-vx*vy")
 
     zp = ehf ** 1.5 * eat ** 0.5 * vxy ** 0.5 * (length ** 2 / (radius * thickness)) / eaf ** 2
-    gamma_d = 0.9 if zp > 100.0 else max(1.0 - 0.001 * zp, eps)
+    gamma_d = 0.9 if zp > 100.0 else 1.0 - 0.001 * zp
     knockdown_factor = 0.84
     safety_factor = 1.0
     q_value = (
@@ -543,7 +548,7 @@ def estimate_asme_rd1172_linear_buckling_q(
         * thickness ** 2.5
         / (vxy ** 0.75 * length * safety_factor * radius ** 1.5)
     )
-    return round(max(float(q_value), 0.0), 6)
+    return round(positive_number(q_value, "ASME_Q"), 6)
 
 
 def estimate_linear_buckling_feature_q(
@@ -557,26 +562,25 @@ def estimate_linear_buckling_feature_q(
 
 
 def estimate_shell_mass_kg(geometry: Dict[str, Any], material: Dict[str, Any]) -> float:
-    length_m = _safe_float(geometry.get("length_mm"), 500.0) / 1000.0
-    radius_m = _safe_float(geometry.get("radius_mm"), 100.0) / 1000.0
-    thickness_m = _safe_float(geometry.get("thickness_mm"), 10.0) / 1000.0
-    density = _safe_float(material.get("density_kg_per_m3"), 1550.0)
+    length_m = positive_number(geometry.get("length_mm"), "geometry.length_mm") / 1000.0
+    radius_m = shell_radii(geometry)["middle_surface"] / 1000.0
+    thickness_m = positive_number(geometry.get("thickness_mm"), "geometry.thickness_mm") / 1000.0
+    density = positive_number(material.get("density_kg_per_m3"), "material.density_kg_per_m3")
     volume = 2.0 * math.pi * radius_m * length_m * thickness_m
     return round(max(volume * density, 0.0), 6)
 
 
 def estimate_areal_density_kg_per_m2(geometry: Dict[str, Any], material: Dict[str, Any]) -> float:
-    length_m = max(_safe_float(geometry.get("length_mm"), 500.0) / 1000.0, 1e-9)
-    radius_m = max(_safe_float(geometry.get("radius_mm"), 100.0) / 1000.0, 1e-9)
-    area = 2.0 * math.pi * radius_m * length_m
-    return round(estimate_shell_mass_kg(geometry, material) / area, 6)
+    thickness = positive_number(geometry.get("thickness_mm"), "geometry.thickness_mm")
+    density = positive_number(material.get("density_kg_per_m3"), "material.density_kg_per_m3")
+    return round(thickness * density / 1000.0, 6)
 
 
 def describe_geometry_text(hull_type: str, geometry: Dict[str, Any], layup: Dict[str, Any] | None = None) -> str:
     _ = resolve_hull_type(hull_type)
     return (
         f"L={_safe_float(geometry.get('length_mm')):.1f}mm, "
-        f"R={_safe_float(geometry.get('radius_mm')):.1f}mm, "
+        f"R({radius_reference(geometry)})={_safe_float(geometry.get('radius_mm')):.1f}mm, "
         f"t={_safe_float(geometry.get('thickness_mm')):.2f}mm, "
         f"alpha={_safe_float(geometry.get('alpha_deg')):.1f}deg, "
         f"beta={_safe_float(geometry.get('beta_deg')):.1f}deg, "
@@ -593,11 +597,10 @@ def build_pressure_hull_meshes(hull_type: str, geometry: Dict[str, Any]) -> List
 
     _ = resolve_hull_type(hull_type)
     length = max(_safe_float(geometry.get("length_mm"), 500.0), 1.0)
-    radius = max(_safe_float(geometry.get("radius_mm"), 100.0), 1.0)
-    thickness = max(_safe_float(geometry.get("thickness_mm"), 10.0), 0.5)
-    inner_radius = max(radius - thickness, 1.0)
-    if inner_radius >= radius:
-        inner_radius = max(radius * 0.85, radius - 0.5)
+    radii = shell_radii(geometry)
+    radius = radii["outer"]
+    inner_radius = radii["inner"]
+    thickness = radius - inner_radius
 
     axial_count = 28
     circum_count = 144

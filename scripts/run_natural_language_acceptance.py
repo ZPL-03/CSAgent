@@ -116,7 +116,7 @@ def _candidate_signature(candidate: dict[str, Any]) -> tuple[Any, ...]:
         candidate.get("hull_type"),
         material.get("material_key") or material.get("name"),
         tuple(
-            (key, round(float(value), 6 if key == "imperfection_ratio" else 3))
+            (key, value if key == "radius_reference" else round(float(value), 6 if key == "imperfection_ratio" else 3))
             for key, value in sorted(geometry.items())
             if value is not None
         ),

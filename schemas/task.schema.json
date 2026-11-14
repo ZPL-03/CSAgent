@@ -16,6 +16,7 @@
     "design_targets"
   ],
   "properties": {
+    "radius_reference": {"type": "string", "enum": ["inner", "middle_surface", "outer"]},
     "application": {
       "type": "string",
       "minLength": 1

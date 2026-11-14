@@ -1610,7 +1610,6 @@ class MainWindow(QMainWindow):
                     ("最小回训案例", self._settings_line("pipeline.min_case_records_for_retrain", pipeline.get("min_case_records_for_retrain", 30))),
                     ("压力权重", self._settings_line("pipeline.screening.pressure_weight", (pipeline.get("screening_score") or {}).get("pressure_weight", 1.0))),
                     ("质量惩罚", self._settings_line("pipeline.screening.weight_penalty", (pipeline.get("screening_score") or {}).get("weight_penalty", 0.12))),
-                    ("不确定度惩罚", self._settings_line("pipeline.screening.uncertainty_penalty", (pipeline.get("screening_score") or {}).get("uncertainty_penalty", 0.2))),
                     ("确认节点", self._settings_line("conversation.confirmation_steps", ", ".join(conversation.get("confirmation_steps", [])))),
                 ],
             ),
@@ -1982,7 +1981,6 @@ class MainWindow(QMainWindow):
             "pipeline.min_case_records_for_retrain": pipeline.get("min_case_records_for_retrain", 30),
             "pipeline.screening.pressure_weight": (pipeline.get("screening_score") or {}).get("pressure_weight", 1.0),
             "pipeline.screening.weight_penalty": (pipeline.get("screening_score") or {}).get("weight_penalty", 0.12),
-            "pipeline.screening.uncertainty_penalty": (pipeline.get("screening_score") or {}).get("uncertainty_penalty", 0.2),
             "conversation.confirmation_steps": ", ".join(conversation.get("confirmation_steps", [])),
             "knowledge.top_k": knowledge.get("top_k", 5),
             "knowledge.kg_top_k": knowledge.get("kg_top_k", 8),
@@ -2069,10 +2067,6 @@ class MainWindow(QMainWindow):
         screening_score = app_config["pipeline"].setdefault("screening_score", {})
         screening_score["pressure_weight"] = self._settings_float("pipeline.screening.pressure_weight", float(screening_score.get("pressure_weight", 1.0) or 1.0))
         screening_score["weight_penalty"] = self._settings_float("pipeline.screening.weight_penalty", float(screening_score.get("weight_penalty", 0.12) or 0.12))
-        screening_score["uncertainty_penalty"] = self._settings_float(
-            "pipeline.screening.uncertainty_penalty",
-            float(screening_score.get("uncertainty_penalty", 0.2) or 0.2),
-        )
         steps = [item.strip() for item in self._settings_value("conversation.confirmation_steps").split(",") if item.strip()]
         app_config["conversation"]["confirmation_steps"] = steps
 

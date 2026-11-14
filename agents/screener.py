@@ -21,14 +21,12 @@ class ScreenerAgent(BaseAgent):
         score_config = dict(self.config["pipeline"].get("screening_score", {}))
         self.pressure_weight = float(score_config.get("pressure_weight", 1.0))
         self.weight_penalty = float(score_config.get("weight_penalty", 0.12))
-        self.uncertainty_penalty = float(score_config.get("uncertainty_penalty", 2.0))
 
     @property
     def score_formula_text(self) -> str:
         return (
             f"score = {self.pressure_weight:.2f} × P_ult "
-            f"- {self.weight_penalty:.2f} × 面密度 "
-            f"- {self.uncertainty_penalty:.2f} × 公式不确定度"
+            f"- {self.weight_penalty:.2f} × 面密度"
         )
 
     def _estimate_weight(self, candidate: Dict) -> float:
@@ -47,11 +45,10 @@ class ScreenerAgent(BaseAgent):
             updated = dict(candidate)
             prediction = self.model_manager.predict_candidate_payload(candidate)
             ultimate_pressure = float(prediction["ultimate_pressure_MPa"])
-            uncertainty = float(prediction["uncertainty_MPa"])
             areal_density = self._estimate_weight(candidate)
             updated["surrogate_ultimate_pressure_MPa"] = round(ultimate_pressure, 3)
             updated["surrogate_PBIPF_MPa"] = round(float(prediction["PBIPF_MPa"]), 3)
-            updated["surrogate_uncertainty_MPa"] = round(uncertainty, 3)
+            updated["surrogate_uncertainty_MPa"] = prediction["uncertainty_MPa"]
             updated["surrogate_calibration_status"] = prediction["calibration_status"]
             updated["asme_linear_buckling_pressure_MPa"] = round(
                 float(prediction["asme_linear_buckling_pressure_MPa"]), 3
@@ -63,7 +60,6 @@ class ScreenerAgent(BaseAgent):
                 float(
                     self.pressure_weight * updated["surrogate_ultimate_pressure_MPa"]
                     - self.weight_penalty * updated["surrogate_weight"]
-                    - self.uncertainty_penalty * updated["surrogate_uncertainty_MPa"]
                 ),
                 4,
             )
@@ -71,17 +67,21 @@ class ScreenerAgent(BaseAgent):
                 "formula": self.score_formula_text,
                 "pressure_component": round(self.pressure_weight * updated["surrogate_ultimate_pressure_MPa"], 4),
                 "weight_component": round(self.weight_penalty * updated["surrogate_weight"], 4),
-                "uncertainty_component": round(self.uncertainty_penalty * updated["surrogate_uncertainty_MPa"], 4),
                 "surrogate_detail": prediction,
             }
+            validation_error = prediction["uncertainty_MPa"]
+            validation_text = f"{validation_error} MPa" if validation_error is not None else "未提供"
             updated["screening_summary"] = (
-                f"PBIPF 公式筛选估计={updated['surrogate_ultimate_pressure_MPa']} MPa，"
+                f"描述符回归压力估计={updated['surrogate_ultimate_pressure_MPa']} MPa，"
                 f"ASME RD-1172线性屈曲压力={updated['asme_linear_buckling_pressure_MPa']} MPa，"
-                f"经验不确定度={updated['surrogate_uncertainty_MPa']} MPa，"
+                f"模型五折验证 RMSE={prediction['model_validation']['cross_validation_rmse_MPa']:.3f} MPa，"
+                f"校准留一验证 RMSE={validation_text}，"
                 f"校准状态={updated['surrogate_calibration_status']}，"
                 f"面密度={updated['surrogate_weight']} kg/m^2，"
                 f"按 {self.score_formula_text} 得分 {updated['rank_score']}。"
             )
+            if prediction["model_validation"]["outside_descriptor_range"]:
+                updated["screening_summary"] += " 描述符超出建模数据范围，排序使用外推估计。"
             enriched.append(updated)
 
         enriched.sort(key=lambda item: item["rank_score"], reverse=True)
