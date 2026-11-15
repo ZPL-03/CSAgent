@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from datetime import datetime
+from copy import deepcopy
 import json
 from threading import Lock
 from typing import Dict
@@ -10,6 +11,7 @@ from typing import Dict
 from agents.base import BaseAgent
 from core.case_memory import CaseMemoryIndex
 from core.config_loader import load_app_config
+from core.fem_input_contract import REVISION_FIELDS
 from core.fem_result_semantics import complete_case_result_errors, is_passed_design_check, normalize_result_semantics, required_fem_artifact_fields, verified_capacity_pressure
 from core.id_utils import next_case_id
 from core.io_utils import write_json
@@ -86,6 +88,13 @@ class KnowledgeAgent(BaseAgent):
         for field in ("run_id", "task_id"):
             if design.get(field):
                 payload[field] = design[field]
+        # 修订号绑定实际求解输入，入库时保持这些字段的原值和缺省状态。
+        if design.get("design_revision_id"):
+            for field in REVISION_FIELDS:
+                if field in design:
+                    payload[field] = deepcopy(design[field])
+                else:
+                    payload.pop(field, None)
         return payload
 
     def _sanitize_abaqus_results(self, abaqus_results: Dict) -> Dict:
@@ -186,6 +195,11 @@ class KnowledgeAgent(BaseAgent):
         for field in ("run_id", "task_id"):
             if abaqus_results.get(field):
                 payload[field] = abaqus_results[field]
+        for field in ("design_revision_id", "parent_design_revision_id"):
+            if abaqus_results.get(field):
+                payload[field] = abaqus_results[field]
+        if isinstance(abaqus_results.get("solved_design"), dict):
+            payload["solved_design"] = self._sanitize_design(abaqus_results["solved_design"])
         return normalize_result_semantics(payload)
 
     def _result_pressure(self, results: Dict) -> float | None:

@@ -5,7 +5,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict
 
-from core.config_loader import fixed_imperfection_ratio, load_material_db
+from core.config_loader import default_imperfection_ratio, load_material_db, validate_imperfection_ratio
 from core.id_utils import next_task_id
 from core.schema_validator import validate_or_raise
 from core.task_contract import (
@@ -154,10 +154,59 @@ class TaskParser:
             "beta_deg": [
                 rf"(?:beta|β|铺层角\s*β|角度\s*β){connector}\s*([0-9]+(?:\.[0-9]+)?)",
             ],
-            "imperfection_ratio": [
-                rf"(?:初始缺陷比|缺陷比|初始缺陷|缺陷幅值|imperfection|Ir){connector}\s*([0-9]+(?:\.[0-9]+)?)\s*(%|‰|permille|per\s*mille)?",
-            ],
         }
+
+    def _extract_imperfection_ratio(self, text: str) -> float | None:
+        """解析比例、百分比和千分比，同一任务只接受一个固定值。"""
+        label = r"(?:初始几何缺陷比|初始缺陷比|缺陷比|imperfection(?:[_\s]+ratio)?|\bIr\b)"
+        number = r"[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+-]?\d+)?|[零〇一二两三四五六七八九十点]+"
+        quantity = rf"(?P<prefix>千分之|百分之)?\s*(?P<number>{number})(?:\s*(?P<unit>‰|%|permille|per\s+mille))?"
+        patterns = [re.compile(
+            rf"{label}\s*(?:(?:为|是|取值|取|设为|=|:|：|固定|保持|限定|指定|按|采用|约)\s*)*"
+            + quantity,
+            flags=re.IGNORECASE,
+        ), re.compile(rf"(?<![0-9A-Za-z_.%‰]){quantity}\s*(?:的\s*)?{label}", flags=re.IGNORECASE)]
+        values = []
+        matches = [match for pattern in patterns for match in pattern.finditer(text)]
+        for mention in re.finditer(label, text, flags=re.IGNORECASE):
+            if any(match.start() <= mention.start() and match.end() >= mention.end() for match in matches):
+                continue
+            tail = text[mention.end():]
+            if re.match(r"\s*(?:为|是|取|设为|=|:|：|固定|限定|指定|采用|nan\b|inf\b|infinity\b|true\b|false\b|null\b|\[|负)", tail, flags=re.IGNORECASE):
+                raise ValueError("初始几何缺陷比需要一个有效数值。")
+        for match in matches:
+            before = text[:match.start()]
+            if re.search(r"[\d%‰零一二三四五六七八九十]\s*(?:[-+~～至到、]|和|或)\s*$", before):
+                raise ValueError("初始几何缺陷比需要一个固定值，不作为搜索变量。")
+            raw = match.group("number")
+            if re.search(r"[零〇一二两三四五六七八九十点]", raw):
+                digits = str.maketrans("零〇一二两三四五六七八九点", "001223456789.")
+                raw = raw.translate(digits)
+                if "十" in raw:
+                    tens, ones = raw.split("十", 1)
+                    raw = str(float(tens or "1") * 10 + float(ones or "0"))
+            try:
+                value = float(raw)
+            except ValueError as exc:
+                raise ValueError("初始几何缺陷比数值格式无效。") from exc
+            prefix, unit = match.group("prefix"), (match.group("unit") or "").lower()
+            if prefix and unit:
+                raise ValueError("初始几何缺陷比只能使用一种比例单位。")
+            if prefix == "千分之" or unit == "‰" or re.fullmatch(r"per\s*mille", unit):
+                value /= 1000
+            elif prefix == "百分之" or unit == "%":
+                value /= 100
+            tail = text[match.end():]
+            if re.match(r"\s*(?:[-~～至到、]|和|或)\s*(?:千分之|百分之)?\s*[\d零一二三四五六七八九十]", tail):
+                raise ValueError("初始几何缺陷比需要一个固定值，不作为搜索变量。")
+            if re.match(r"\s*(?:mm|毫米|米)\b", tail, flags=re.IGNORECASE):
+                raise ValueError("初始几何缺陷比使用比例，不接受长度单位。")
+            if re.match(r"(?:[%‰]|[A-Za-z])", tail):
+                raise ValueError("初始几何缺陷比单位或数值格式无效。")
+            values.append(validate_imperfection_ratio(value))
+        if values and any(abs(value - values[0]) > 1e-12 for value in values[1:]):
+            raise ValueError("任务中的初始几何缺陷比取值冲突。")
+        return values[0] if values else None
 
     def _extract_geometry_values(self, text: str) -> Dict[str, float]:
         geometry: Dict[str, float] = {}
@@ -170,16 +219,11 @@ class TaskParser:
                     value = float(match.group(1))
                 except (TypeError, ValueError):
                     continue
-                if key == "imperfection_ratio":
-                    unit = (match.group(2) or "").lower() if len(match.groups()) >= 2 else ""
-                    if unit in {"‰", "permille", "per mille"}:
-                        value = value / 1000.0
-                    elif unit == "%" or 0.05 < value <= 1.0:
-                        value = value / 100.0
-                    elif value > 1.0:
-                        value = value / 1000.0
                 geometry[key] = value
                 break
+        imperfection = self._extract_imperfection_ratio(text)
+        if imperfection is not None:
+            geometry["imperfection_ratio"] = imperfection
         return geometry
 
     def _extract_fixed_geometry_values(self, text: str, geometry_values: Dict[str, float]) -> Dict[str, float]:
@@ -194,7 +238,7 @@ class TaskParser:
             rf"{reference_terms}{gap}(?:几何|尺寸|结构尺寸)",
         ]
         if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in whole_reference_patterns):
-            return {}
+            return {key: value for key, value in geometry_values.items() if key == "imperfection_ratio"}
 
         whole_geometry_patterns = [
             rf"(?:几何|尺寸|结构尺寸){gap}{fixed_terms}",
@@ -213,6 +257,9 @@ class TaskParser:
         }
         fixed: Dict[str, float] = {}
         for key, value in geometry_values.items():
+            if key == "imperfection_ratio":
+                fixed[key] = value
+                continue
             label = labels[key]
             reference_patterns = [
                 rf"{reference_terms}{gap}{label}",
@@ -241,11 +288,8 @@ class TaskParser:
                 "beta_deg": 10.0,
             }[key]
             geometry[key] = [value - width, value + width]
-        fixed_defect = fixed_imperfection_ratio()
-        specified_defect = values.get("imperfection_ratio")
-        if specified_defect is not None and abs(specified_defect - fixed_defect) > 1e-9:
-            raise ValueError(f"初始几何缺陷比统一采用 {fixed_defect:g}（{fixed_defect * 1000:g}‰）。")
-        geometry["imperfection_ratio"] = [fixed_defect, fixed_defect]
+        defect = values.get("imperfection_ratio", default_imperfection_ratio())
+        geometry["imperfection_ratio"] = [defect, defect]
         return normalize_geometry_envelope(geometry)
 
     def _ultimate_pressure_target_value(self, text: str) -> float | None:
@@ -449,6 +493,9 @@ class TaskParser:
             ),
         }
         hints["user_input_facts"] = self._extract_user_input_facts(text, hints)
+        hints["analysis_condition_sources"] = {
+            "imperfection_ratio": "user" if "imperfection_ratio" in hints["user_input_facts"].get("fixed_geometry", {}) else "default"
+        }
         return hints
 
     def _apply_user_overrides(self, hints: Dict[str, Any], overrides: Dict[str, Any] | None) -> Dict[str, Any]:

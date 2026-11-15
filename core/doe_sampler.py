@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 
 import numpy as np
 
-from core.config_loader import fixed_imperfection_ratio, load_app_config, load_material_db, load_param_ranges
+from core.config_loader import load_app_config, load_material_db, load_param_ranges
 from core.id_utils import format_candidate_id
 from core.pressure_hull_profile import (
     layup_pattern,
@@ -90,10 +90,8 @@ class DOESampler:
                 low = max(low, min(task_low, task_high))
                 high = min(high, max(task_low, task_high))
             if low > high:
-                low = float(base["min"])
-                high = float(base["max"])
+                raise ValueError(f"任务的 {feature} 与模型适用范围无交集。")
             bounds_by_feature[feature] = {"min": low, "max": high}
-        bounds_by_feature["imperfection_ratio"] = {"min": fixed_imperfection_ratio(), "max": fixed_imperfection_ratio()}
         return bounds_by_feature
 
     def _lhs(self, dimensions: int, samples: int, seed_offset: int = 0) -> np.ndarray:
@@ -153,7 +151,7 @@ class DOESampler:
                 for idx, feature in enumerate(feature_order):
                     bounds = type_ranges.get(feature) or {"min": 0.0, "max": 1.0}
                     value = float(bounds["min"]) + row[idx] * (float(bounds["max"]) - float(bounds["min"]))
-                    geometry[feature] = round(float(value), 6 if feature == "imperfection_ratio" else 3)
+                    geometry[feature] = float(bounds["min"]) if bounds["min"] == bounds["max"] else round(float(value), 3)
                 geometry = normalize_geometry(htype, geometry)
 
                 layup = self._layup_payload(rng, geometry)

@@ -20,7 +20,7 @@ def _task() -> dict:
                 "length_mm": [450, 650],
                 "radius_mm": [90, 130],
                 "thickness_mm": [8, 14],
-                "imperfection_ratio": [0.001, 0.01],
+                "imperfection_ratio": [0.008, 0.008],
             },
             "material_system": {"name": "T700/Epoxy"},
             "hull_type": "CYLINDRICAL",

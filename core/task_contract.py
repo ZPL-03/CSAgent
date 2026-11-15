@@ -7,6 +7,8 @@ from datetime import datetime, timezone
 import re
 from typing import Any, Dict, Iterable
 
+from core.config_loader import default_imperfection_ratio, validate_imperfection_ratio
+
 
 DEFAULT_ALLOWED_ANGLES = [0, 45, -45, 90]
 DEFAULT_GEOMETRY_ENVELOPE = {
@@ -15,7 +17,6 @@ DEFAULT_GEOMETRY_ENVELOPE = {
     "thickness_mm": [5.0, 20.0],
     "alpha_deg": [10.0, 80.0],
     "beta_deg": [10.0, 80.0],
-    "imperfection_ratio": [0.001, 0.01],
 }
 DEFAULT_DESIGN_TARGETS = {
     "ultimate_pressure_min_MPa": 30.0,
@@ -250,6 +251,8 @@ def boundary_condition_code(boundary_conditions: Any) -> float:
 
 def normalize_geometry_envelope(envelope: Dict[str, Any] | None) -> Dict[str, Any]:
     data = deepcopy(DEFAULT_GEOMETRY_ENVELOPE)
+    default_defect = default_imperfection_ratio()
+    data["imperfection_ratio"] = [default_defect, default_defect]
     if not isinstance(envelope, dict):
         return data
     aliases = {
@@ -267,14 +270,23 @@ def normalize_geometry_envelope(envelope: Dict[str, Any] | None) -> Dict[str, An
         "Ir": "imperfection_ratio",
         "imperfection": "imperfection_ratio",
     }
+    specified_defect = None
     for raw_key, value in envelope.items():
         key = aliases.get(str(raw_key), str(raw_key))
+        if key == "imperfection_ratio":
+            values = list(value) if isinstance(value, (list, tuple)) else [value, value]
+            if len(values) != 2:
+                raise ValueError("初始几何缺陷比需要一个固定值，不作为搜索变量。")
+            values = [validate_imperfection_ratio(item) for item in values]
+            if values[0] != values[1]:
+                raise ValueError("初始几何缺陷比需要一个固定值，不作为搜索变量。")
+            if specified_defect is not None and values[0] != specified_defect:
+                raise ValueError("初始几何缺陷比字段与别名取值冲突。")
+            specified_defect = values[0]
+            data[key] = values
+            continue
         if key in data:
             data[key] = _normalize_range(value, data[key])
-    if data["imperfection_ratio"][1] > 1.0:
-        data["imperfection_ratio"] = [value / 1000.0 for value in data["imperfection_ratio"]]
-    elif data["imperfection_ratio"][1] > 0.05:
-        data["imperfection_ratio"] = [value / 100.0 for value in data["imperfection_ratio"]]
     return data
 
 
@@ -324,7 +336,26 @@ def normalize_task_payload(
     normalized["application"] = str(normalized.get("application") or "复合材料外压圆柱耐压壳")
     normalized["load_conditions"] = normalize_load_conditions(normalized.get("load_conditions"))
     normalized["boundary_conditions"] = normalize_boundary_conditions(normalized.get("boundary_conditions"))
-    normalized["geometry_envelope"] = normalize_geometry_envelope(normalized.get("geometry_envelope"))
+    envelope = dict(normalized.get("geometry_envelope") or {})
+    fixed_facts = (normalized.get("user_input_facts") or {}).get("fixed_geometry") or {}
+    if "imperfection_ratio" in fixed_facts:
+        fact_defect = validate_imperfection_ratio(fixed_facts["imperfection_ratio"])
+        supplied_keys = {"imperfection_ratio", "Ir", "imperfection"}.intersection(envelope)
+        if supplied_keys and normalize_geometry_envelope(envelope)["imperfection_ratio"][0] != fact_defect:
+            raise ValueError("任务缺陷比与用户固定条件冲突。")
+        envelope["imperfection_ratio"] = fact_defect
+    normalized["geometry_envelope"] = normalize_geometry_envelope(envelope)
+    # 来源随任务保存，读取历史任务时不根据配置值是否相等猜测用户意图。
+    condition_sources = dict(normalized.get("analysis_condition_sources") or {})
+    if "imperfection_ratio" in fixed_facts:
+        condition_sources["imperfection_ratio"] = "user"
+    else:
+        condition_sources.setdefault(
+            "imperfection_ratio", "task" if {"imperfection_ratio", "Ir", "imperfection"}.intersection(envelope) else "default"
+        )
+    if condition_sources["imperfection_ratio"] not in {"user", "task", "default"}:
+        raise ValueError("初始几何缺陷比来源应为 user、task 或 default。")
+    normalized["analysis_condition_sources"] = condition_sources
     from abaqus.cylindrical_geometry import radius_reference
 
     normalized["radius_reference"] = radius_reference(normalized)
@@ -361,6 +392,17 @@ def task_payload_from_request(task_record: Dict[str, Any] | None) -> Dict[str, A
     if isinstance(task_record.get("task"), dict):
         return normalize_task_payload(dict(task_record.get("task") or {}))
     return normalize_task_payload(dict(task_record))
+
+
+def task_imperfection_ratio(task: Dict[str, Any] | None) -> float:
+    """所有候选路径使用任务的固定缺陷比；缺省值由任务归一化提供。"""
+    return task_payload_from_request(task)["geometry_envelope"]["imperfection_ratio"][0]
+
+
+def describe_imperfection_source(task: Dict[str, Any] | None) -> str:
+    """返回任务保存的缺陷比取值来源。"""
+    source = task_payload_from_request(task)["analysis_condition_sources"]["imperfection_ratio"]
+    return {"user": "用户指定", "task": "任务参数", "default": "配置默认"}[source]
 
 
 def build_task_request_record(

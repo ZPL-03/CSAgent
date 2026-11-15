@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
+import math
 from pathlib import Path
 from typing import Any, Dict
 
@@ -36,13 +37,20 @@ def load_param_ranges() -> Dict[str, Any]:
     return _load_yaml(CONFIG_DIR / "param_ranges.yaml")
 
 
-def fixed_imperfection_ratio() -> float:
-    """读取候选采用的初始几何缺陷比。"""
-    value = float(load_param_ranges()["analysis_assumptions"]["imperfection_ratio"])
+def validate_imperfection_ratio(value: Any) -> float:
+    """校验以比例表示的分析缺陷比，不推测单位或截断数值。"""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("初始几何缺陷比必须是有限数值，单位为比例。")
+    value = float(value)
     bounds = load_param_ranges()["geometry"]["imperfection_ratio"]
-    if not float(bounds["min"]) <= value <= float(bounds["max"]):
-        raise ValueError("固定初始几何缺陷比超出模型适用范围。")
+    if not math.isfinite(value) or not float(bounds["min"]) <= value <= float(bounds["max"]):
+        raise ValueError(f"初始几何缺陷比需要位于 {bounds['min']:g}-{bounds['max']:g} 的模型适用范围。")
     return value
+
+
+def default_imperfection_ratio() -> float:
+    """读取用户未指定分析缺陷比时采用的配置值。"""
+    return validate_imperfection_ratio(load_param_ranges()["analysis_assumptions"]["imperfection_ratio"])
 
 
 @lru_cache(maxsize=None)

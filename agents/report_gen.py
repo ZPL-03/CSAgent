@@ -17,7 +17,10 @@ from core.fem_result_semantics import complete_case_result_errors
 from core.io_utils import write_text
 from core.llm_backend import LLMBackend, auto_llm_enabled
 from core.paths import RESULTS_DIR
-from core.task_contract import describe_boundary_conditions, describe_load_conditions, task_payload_from_request
+from core.task_contract import (
+    describe_boundary_conditions, describe_imperfection_source, describe_load_conditions,
+    task_imperfection_ratio, task_payload_from_request,
+)
 
 
 class ReportGenAgent(BaseAgent):
@@ -123,6 +126,8 @@ class ReportGenAgent(BaseAgent):
             "application": task_payload["application"],
             "load_conditions": describe_load_conditions(task_payload["load_conditions"]),
             "boundary_conditions": describe_boundary_conditions(task_payload["boundary_conditions"]),
+            "imperfection_ratio": task_imperfection_ratio(task_payload),
+            "imperfection_source": describe_imperfection_source(task_payload),
             "ultimate_pressure_min_MPa": target_pressure,
             "primary_objective": design_targets.get("primary_objective"),
             "result_count": len(results),
@@ -150,6 +155,7 @@ class ReportGenAgent(BaseAgent):
                     "ultimate_pressure_basis": result.get("ultimate_pressure_basis"),
                     "riks_lpf_max": result.get("riks_lpf_max"),
                     "imperfection_amplitude_mm": result.get("imperfection_amplitude_mm"),
+                    "solved_imperfection_ratio": ((result.get("solved_design") or {}).get("geometry") or {}).get("imperfection_ratio"),
                     "weight_kg_per_m2": result.get("weight_kg_per_m2"),
                     "verdict": result.get("verdict"),
                     "failure_mode": result.get("failure_mode"),
@@ -256,8 +262,12 @@ class ReportGenAgent(BaseAgent):
             "results": [{key: value for key, value in result.items() if key != "design_verdict_basis"}
                         for result in summary.get("results", [])],
             "aggregate": {"overall": overall, "result_count": result_count, "passed_count": passed_count},
-            "analysis_conditions": {"imperfection_ratios": sorted({item["imperfection_ratio"] for item in summary.get("all_candidates", [])
-                                                                    if item.get("imperfection_ratio") is not None})},
+            "analysis_conditions": {
+                "task_imperfection_ratio": summary.get("imperfection_ratio"),
+                "imperfection_source": summary.get("imperfection_source"),
+                "imperfection_ratios": sorted({item["imperfection_ratio"] for item in summary.get("all_candidates", [])
+                                               if item.get("imperfection_ratio") is not None}),
+            },
             "interpretation_constraints": [
                 "数值由报告模板输出；解释不复述数值不代表原始数据缺失。",
                 "只有缺失或为null的字段才能描述为未提供，不得把已完成的校核描述为尚未执行。",
@@ -505,12 +515,16 @@ class ReportGenAgent(BaseAgent):
             "如果结构化数据缺少某项，请明确说明当前结构化数据未提供。\n\n"
             f"结构化事实 JSON：\n{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}"
         )
-        answer = self.llm_backend.chat(
-            system_prompt,
-            user_prompt,
-            max_tokens_override=min(max(int(self.llm_backend.max_tokens), 1800), 2600),
-            json_mode=False,
-        ).strip()
+        try:
+            answer = self.llm_backend.chat(
+                system_prompt,
+                user_prompt,
+                max_tokens_override=min(max(int(self.llm_backend.max_tokens), 1800), 2600),
+                json_mode=False,
+            ).strip()
+        except Exception:
+            self.emit_llm_trace(self.llm_backend, {"purpose": "report_engineering_explanation", "failed": True})
+            raise
         self.emit_llm_trace(self.llm_backend, {"purpose": "report_engineering_explanation"})
         if not answer:
             return ""
@@ -570,7 +584,6 @@ class ReportGenAgent(BaseAgent):
                                 f"总体报告解释未通过事实或格式校验，已使用结构化说明：{exc}",
                                 {"report_kind": "overall", "reason": str(exc)})
             except Exception as exc:
-                self.emit_llm_trace(self.llm_backend, {"purpose": "report_engineering_explanation", "failed": True})
                 self.emit(f"报告 LLM 工程解释生成失败，已使用确定性解释：{exc}")
         return self._render_deterministic_engineering_explanation(summary)
 
@@ -589,6 +602,7 @@ class ReportGenAgent(BaseAgent):
             *([f"- 用户额外指定的极限承载力下限：{task_payload['design_targets']['ultimate_pressure_min_MPa']} MPa"]
               if float(task_payload['design_targets']['ultimate_pressure_min_MPa']) != working_pressure else []),
             f"- 边界条件：{describe_boundary_conditions(task_payload['boundary_conditions'])}",
+            f"- 任务初始几何缺陷比：{summary['imperfection_ratio']}（比例，{summary['imperfection_source']}）",
             f"- 用户指定几何：{self._field_text(task_payload.get('user_input_facts', {}).get('fixed_geometry'))}",
             f"- 优化目标：{task_payload['design_targets']['primary_objective']}",
             "- 校核依据：有限元工作压力下的屈曲与首层失效检查，以及已确认的渐进损伤容量；不自动附加安全系数。",
@@ -613,6 +627,7 @@ class ReportGenAgent(BaseAgent):
                 f"- 铺层参数：alpha={geometry.get('alpha_deg')} deg，beta={geometry.get('beta_deg')} deg；实际角度以铺层表达式为准",
                 f"- 逐层属性核查：对称性={self._field_text(layup.get('symmetric'))}，平衡性={self._field_text(layup.get('balanced'))}",
                 f"- 初始几何缺陷比：{geometry.get('imperfection_ratio')}",
+                f"- 候选缺陷条件与任务：{'未记录' if geometry.get('imperfection_ratio') is None else '一致' if geometry['imperfection_ratio'] == summary['imperfection_ratio'] else '不一致'}",
                 f"- 生成提案理由（原文）：{candidate.get('rationale') or '生成记录未提供额外理由，不作推断。'}",
                 f"- 来源追踪：{candidate.get('origin_summary') or '见候选生成记录。'}",
                 *([f"- 来源提案缺陷比：{proposed_defect}"]
@@ -637,6 +652,7 @@ class ReportGenAgent(BaseAgent):
             lines.append("- 当前没有有限元结果，不能作出最终通过或推荐结论。")
         for result in results:
             capacity = result.get("ultimate_pressure_MPa")
+            solved_defect = ((result.get("solved_design") or {}).get("geometry") or {}).get("imperfection_ratio")
             confirmed = result.get("riks_limit_point_confirmed") is True
             capacity_check = (
                 "满足" if float(capacity) >= working_pressure else "不满足"
@@ -646,6 +662,8 @@ class ReportGenAgent(BaseAgent):
                 f"- 作业状态：{result.get('status') or '-'}",
                 *([f"- 实际求解几何：{result['solved_design']['geometry']}"]
                   if (result.get("solved_design") or {}).get("geometry") else []),
+                f"- 实际求解缺陷比：{self._field_text(solved_defect, '未记录')}",
+                f"- 求解缺陷条件与任务：{'未记录' if solved_defect is None else '一致' if solved_defect == summary['imperfection_ratio'] else '不一致'}",
                 f"- 工作压力校核：{result.get('service_pressure_check_status') or '-'}",
                 f"- 工作压力最大 Hashin 指数：{self._field_text(result.get('service_hashin_index_max'))}",
                 f"- 线性屈曲压力：{self._field_text(result.get('linear_buckling_pressure_MPa'))} MPa",
@@ -670,6 +688,7 @@ class ReportGenAgent(BaseAgent):
             and not complete_case_result_errors(result)
             and result.get("ultimate_pressure_MPa") is not None
             and float(result["ultimate_pressure_MPa"]) >= required_capacity
+            and ((result.get("solved_design") or {}).get("geometry") or {}).get("imperfection_ratio") in (None, summary["imperfection_ratio"])
         ]
         objective = str(task_payload["design_targets"]["primary_objective"])
         def recommendation_key(result):

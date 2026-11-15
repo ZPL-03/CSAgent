@@ -139,9 +139,11 @@ def test_case_retrieval_does_not_invent_unknown_dimensions_or_pressure_targets()
     assert retriever._score({"geometry_envelope": {"length_mm": [600, 600]}}, record) == float("inf")
 
 
-def test_case_retrieval_uses_project_defect_setting():
+def test_case_retrieval_uses_fixed_task_defect():
     retriever = CaseRetriever(use_vector_index=False)
-    assert retriever._geometry_center({"geometry_envelope": {"imperfection_ratio": [0.001, 0.01]}})["imperfection_ratio"] == 0.008
+    assert retriever._geometry_center({"geometry_envelope": {"imperfection_ratio": [0.005, 0.005]}})["imperfection_ratio"] == 0.005
+    with pytest.raises(ValueError, match="固定值"):
+        retriever._geometry_center({"geometry_envelope": {"imperfection_ratio": [0.001, 0.01]}})
 
 
 def test_shell_pass_and_capacity_require_full_ply_and_damage_evidence():

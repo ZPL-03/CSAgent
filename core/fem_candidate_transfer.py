@@ -8,7 +8,7 @@ from copy import deepcopy
 from pathlib import Path
 from typing import Any, Dict, List
 
-from core.config_loader import fixed_imperfection_ratio, load_app_config
+from core.config_loader import default_imperfection_ratio, load_app_config, validate_imperfection_ratio
 from core.fem_input_contract import attach_design_revision, validate_fem_input
 from core.io_utils import read_json, write_json
 from core.id_utils import next_task_id
@@ -142,11 +142,24 @@ def validate_fem_ready_response(response: Dict[str, Any]) -> List[Dict[str, Any]
     return normalized
 
 
-def import_fem_ready_response(path: Path, output_path: Path | None = None) -> Dict[str, Any]:
+def import_fem_ready_response(
+    path: Path, output_path: Path | None = None, *, imperfection_ratio: float | None = None,
+) -> Dict[str, Any]:
     """从 UTF-8 JSON 文件导入并保存已验证的机器候选包。"""
     response = read_json(path)
-    candidates = [adapt_imported_candidate(candidate) for candidate in validate_fem_ready_response(response)]
+    source_candidates = validate_fem_ready_response(response)
     result = response["result"]
+    requested_defect = (result.get("request", {}).get("geometry") or {}).get("imperfection_ratio")
+    explicit_defect = imperfection_ratio if imperfection_ratio is not None else requested_defect
+    defect = default_imperfection_ratio() if explicit_defect is None else validate_imperfection_ratio(explicit_defect)
+    candidates = [adapt_imported_candidate(candidate, imperfection_ratio=defect) for candidate in source_candidates]
+    # 固定分析条件可能合并仅缺陷比不同的来源设计，写入前复核实际设计身份。
+    revisions: dict[str, str] = {}
+    for candidate in candidates:
+        revision, identifier = candidate["design_revision_id"], candidate["candidate_id"]
+        if revision in revisions:
+            raise FEMCandidateTransferError(f"分析条件适配后候选重复：{revisions[revision]} 与 {identifier}。")
+        revisions[revision] = identifier
     fingerprint = _fingerprint({"request": result["request"], "source_table": result["source_table"], "candidates": candidates})
     target = output_path or IO_DIR / f"imported_fem_{fingerprint}.json"
     payload = {
@@ -155,6 +168,8 @@ def import_fem_ready_response(path: Path, output_path: Path | None = None) -> Di
         "contract_version": FEM_READY_CONTRACT_VERSION,
         "source_table": deepcopy(result["source_table"]),
         "request": deepcopy(result["request"]),
+        "analysis_conditions": {"imperfection_ratio": defect},
+        "analysis_condition_sources": {"imperfection_ratio": "user" if explicit_defect is not None else "default"},
         "candidate_count": len(candidates),
         "source_design_fingerprint": result["design_fingerprint"],
         "design_fingerprint": fingerprint,
@@ -164,21 +179,23 @@ def import_fem_ready_response(path: Path, output_path: Path | None = None) -> Di
     return {"path": str(target), "payload": payload}
 
 
-def adapt_imported_candidate(candidate: Dict[str, Any]) -> Dict[str, Any]:
+def adapt_imported_candidate(candidate: Dict[str, Any], *, imperfection_ratio: float | None = None) -> Dict[str, Any]:
     """将来源设计转换为项目分析条件，保留来源输入和历史结果。"""
     issues = validate_fem_input(candidate)
     if issues:
         raise FEMCandidateTransferError("来源候选输入无效：" + ", ".join(issues))
     adapted = deepcopy(candidate)
-    conditions = {"imperfection_ratio": fixed_imperfection_ratio(), "radius_reference": "inner"}
+    defect = default_imperfection_ratio() if imperfection_ratio is None else validate_imperfection_ratio(imperfection_ratio)
+    conditions = {"imperfection_ratio": defect, "radius_reference": "inner"}
     analysis = adapted.setdefault("analysis", {})
     use_subroutine = bool(load_app_config()["abaqus"].get("use_user_subroutine", False))
     changed = (any(adapted["geometry"].get(key) != value for key, value in conditions.items())
                or analysis.get("use_user_subroutine") != use_subroutine)
     provenance = adapted.setdefault("provenance", {})
     provenance["source_design_revision_id"] = candidate["design_revision_id"]
-    provenance["source_geometry"] = deepcopy(candidate["geometry"])
-    provenance["source_analysis"] = deepcopy(candidate.get("analysis", {}))
+    provenance.setdefault("source_geometry", deepcopy(candidate["geometry"]))
+    provenance.setdefault("source_analysis", deepcopy(candidate.get("analysis", {})))
+    provenance["imported_geometry"] = deepcopy(candidate["geometry"])
     provenance["fixed_analysis_conditions"] = conditions
     adapted["geometry"].update(conditions)
     analysis["use_user_subroutine"] = use_subroutine
@@ -206,6 +223,22 @@ def build_fem_ready_task_record(payload: Dict[str, Any]) -> Dict[str, Any]:
     geometry = request.get("geometry") or {}
     length = geometry.get("length_mm")
     radius = geometry.get("radius_mm")
+    defects = {validate_imperfection_ratio((candidate.get("geometry") or {}).get("imperfection_ratio"))
+               for candidate in candidates}
+    if len(defects) != 1:
+        raise FEMCandidateTransferError("同一任务的候选需要使用同一个初始几何缺陷比。")
+    defect = defects.pop()
+    requested_defect = geometry.get("imperfection_ratio")
+    conditions = payload.get("analysis_conditions") or {}
+    expected_defect = conditions.get("imperfection_ratio", requested_defect)
+    expected_defect = default_imperfection_ratio() if expected_defect is None else validate_imperfection_ratio(expected_defect)
+    if expected_defect != defect:
+        raise FEMCandidateTransferError("候选缺陷比与导入分析条件不一致。")
+    condition_source = (payload.get("analysis_condition_sources") or {}).get(
+        "imperfection_ratio", "user" if requested_defect is not None else "default"
+    )
+    if condition_source not in {"user", "default"}:
+        raise FEMCandidateTransferError("导入缺陷比来源应为 user 或 default。")
     angles = sorted(
         {
             abs(float(angle))
@@ -217,11 +250,13 @@ def build_fem_ready_task_record(payload: Dict[str, Any]) -> Dict[str, Any]:
         "application": str(request.get("structure_form") or "复合材料外压圆柱耐压壳"),
         "hull_type": "CYLINDRICAL",
         "radius_reference": "inner",
+        "analysis_condition_sources": {"imperfection_ratio": condition_source},
         "load_conditions": deepcopy(request.get("load_conditions") or {}),
         "boundary_conditions": deepcopy(request.get("boundary_conditions") or {}),
         "geometry_envelope": {
             "length_mm": [length, length],
             "radius_mm": [radius, radius],
+            "imperfection_ratio": [defect, defect],
         },
         "candidate_generation_preferences": {
             "total_candidates": len(candidates),
@@ -242,6 +277,8 @@ def build_fem_ready_task_record(payload: Dict[str, Any]) -> Dict[str, Any]:
             "design_targets": deepcopy(request.get("design_targets") or {}),
         },
     }
+    if condition_source == "user":
+        task_payload["user_input_facts"]["fixed_geometry"]["imperfection_ratio"] = defect
     return build_task_request_record(
         task_payload,
         task_id=next_task_id(),

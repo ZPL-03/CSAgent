@@ -12,7 +12,7 @@ import agents.orchestrator as orchestrator_module
 from agents.orchestrator import OrchestratorAgent
 from agents.report_gen import ReportGenAgent
 from core.id_utils import format_temp_candidate_id
-from core.llm_backend import LLMBackend
+from core.llm_backend import LLMBackend, LLMCallError
 from core.rag_engine import RAGEngine
 from core.schema_validator import SchemaValidationError, validate_or_raise
 from core.task_contract import (
@@ -135,27 +135,26 @@ def test_parser_rejects_invalid_quantity_overrides(field, value):
         TaskParser().parse_instruction("工作压力 12 MPa", {field: value})
 
 
-def test_current_designs_fix_imperfection_without_rewriting_case_source(monkeypatch):
+@pytest.mark.parametrize("specified,expected", [("", 0.008), ("，缺陷比0.005", 0.005)])
+def test_designs_use_task_imperfection_without_rewriting_case_source(monkeypatch, specified, expected):
     from copy import deepcopy
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    task = TaskParser().parse_instruction("工作压力 12 MPa，长度 500 mm，半径 100 mm，生成4个方案，预筛1个")
+    task = TaskParser().parse_instruction("工作压力 12 MPa，长度 500 mm，半径 100 mm，生成4个方案，预筛1个" + specified)
     agent = CandidateGenAgent()
     source = agent.doe_sampler.sample_candidates(task, 1, strict_solver_window=True)[0]
     source["geometry"]["imperfection_ratio"] = 0.003
     original = deepcopy(source)
     migrated = agent._normalize_candidate(task, source, 1, "CASE_TRANSFER")
     assert source == original
-    assert migrated["geometry"]["imperfection_ratio"] == 0.008
+    assert migrated["geometry"]["imperfection_ratio"] == expected
     assert migrated["provenance"]["proposed_imperfection_ratio"] == 0.003
-    assert all(item["geometry"]["imperfection_ratio"] == 0.008 for item in agent.run(task))
+    assert all(item["geometry"]["imperfection_ratio"] == expected for item in agent.run(task))
     for failure in ("geometry_issue", "convergence_fail"):
         from agents.fem_agent import FEMAgent
         from agents.orchestrator import OrchestratorAgent
         fem_input = OrchestratorAgent().prepare_candidate_for_fem(task, migrated)
         adjusted = FEMAgent().apply_adjustment(fem_input, failure, 0)
-        assert adjusted["geometry"]["imperfection_ratio"] == 0.008
-    with pytest.raises(ValueError, match="初始几何缺陷比统一采用 0.008"):
-        TaskParser().parse_instruction("工作压力 12 MPa，缺陷比 0.005")
+        assert adjusted["geometry"]["imperfection_ratio"] == expected
 
 
 def test_initial_case_task_uses_fixed_analysis_defect_and_working_pressure():
@@ -268,8 +267,8 @@ def test_candidate_prompt_separates_user_facts_from_system_constraints(monkeypat
     assert "T700/Epoxy" not in user_fact_section
     assert "500.0" not in user_fact_section
     assert "T700/Epoxy" in user_prompt
-    assert "项目计算采用 0.008" in user_prompt
-    assert "模型提案值单独记录" in user_prompt
+    assert "任务采用 0.008" in user_prompt
+    assert "所有候选使用同一数值" in user_prompt
     assert "结构化任务 JSON" not in user_prompt
     assert "不要输出 JSON" in system_prompt
     assert "结构性能依据和制造/缺陷风险依据" in user_prompt
@@ -403,6 +402,51 @@ def test_llm_backend_uses_fallback_backend_after_primary_unusable_response(monke
     assert "https://api.deepseek.com/v1" not in sanitized_error
     assert "primary-key" not in sanitized_error
     assert fake_secret not in sanitized_error
+
+
+@pytest.mark.parametrize("failure_kind", ["empty", "transport"])
+def test_all_backend_failures_are_sanitized_and_reported(monkeypatch, failure_kind):
+    from types import SimpleNamespace
+    import traceback
+
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    backend = LLMBackend({"backends": [
+        {"name": name, "base_url": f"http://{name}.local/v1", "api_key": f"{name}-private-key",
+         "model": "test-model", "max_tokens": 32}
+        for name in ("primary", "fallback")
+    ]})
+
+    def client_for(runtime):
+        def create(**_payload):
+            if failure_kind == "transport":
+                raise RuntimeError(f"Request failed: {runtime.base_url} {runtime.api_key}")
+            return SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(content="", reasoning_content=""), finish_reason="stop")])
+        return SimpleNamespace(chat=SimpleNamespace(completions=SimpleNamespace(create=create)))
+
+    monkeypatch.setattr(backend, "_client_for", client_for)
+    with pytest.raises(LLMCallError) as caught:
+        backend.chat("system", "user")
+    rendered = "".join(traceback.format_exception(caught.value))
+    for runtime in backend.backends:
+        assert runtime.api_key not in rendered
+        assert runtime.base_url not in rendered
+    assert caught.value.__cause__ is None
+    assert len(backend.last_call_trace) == 2
+    assert all(item["status"] == "failed" for item in backend.last_call_trace)
+
+    events = []
+    agent = ReportGenAgent(progress_callback=lambda *args: events.append(args))
+    agent.llm_backend = backend
+    task, results, candidates = _report_sample()
+    agent._render_markdown(task, results, candidates)
+    trace_events = [event for _, _, event in events if event["event_type"] == "llm_call_trace"]
+    assert len(trace_events) == 1
+    assert trace_events[0]["payload"]["context"]["failed"] is True
+    assert not any(event["event_type"] == "report_explanation_rejected" for _, _, event in events)
+    for runtime in backend.backends:
+        assert runtime.api_key not in str(events)
+        assert runtime.base_url not in str(events)
 
 
 def test_count_overrides_keep_ratio_mode(monkeypatch):

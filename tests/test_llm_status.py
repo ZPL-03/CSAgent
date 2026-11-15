@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from core.llm_backend import LLMBackend
+from core.llm_backend import LLMBackend, LLMCallError
 from core.llm_status import configured_llm_backends, probe_llm_backends
 
 
@@ -163,7 +163,7 @@ def test_llm_backend_records_reasoning_budget_empty_content(monkeypatch) -> None
 
     backend._openai_cls = FakeOpenAI
 
-    with pytest.raises(ValueError, match="推理 token 预算耗尽"):
+    with pytest.raises(LLMCallError, match="推理 token 预算耗尽"):
         backend.chat("system", "user", max_tokens_override=16)
 
     assert backend.last_call_trace[0]["reasoning_chars"] > 0

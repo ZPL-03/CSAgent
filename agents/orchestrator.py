@@ -11,7 +11,6 @@ from agents.fem_agent import FEMAgent
 from agents.knowledge_agent import KnowledgeAgent
 from agents.report_gen import ReportGenAgent
 from agents.screener import ScreenerAgent
-from core.config_loader import fixed_imperfection_ratio
 from core.id_utils import reserve_candidate_ids, task_file_name
 from core.fem_input_contract import attach_design_revision, validate_fem_input_or_raise
 from core.io_utils import write_json
@@ -24,6 +23,7 @@ from core.task_contract import (
     requested_screen_top_k,
     summarize_task,
     task_payload_from_request,
+    task_imperfection_ratio,
 )
 from core.task_parser import TaskParser
 from core.pressure_hull_profile import expand_layup_for_fem
@@ -68,7 +68,7 @@ class OrchestratorAgent(BaseAgent):
         return enriched
 
     def _promote_candidate_for_fem(self, task: Dict, candidate: Dict, formal_candidate_id: str | None = None) -> Dict:
-        self._validate_analysis_conditions(candidate)
+        self._validate_analysis_conditions(task, candidate)
         enriched_candidate = self._attach_task_context(task, candidate)
         formal_candidate_id = formal_candidate_id or reserve_candidate_ids(1)[0]
         session_candidate_id = enriched_candidate.get("candidate_id")
@@ -101,16 +101,16 @@ class OrchestratorAgent(BaseAgent):
         return promoted
 
     @staticmethod
-    def _validate_analysis_conditions(candidate: Dict) -> None:
-        expected = fixed_imperfection_ratio()
+    def _validate_analysis_conditions(task: Dict, candidate: Dict) -> None:
+        expected = task_imperfection_ratio(task)
         if (candidate.get("geometry") or {}).get("imperfection_ratio") != expected:
-            raise ValueError(f"初始几何缺陷比必须为 {expected:g}。")
+            raise ValueError(f"候选初始几何缺陷比与任务不一致，应为 {expected:g}。")
 
     def prepare_candidates_for_fem(self, task: Dict, candidates: List[Dict]) -> List[Dict]:
         """为同一批有限元样本生成互不重复的正式编号。"""
 
         for candidate in candidates:
-            self._validate_analysis_conditions(candidate)
+            self._validate_analysis_conditions(task, candidate)
         formal_candidate_ids = reserve_candidate_ids(len(candidates))
         return [
             self._promote_candidate_for_fem(task, candidate, formal_candidate_ids[index])
@@ -187,6 +187,8 @@ class OrchestratorAgent(BaseAgent):
         return updated
 
     def screen_candidates(self, task: Dict, candidates: List[Dict]) -> List[Dict]:
+        for candidate in candidates:
+            self._validate_analysis_conditions(task, candidate)
         score_formula = self.screener.score_formula_text
         requested_top_k = requested_screen_top_k(task)
         if requested_top_k is None:

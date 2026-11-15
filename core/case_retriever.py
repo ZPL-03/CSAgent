@@ -7,7 +7,8 @@ from typing import Dict, Iterable, List
 
 from abaqus.cylindrical_geometry import positive_number, radius_reference, shell_radii
 from core.case_memory import CaseMemoryIndex, is_transferable_case
-from core.config_loader import fixed_imperfection_ratio, load_app_config
+from core.config_loader import load_app_config
+from core.task_contract import task_imperfection_ratio
 from core.fem_result_semantics import verified_capacity_pressure
 from core.io_utils import read_json
 from core.paths import CASE_LIBRARY_DIR, CASES_DIR
@@ -104,7 +105,7 @@ class CaseRetriever:
 
     def _geometry_center(self, task: Dict) -> Dict[str, float]:
         envelope = task.get("geometry_envelope", {})
-        centers = {"imperfection_ratio": fixed_imperfection_ratio()}
+        centers = {"imperfection_ratio": task_imperfection_ratio(task)}
         for key in ("length_mm", "radius_mm", "thickness_mm"):
             value = envelope.get(key)
             if value is None:

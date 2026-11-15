@@ -8,7 +8,7 @@ from functools import lru_cache
 from typing import Any, Dict, List
 
 from core.config_loader import load_param_ranges as _load_param_ranges_raw
-from core.config_loader import fixed_imperfection_ratio
+from core.config_loader import default_imperfection_ratio
 from abaqus.cylindrical_geometry import positive_number, radius_reference, shell_radii
 
 
@@ -37,7 +37,7 @@ DEFAULT_GEOMETRY = {
         "thickness_mm": 10.0,
         "alpha_deg": 40.0,
         "beta_deg": 70.0,
-        "imperfection_ratio": fixed_imperfection_ratio(),
+        "imperfection_ratio": default_imperfection_ratio(),
     }
 }
 
@@ -143,12 +143,8 @@ def canonical_geometry_values(raw_geom: Dict[str, Any] | None) -> Dict[str, floa
         normalized_key = _GEOMETRY_ALIASES.get(str(key), str(key))
         if normalized_key in ALL_GEOMETRY_PARAMS and value is not None:
             geometry[normalized_key] = _safe_float(value)
-    if "imperfection_ratio" in geometry:
-        if geometry["imperfection_ratio"] > 1.0:
-            geometry["imperfection_ratio"] = geometry["imperfection_ratio"] / 1000.0
-        elif geometry["imperfection_ratio"] > 0.05:
-            geometry["imperfection_ratio"] = geometry["imperfection_ratio"] / 100.0
-    return {key: round(float(value), 6) for key, value in geometry.items()}
+    return {key: float(value) if key == "imperfection_ratio" else round(float(value), 6)
+            for key, value in geometry.items()}
 
 
 def missing_geometry_params(raw_geom: Dict[str, Any] | None, hull_type: str = "CYLINDRICAL") -> List[str]:
@@ -160,7 +156,8 @@ def normalize_geometry(hull_type: str, raw_geom: Dict[str, Any] | None) -> Dict[
     """补齐并规范候选几何。"""
     geometry = default_geometry(hull_type)
     geometry.update(canonical_geometry_values(raw_geom))
-    normalized = {key: round(float(value), 6) for key, value in geometry.items()}
+    normalized = {key: float(value) if key == "imperfection_ratio" else round(float(value), 6)
+                  for key, value in geometry.items()}
     normalized["radius_reference"] = radius_reference(raw_geom or {})
     return normalized
 

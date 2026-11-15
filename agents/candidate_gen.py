@@ -5,7 +5,7 @@ from typing import Any, Dict, List
 
 from agents.base import BaseAgent
 from core.case_retriever import CaseRetriever
-from core.config_loader import fixed_imperfection_ratio, load_app_config, load_llm_config, load_material_db
+from core.config_loader import load_app_config, load_llm_config, load_material_db
 from core.domain_knowledge import DomainKnowledgeBase
 from core.doe_sampler import DOESampler
 from core.id_utils import format_temp_candidate_id
@@ -23,6 +23,7 @@ from core.rule_checker import RuleChecker
 from core.schema_validator import SchemaValidationError, validate_or_raise
 from core.task_contract import (
     requested_candidate_pool_size,
+    task_imperfection_ratio,
     task_payload_from_request,
 )
 
@@ -194,7 +195,7 @@ class CandidateGenAgent(BaseAgent):
         user_facts = dict(task_payload.get("user_input_facts") or {})
         fact_lines = self._user_fact_lines(user_facts)
         fact_text = "\n".join(f"- {line}" for line in fact_lines)
-        constraint_text = "\n".join(f"- {line}" for line in self._candidate_field_constraint_lines(hull_type))
+        constraint_text = "\n".join(f"- {line}" for line in self._candidate_field_constraint_lines(hull_type, task))
         knowledge_text = (
             "\n\n".join(knowledge_guidance)
             if knowledge_guidance
@@ -207,7 +208,7 @@ class CandidateGenAgent(BaseAgent):
             "候选方案必须用 Markdown 表格表达，列名中直接写出编号、材料、长度、半径或内径、厚度、alpha、beta、铺层形式、缺陷比和推荐理由。"
             "表格中的推荐理由必须用一句话同时包含结构性能依据和制造/缺陷风险依据，不要只写泛化结论。"
             "只能把“用户已给信息”中列出的内容写成用户事实；用户没有给出的工况、材料、几何、目标或边界，不要当成用户事实写入回答。"
-            "为了形成候选而提出的材料、铺层角或缺陷比必须写成候选建议值，不能写成用户已给条件。"
+            "为了形成候选而提出的材料和铺层角必须写成候选建议值，不能写成用户已给条件。缺陷比采用任务给定的固定分析值。"
             "不要输出 JSON，不要输出 XML 标签，不要展开长篇推理过程。"
         )
         user_prompt = (
@@ -226,7 +227,7 @@ class CandidateGenAgent(BaseAgent):
         )
         return system_prompt, user_prompt
 
-    def _candidate_field_constraint_lines(self, hull_type: str) -> List[str]:
+    def _candidate_field_constraint_lines(self, hull_type: str, task: Dict[str, Any]) -> List[str]:
         ranges = load_param_ranges_for_type(hull_type)
 
         def range_text(key: str) -> str:
@@ -240,7 +241,7 @@ class CandidateGenAgent(BaseAgent):
             f"半径 R(mm) 必须为数值；参考尺寸只表示设计中心，候选值仍需在 {range_text('radius_mm')} 内提出；只有固定几何约束才必须沿用",
             f"厚度 t(mm) 必须为数值；参考尺寸只表示设计中心，候选值仍需在 {range_text('thickness_mm')} 内提出；只有固定几何约束才必须沿用",
             f"alpha(deg) 与 beta(deg) 必须为 {range_text('alpha_deg')} 内的两个铺层角建议值",
-            f"初始几何缺陷比：项目计算采用 {fixed_imperfection_ratio():g}（{fixed_imperfection_ratio() * 1000:g}‰），模型提案值单独记录",
+            f"初始几何缺陷比：任务采用 {task_imperfection_ratio(task):g}（{task_imperfection_ratio(task) * 1000:g}‰），所有候选使用同一数值",
             "铺层形式使用 [90_4/(±alpha/±beta)_8/90_4] 或 [(±alpha/±beta)_10] 这一类可解析格式",
         ]
 
@@ -463,7 +464,7 @@ class CandidateGenAgent(BaseAgent):
         geometry.update({key: value for key, value in user_geometry.items() if value is not None})
         merged["provenance"] = {**(raw.get("provenance") or {}),
                                 "proposed_imperfection_ratio": raw_geometry.get("imperfection_ratio")}
-        geometry["imperfection_ratio"] = fixed_imperfection_ratio()
+        geometry["imperfection_ratio"] = task_imperfection_ratio(task)
         if geometry:
             merged["geometry"] = geometry
 
@@ -525,13 +526,13 @@ class CandidateGenAgent(BaseAgent):
         for key, bounds in self._task_payload(task)["geometry_envelope"].items():
             if bounds[0] == bounds[1]:
                 geometry[key] = float(bounds[0])
-        geometry["imperfection_ratio"] = fixed_imperfection_ratio()
         return geometry
 
 
     def _normalize_candidate(self, task: Dict[str, Any], raw: Dict[str, Any], index: int, source: str) -> Dict[str, Any]:
         source_defect = (raw.get("geometry") or {}).get("imperfection_ratio")
-        raw = {**raw, "geometry": {**(raw.get("geometry") or {}), "imperfection_ratio": fixed_imperfection_ratio()}}
+        defect = task_imperfection_ratio(task)
+        raw = {**raw, "geometry": {**(raw.get("geometry") or {}), "imperfection_ratio": defect}}
         task_payload = self._task_payload(task)
         hull_type = resolve_hull_type(raw.get("hull_type") or task_payload.get("hull_type"))
         missing_geometry = missing_geometry_params(raw.get("geometry"), hull_type)
@@ -572,7 +573,7 @@ class CandidateGenAgent(BaseAgent):
             "provenance": {
                 "proposed_imperfection_ratio": source_defect,
                 **(raw.get("provenance") or {}),
-                "fixed_analysis_conditions": {"imperfection_ratio": fixed_imperfection_ratio()},
+                "fixed_analysis_conditions": {"imperfection_ratio": defect},
                 "layup_origin": "proposal" if raw.get("layup") else "project_template_from_angles",
             },
             "llm_output_excerpt": _sanitize_llm_output_excerpt(raw.get("llm_output_excerpt")),

@@ -26,13 +26,14 @@ def parse_args() -> argparse.Namespace:
     selection.add_argument("--candidate-id", action="append", dest="candidate_ids", help="待运行的 TMP 编号，可重复")
     selection.add_argument("--all", action="store_true", help="运行候选包中的全部方案")
     parser.add_argument("--run-id", help="显式工作流运行编号")
+    parser.add_argument("--imperfection-ratio", type=float, help="固定分析缺陷比，以比例输入；未指定时读取请求值或项目默认值")
     return parser.parse_args()
 
 
 def main() -> int:
     args = parse_args()
     try:
-        imported = import_fem_ready_response(args.input)
+        imported = import_fem_ready_response(args.input, imperfection_ratio=args.imperfection_ratio)
         payload = imported["payload"]
         candidates = list(payload["candidates"])
         if not args.all:

@@ -90,6 +90,10 @@ def llm_user_agent() -> str:
     return value or "CSAgent/1.0"
 
 
+class LLMCallError(RuntimeError):
+    """全部后端调用失败；异常文本只包含脱敏后的调用信息。"""
+
+
 class LLMBackend:
     """面向当前项目 LLM 接口的主后端与回退封装。"""
 
@@ -168,7 +172,6 @@ class LLMBackend:
         excluded_backend_names: set[str] | None = None,
     ) -> str:
         """按配置优先级调用 LLM，失败时自动尝试回退后端。"""
-        last_error: Exception | None = None
         excluded = set(excluded_backend_names or set())
         trace: List[Dict[str, Any]] = []
         for runtime in self.backends:
@@ -232,12 +235,12 @@ class LLMBackend:
                 attempt["error"] = self._sanitize_trace_error(exc)
                 attempt["latency_ms"] = round((time.perf_counter() - started_at) * 1000.0, 3)
                 trace.append(attempt)
-                last_error = exc
                 continue
         self._record_call_trace(trace)
-        if last_error is not None:
-            raise last_error
-        raise ValueError("LLM 后端列表为空")
+        if trace:
+            errors = "；".join(f"{item['backend']} ({item['error_type']}): {item['error']}" for item in trace)
+            raise LLMCallError(f"LLM 调用失败：{errors}") from None
+        raise LLMCallError("没有可调用的 LLM 后端") from None
 
     def _extract_json_text(self, text: str) -> str:
         cleaned = text.strip()

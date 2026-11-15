@@ -139,6 +139,80 @@ def test_import_separates_source_and_analysis_fingerprints(tmp_path):
     assert json.loads(path.read_text(encoding="utf-8")) == response
 
 
+def test_import_uses_user_defect_and_keeps_historical_geometry(tmp_path, monkeypatch):
+    import core.fem_candidate_transfer as transfer
+
+    response = _response()
+    first = response["result"]["candidates"][0]
+    first["provenance"]["source_geometry"] = {"length_mm": 500, "radius_mm": 140, "imperfection_ratio": 0.002}
+    result = response["result"]
+    result["design_fingerprint"] = transfer._fingerprint({key: result[key] for key in ("request", "source_table", "candidates")})
+    source = tmp_path / "source.json"
+    source.write_text(json.dumps(response), encoding="utf-8")
+    payload = import_fem_ready_response(source, tmp_path / "import.json", imperfection_ratio=0.005)["payload"]
+    assert all(candidate["geometry"]["imperfection_ratio"] == 0.005 for candidate in payload["candidates"])
+    adapted = payload["candidates"][0]
+    assert adapted["provenance"]["source_geometry"] == first["provenance"]["source_geometry"]
+    assert adapted["provenance"]["imported_geometry"] == first["geometry"]
+    assert adapted["parent_design_revision_id"] == first["design_revision_id"]
+    monkeypatch.setattr(transfer, "next_task_id", lambda: "TASK_IMPORT")
+    task = build_fem_ready_task_record(payload)["task"]
+    assert task["geometry_envelope"]["imperfection_ratio"] == [0.005, 0.005]
+    assert task["user_input_facts"]["fixed_geometry"]["imperfection_ratio"] == 0.005
+    assert json.loads(source.read_text(encoding="utf-8")) == response
+
+
+def test_import_rejects_duplicates_created_by_fixed_analysis_conditions(tmp_path):
+    import core.fem_candidate_transfer as transfer
+
+    response = _response()
+    first = response["result"]["candidates"][0]
+    second = deepcopy(first)
+    second.update(candidate_id="TMP_2", display_name="TMP_2")
+    second["geometry"]["imperfection_ratio"] = 0.003
+    response["result"]["candidates"][1] = attach_design_revision(second)
+    result = response["result"]
+    result["design_fingerprint"] = transfer._fingerprint({key: result[key] for key in ("request", "source_table", "candidates")})
+    source, output = tmp_path / "source.json", tmp_path / "import.json"
+    source.write_text(json.dumps(response), encoding="utf-8")
+    with pytest.raises(FEMCandidateTransferError, match="适配后候选重复"):
+        import_fem_ready_response(source, output)
+    assert not output.exists()
+
+
+@pytest.mark.parametrize("request_defect,override,expected,source_kind", [
+    (None, None, 0.008, "default"), (0.004, None, 0.004, "user"),
+    (0.004, 0.006, 0.006, "user"), (None, 0.008, 0.008, "user"),
+])
+def test_import_condition_priority_reaches_task(tmp_path, monkeypatch, request_defect, override, expected, source_kind):
+    import core.fem_candidate_transfer as transfer
+
+    response = _response()
+    result = response["result"]
+    result["request"]["geometry"] = {"length_mm": 600, "radius_mm": 150}
+    if request_defect is not None:
+        result["request"]["geometry"]["imperfection_ratio"] = request_defect
+    result["design_fingerprint"] = transfer._fingerprint({key: result[key] for key in ("request", "source_table", "candidates")})
+    path = tmp_path / "source.json"
+    path.write_text(json.dumps(response), encoding="utf-8")
+    payload = import_fem_ready_response(path, tmp_path / "imported.json", imperfection_ratio=override)["payload"]
+    monkeypatch.setattr(transfer, "next_task_id", lambda: "TASK_IMPORT")
+    task = build_fem_ready_task_record(payload)["task"]
+    assert task["geometry_envelope"]["imperfection_ratio"] == [expected, expected]
+    assert task["analysis_condition_sources"]["imperfection_ratio"] == source_kind
+    assert all(candidate["geometry"]["imperfection_ratio"] == expected for candidate in payload["candidates"])
+
+
+def test_task_builder_does_not_replace_request_condition_with_candidate_values(monkeypatch):
+    import core.fem_candidate_transfer as transfer
+
+    monkeypatch.setattr(transfer, "next_task_id", lambda: pytest.fail("条件冲突时不分配任务编号"))
+    payload = _response()["result"]
+    payload["request"]["geometry"] = {"imperfection_ratio": 0.003}
+    with pytest.raises(FEMCandidateTransferError, match="缺陷比与导入分析条件不一致"):
+        build_fem_ready_task_record(payload)
+
+
 def test_validated_response_builds_machine_task_without_markdown_parsing(monkeypatch) -> None:
     import core.fem_candidate_transfer as transfer
 

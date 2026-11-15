@@ -8,7 +8,10 @@ from pathlib import Path
 from typing import Any
 
 from core.paths import RESULTS_DIR
-from core.task_contract import describe_boundary_conditions, describe_load_conditions, task_payload_from_request
+from core.task_contract import (
+    describe_boundary_conditions, describe_imperfection_source, describe_load_conditions,
+    task_imperfection_ratio, task_payload_from_request,
+)
 from workflow.agent_contracts import list_agent_contracts
 from workflow.event_store import WorkflowEventStore
 from workflow.simulation_queue import SimulationJobQueue
@@ -101,6 +104,7 @@ def build_run_audit_markdown(
     """生成单次工作流运行的 Markdown 审计报告。"""
 
     task = task_payload_from_request(snapshot.get("task") or {})
+    task_defect = task_imperfection_ratio(task)
     results = list(snapshot.get("results") or [])
     candidates = list(snapshot.get("candidates") or [])
     screened = list(snapshot.get("screened_candidates") or [])
@@ -134,6 +138,8 @@ def build_run_audit_markdown(
                 ["任务", task.get("application")],
                 ["载荷", describe_load_conditions(task.get("load_conditions") or {})],
                 ["边界", describe_boundary_conditions(task.get("boundary_conditions") or {})],
+                ["任务初始几何缺陷比", task_defect],
+                ["缺陷比来源", describe_imperfection_source(task)],
                 ["候选总数", len(candidates)],
                 ["候选来源", _source_text(snapshot)],
                 ["初筛数量", len(screened)],
@@ -161,11 +167,20 @@ def build_run_audit_markdown(
     ]
 
     trace_rows = []
+    defect_rows = []
     for candidate in candidates:
         session_id = str(candidate.get("candidate_id") or "-")
         result = result_by_key.get(session_id) or {}
         formal_id = str(result.get("candidate_id") or candidate.get("persistent_candidate_id") or "-")
         update = update_by_key.get(session_id) or update_by_key.get(formal_id) or {}
+        candidate_defect = (candidate.get("geometry") or {}).get("imperfection_ratio")
+        solved_defect = ((result.get("solved_design") or {}).get("geometry") or {}).get("imperfection_ratio")
+        defect_rows.append([
+            session_id, candidate_defect,
+            "未记录" if candidate_defect is None else "一致" if candidate_defect == task_defect else "不一致",
+            solved_defect,
+            "未求解" if not result else "未记录" if solved_defect is None else "一致" if solved_defect == task_defect else "不一致",
+        ])
         trace_rows.append(
             [
                 session_id,
@@ -185,6 +200,10 @@ def build_run_audit_markdown(
                 ["TMP", "来源", "C编号", "代理极限压力", "FEM极限压力", "代理误差%", "FEM结论", "CASE", "回流状态"],
                 trace_rows,
             ),
+            "",
+            "## 缺陷条件对照",
+            "",
+            _table(["TMP", "候选缺陷比", "候选与任务", "求解缺陷比", "求解与任务"], defect_rows),
             "",
             "## 有限元队列",
             "",

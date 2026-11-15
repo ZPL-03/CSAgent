@@ -16,6 +16,12 @@
     "design_targets"
   ],
   "properties": {
+    "analysis_condition_sources": {
+      "type": "object",
+      "properties": {
+        "imperfection_ratio": {"type": "string", "enum": ["user", "task", "default"]}
+      }
+    },
     "radius_reference": {"type": "string", "enum": ["inner", "middle_surface", "outer"]},
     "application": {
       "type": "string",
@@ -97,6 +103,7 @@
           "items": {"type": "number"}
         },
         "imperfection_ratio": {
+          "description": "任务固定分析缺陷比，以比例保存为 [v, v]；未指定时读取项目默认值。",
           "type": "array",
           "minItems": 2,
           "maxItems": 2,
