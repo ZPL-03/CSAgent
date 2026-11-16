@@ -206,7 +206,7 @@ def test_workflow_widget_renders_manual_llm_health_check(monkeypatch) -> None:
             {
                 "role": "fallback",
                 "name": "configured_fallback",
-                "model": "deepseek-v4-pro",
+                "model": "deepseek-flash",
                 "base_url_configured": True,
                 "api_key_configured": True,
                 "available_for_call": True,
@@ -225,7 +225,7 @@ def test_workflow_widget_renders_manual_llm_health_check(monkeypatch) -> None:
 
         assert "实时检测" in html
         assert "domain_finetuned_primary" in html
-        assert "deepseek-v4-pro" in html
+        assert "deepseek-flash" in html
         assert "调用失败" in html
         assert "connection refused" in html
         assert "可用" in html

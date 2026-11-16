@@ -1640,7 +1640,7 @@ def test_report_emits_llm_trace_when_engineering_explanation_fails(monkeypatch):
                 },
                 {
                     "backend": "fallback",
-                    "model": "deepseek-v4-pro",
+                    "model": "deepseek-flash",
                     "status": "failed",
                     "error_type": "TimeoutError",
                     "error": "request timeout",
@@ -1667,7 +1667,7 @@ def test_report_emits_llm_trace_when_engineering_explanation_fails(monkeypatch):
     assert trace_payload["fallback_used"] is False
     assert [item["backend"] for item in trace_payload["trace"]] == ["primary", "fallback"]
     assert "csllm" in str(trace_payload["trace"])
-    assert "deepseek-v4-pro" in str(trace_payload["trace"])
+    assert "deepseek-flash" in str(trace_payload["trace"])
 
 
 def test_report_rejects_unsupported_explanation_without_rewrite(monkeypatch):
