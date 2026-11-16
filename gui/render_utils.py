@@ -15,6 +15,7 @@ except Exception:  # pragma: no cover
     pv = None
 
 from core.paths import resolve_project_path
+from core.display import format_number
 from core.pressure_hull_profile import build_pressure_hull_meshes
 
 
@@ -96,9 +97,9 @@ def build_candidate_scene(candidate: Dict) -> Tuple[list[tuple[object, Dict]], s
     display_name = candidate.get("display_name") or candidate.get("candidate_id") or "Candidate"
     title = (
         f"{display_name} | "
-        f"L={float(geometry.get('length_mm', 0.0)):.1f} mm, "
-        f"R={float(geometry.get('radius_mm', 0.0)):.1f} mm, "
-        f"t={float(geometry.get('thickness_mm', 0.0)):.2f} mm"
+        f"L={format_number(geometry.get('length_mm', 0.0))} mm, "
+        f"R={format_number(geometry.get('radius_mm', 0.0))} mm, "
+        f"t={format_number(geometry.get('thickness_mm', 0.0), None)} mm"
     )
     return meshes, str(title)
 
@@ -262,16 +263,16 @@ def render_candidate_png_bytes(
                     "render.candidate_section",
                     language=language,
                     name=display_name,
-                    length=length,
-                    radius=radius,
-                    thickness=thickness,
+                    length=format_number(length),
+                    radius=format_number(radius),
+                    thickness=format_number(thickness, None),
                 )
                 subtitle = tr(
                     "render.material_layup",
                     language=language,
                     material=material,
-                    alpha=alpha,
-                    beta=beta,
+                    alpha=format_number(alpha, None),
+                    beta=format_number(beta, None),
                 )
                 figure.text(0.035, 0.94, title, color=text_color, fontsize=10, weight="bold", **text_props)
                 figure.text(0.035, 0.885, subtitle, color=muted, fontsize=8, **text_props)
@@ -317,7 +318,7 @@ def render_candidate_png_bytes(
     axis.plot([0, 0], [-radius, radius], color="#0f172a", linewidth=1.0)
     axis.plot([length, length], [-radius, radius], color="#0f172a", linewidth=1.0)
     axis.annotate(
-        tr("render.thickness", language=language, thickness=thickness),
+        tr("render.thickness", language=language, thickness=format_number(thickness, None)),
         xy=(length * 0.52, radius - thickness / 2.0),
         xytext=(length * 0.52, radius + max(radius * 0.11, thickness * 3.0)),
         arrowprops={"arrowstyle": "->", "color": "#334155", "linewidth": 1.0},
@@ -331,16 +332,16 @@ def render_candidate_png_bytes(
         "render.candidate_section",
         language=language,
         name=display_name,
-        length=length,
-        radius=radius,
-        thickness=thickness,
+        length=format_number(length),
+        radius=format_number(radius),
+        thickness=format_number(thickness, None),
     )
     subtitle = tr(
         "render.material_layup",
         language=language,
         material=material,
-        alpha=alpha,
-        beta=beta,
+        alpha=format_number(alpha, None),
+        beta=format_number(beta, None),
     )
     axis.set_title(f"{title}\n{subtitle}", fontsize=11, color="#111827", **text_props)
     axis.set_xlabel(tr("render.x_axis", language=language), **text_props)

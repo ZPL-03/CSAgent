@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from typing import Iterable
 
+from core.display import format_number as _fmt
+
 from PyQt6.QtWidgets import (
     QHBoxLayout,
     QSplitter,
@@ -17,15 +19,6 @@ from PyQt6.QtWidgets import (
 from gui.i18n import DEFAULT_LANGUAGE, text as tr
 from gui.interactive_view import InteractivePlotWidget
 from gui.render_utils import mode_shape_payload_status
-
-
-def _fmt(value: object, digits: int = 3) -> str:
-    if value is None or value == "":
-        return "-"
-    try:
-        return f"{float(value):.{digits}f}"
-    except Exception:
-        return str(value)
 
 
 class AbaqusWidget(QWidget):
@@ -135,8 +128,8 @@ class AbaqusWidget(QWidget):
             f"<b>极限压力：</b>{_fmt(result.get('ultimate_pressure_MPa'))} MPa<br>"
             f"<b>线性屈曲压力：</b>{_fmt(result.get('linear_buckling_pressure_MPa'))} MPa<br>"
             f"<b>极限压力依据：</b>{result.get('ultimate_pressure_basis', '-')}<br>"
-            f"<b>Riks 最大 LPF：</b>{_fmt(result.get('riks_lpf_max'))}<br>"
-            f"<b>缺陷幅值：</b>{_fmt(result.get('imperfection_amplitude_mm'))} mm<br>"
+            f"<b>Riks 最大 LPF：</b>{_fmt(result.get('riks_lpf_max'), None)}<br>"
+            f"<b>缺陷幅值：</b>{_fmt(result.get('imperfection_amplitude_mm'), None)} mm<br>"
             f"<b>面密度：</b>{_fmt(result.get('weight_kg_per_m2'))} kg/m^2<br>"
             f"<b>最大位移：</b>{_fmt(result.get('max_displacement_mm'))} mm<br>"
             f"<b>失效模式：</b>{result.get('failure_mode', '-')}<br>"

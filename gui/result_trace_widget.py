@@ -5,16 +5,9 @@ from __future__ import annotations
 from html import escape
 from typing import Iterable
 
+from core.display import format_number as _fmt
+
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QSplitter, QTableWidget, QTableWidgetItem, QTextBrowser, QVBoxLayout, QWidget
-
-
-def _fmt(value: object, digits: int = 3) -> str:
-    if value is None or value == "":
-        return "-"
-    try:
-        return f"{float(value):.{digits}f}"
-    except Exception:
-        return str(value)
 
 
 def _error_pct(predicted: object, actual: object) -> float | None:
@@ -153,7 +146,7 @@ class ResultTraceWidget(QWidget):
                 row["formal_id"],
                 _fmt(row["predicted_pressure"]),
                 _fmt(row["actual_pressure"]),
-                _fmt(row["error_pct"], 2),
+                _fmt(row["error_pct"]),
                 row["verdict"],
                 row["case_id"],
                 row["knowledge_status"],
@@ -193,12 +186,12 @@ class ResultTraceWidget(QWidget):
             f"代理极限压力：{escape(_fmt(row['predicted_pressure']))} MPa<br>"
             f"ASME RD-1172 线性屈曲压力：{escape(_fmt(candidate.get('asme_linear_buckling_pressure_MPa')))} MPa<br>"
             f"PBIPF 预测极限压力：{escape(_fmt(candidate.get('surrogate_PBIPF_MPa')))} MPa<br>"
-            f"排序分数：{escape(_fmt(candidate.get('rank_score'), 4))}</p>"
+            f"排序分数：{escape(_fmt(candidate.get('rank_score')))}</p>"
             "<h4>有限元结果</h4>"
             f"<p>状态：{escape(str(result.get('status') or '-'))}<br>"
             f"极限压力：{escape(_fmt(row['actual_pressure']))} MPa<br>"
             f"线性屈曲压力：{escape(_fmt(result.get('linear_buckling_pressure_MPa')))} MPa<br>"
-            f"代理误差：{escape(_fmt(row['error_pct'], 2))} %<br>"
+            f"代理误差：{escape(_fmt(row['error_pct']))} %<br>"
             f"结论：{escape(row['verdict'])}<br>"
             f"失效模式：{escape(str(result.get('failure_mode') or '-'))}</p>"
             "<h4>案例回流</h4>"

@@ -1288,6 +1288,24 @@ def test_report_falls_back_to_structured_engineering_explanation(monkeypatch):
     assert agent._last_llm_explanation_used is False
 
 
+@pytest.mark.parametrize(("capacity", "verdict"), [(9.593256, "不满足"), (9.606744, "满足")])
+def test_report_display_rounding_does_not_change_capacity_verdict(monkeypatch, capacity, verdict):
+    from copy import deepcopy
+
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, results, candidates = _report_sample()
+    task["task"]["load_conditions"]["external_pressure_MPa"] = 9.6
+    task["task"]["design_targets"]["ultimate_pressure_min_MPa"] = 9.6
+    results[0].update(ultimate_pressure_MPa=capacity, riks_limit_point_confirmed=True)
+    snapshot = deepcopy((task, results, candidates))
+    text = ReportGenAgent()._render_markdown(task, results, candidates)
+
+    assert "工作压力：9.6 MPa" in text
+    assert "渐进损伤容量峰值：9.6 MPa" in text
+    assert f"容量与工作压力比较：{verdict}" in text
+    assert (task, results, candidates) == snapshot
+
+
 def test_report_tracks_llm_usage_in_single_artifact(monkeypatch, tmp_path):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task, results, candidates = _report_sample()

@@ -6,6 +6,7 @@ from typing import Dict, List
 
 from agents.base import BaseAgent
 from core.config_loader import load_app_config
+from core.display import format_number
 from core.pressure_hull_profile import estimate_areal_density_kg_per_m2
 from core.surrogate_model import SurrogateModelManager
 from core.task_contract import effective_screen_top_k
@@ -73,18 +74,18 @@ class ScreenerAgent(BaseAgent):
                 "surrogate_detail": prediction,
             }
             validation_error = prediction["uncertainty_MPa"]
-            validation_text = f"{validation_error} MPa" if validation_error is not None else "未提供"
+            validation_text = f"{format_number(validation_error)} MPa" if validation_error is not None else "未提供"
             updated["screening_summary"] = (
-                f"描述符回归压力估计={updated['surrogate_ultimate_pressure_MPa']} MPa，"
-                f"ASME RD-1172线性屈曲压力={updated['asme_linear_buckling_pressure_MPa']} MPa，"
-                f"公式测试 RMSE={prediction['model_validation']['regression_testing_rmse_MPa']:.3f} MPa，"
-                f"ASME代入评估 RMSE={prediction['model_validation']['deployment_rmse_MPa']:.3f} MPa，"
+                f"描述符回归压力估计={format_number(updated['surrogate_ultimate_pressure_MPa'])} MPa，"
+                f"ASME RD-1172线性屈曲压力={format_number(updated['asme_linear_buckling_pressure_MPa'])} MPa，"
+                f"公式测试 RMSE={format_number(prediction['model_validation']['regression_testing_rmse_MPa'])} MPa，"
+                f"ASME代入评估 RMSE={format_number(prediction['model_validation']['deployment_rmse_MPa'])} MPa，"
                 f"校准留一验证 RMSE={validation_text}，"
                 f"校准状态={updated['surrogate_calibration_status']}，"
-                f"面密度={updated['surrogate_weight']} kg/m^2。"
+                f"面密度={format_number(updated['surrogate_weight'])} kg/m^2。"
             )
             if eligible:
-                updated["screening_summary"] += f" 按 {self.score_formula_text} 得分 {updated['rank_score']}。"
+                updated["screening_summary"] += f" 按 {self.score_formula_text} 得分 {format_number(updated['rank_score'])}。"
             else:
                 updated["screening_summary"] += " 线性估计非正，不参与预筛排名，可人工选择有限元校核。"
             if prediction["model_validation"]["outside_descriptor_range"]:

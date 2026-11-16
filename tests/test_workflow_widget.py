@@ -151,7 +151,8 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
         assert "TMP_1" in html
         assert "TMP_2" in html
         assert "C1" in html
-        assert "45.0" in html
+        assert "45" in widget.browser.toPlainText()
+        assert "45.0" not in widget.browser.toPlainText()
         assert "Abaqus 输入文件缺少厚度字段" in html
         assert "LLM 已使用回退后端" in html
         assert "LLM 后端" in html

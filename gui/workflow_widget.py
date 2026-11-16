@@ -10,6 +10,7 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTextBrowser, QVBoxLayout, QWidget
 
 from core.llm_status import configured_llm_backends, probe_llm_backends
+from core.display import format_number
 from core.paths import RESULTS_DIR
 from gui.theme import resolve_theme
 from workflow.agent_contracts import list_agent_contracts
@@ -289,9 +290,9 @@ class WorkflowWidget(QWidget):
         target = (task.get("design_targets") or {}).get("ultimate_pressure_min_MPa")
         parts = [str(application)]
         if pressure is not None:
-            parts.append(f"外压 {pressure} MPa")
+            parts.append(f"外压 {format_number(pressure)} MPa")
         if target is not None:
-            parts.append(f"极限压力目标 {target} MPa")
+            parts.append(f"极限压力目标 {format_number(target)} MPa")
         return " | ".join(parts)
 
     def _snapshot_summary_html(
@@ -597,7 +598,7 @@ class WorkflowWidget(QWidget):
         for job in jobs:
             result = job.get("result") or {}
             ultimate = result.get("ultimate_pressure_MPa")
-            ultimate_text = "-" if ultimate is None else str(ultimate)
+            ultimate_text = format_number(ultimate)
             error = job.get("error_message") or "-"
             job_rows.append(
                 "<tr>"

@@ -92,7 +92,8 @@ def test_nonpositive_prediction_remains_visible_and_manually_selectable() -> Non
                      selection_reason="线性估计非正，不参与预筛排名，可人工选择有限元校核。")
     try:
         widget.update_candidates([candidate])
-        assert float(widget.table.item(0, 2).text()) == candidate["surrogate_ultimate_pressure_MPa"]
+        assert widget.table.item(0, 2).text() == "-3.6"
+        assert candidate["surrogate_ultimate_pressure_MPa"] == -3.558
         assert widget.table.item(0, 6).text() == "预筛非正"
         assert widget.table.item(0, 6).toolTip() == candidate["selection_reason"]
         assert widget.selected_candidates()[0]["candidate_id"] == "TMP_1"

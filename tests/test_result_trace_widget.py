@@ -65,7 +65,7 @@ def test_result_trace_widget_renders_end_to_end_mapping() -> None:
         assert widget.table.rowCount() == 2
         assert widget.table.item(0, 0).text() == "TMP_1"
         assert widget.table.item(0, 2).text() == "C1"
-        assert widget.table.item(0, 5).text() == "25.00"
+        assert widget.table.item(0, 5).text() == "25"
         assert widget.table.item(0, 7).text() == "CASE_1"
         assert widget.table.item(0, 8).text() == "stored"
         assert widget.table.item(0, 9).text() == "已纳入报告"
@@ -79,7 +79,7 @@ def test_result_trace_widget_renders_end_to_end_mapping() -> None:
         assert "TMP_1 -> C1" in detail
         assert "CASE_1" in detail
         assert "latest_report.md" in detail
-        assert "代理误差：25.00 %" in detail
+        assert "代理误差：25 %" in detail
     finally:
         widget.close()
         app.processEvents()

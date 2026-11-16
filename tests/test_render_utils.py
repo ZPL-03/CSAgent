@@ -33,12 +33,27 @@ def _app() -> QApplication:
     return app
 
 
-def test_render_candidate_static_png() -> None:
-    png = render_candidate_png_bytes(_candidate(), width=480, height=300)
+def test_render_candidate_static_png(monkeypatch) -> None:
+    from matplotlib.figure import Figure
+
+    annotations = []
+    original_text = Figure.text
+
+    def capture_text(self, x, y, text, *args, **kwargs):
+        annotations.append(text)
+        return original_text(self, x, y, text, *args, **kwargs)
+
+    monkeypatch.setattr(Figure, "text", capture_text)
+    candidate = _candidate()
+    candidate["geometry"].update(thickness_mm=10.125, beta_deg=22.5123456)
+    png = render_candidate_png_bytes(candidate, width=480, height=300, show_annotations=True)
 
     assert png is not None
     assert png.startswith(b"\x89PNG")
     assert len(png) > 1000
+    assert any("t=10.125 mm" in text for text in annotations)
+    assert any("±35/±22.5123456" in text for text in annotations)
+    assert candidate["geometry"]["beta_deg"] == 22.5123456
 
 
 def test_render_mode_shape_static_png_and_status(tmp_path) -> None:

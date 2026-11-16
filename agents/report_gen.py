@@ -13,6 +13,7 @@ from xml.sax.saxutils import escape
 
 from agents.base import BaseAgent
 from core.config_loader import load_llm_config
+from core.display import NUMBER_DISPLAY_INSTRUCTION, format_number, format_parameter
 from core.fem_result_semantics import complete_case_result_errors
 from core.io_utils import write_text
 from core.llm_backend import LLMBackend, auto_llm_enabled
@@ -432,6 +433,7 @@ class ReportGenAgent(BaseAgent):
             "你是复合材料外压圆柱耐压壳设计报告解释助手。"
             "依据输入中的任务、候选和校核结果撰写中文工程说明，字段含义见 field_semantics。"
             "数值、材料、工况、候选编号和校核结论以输入为准；引用数值时保留单位和对应对象。"
+            + NUMBER_DISPLAY_INSTRUCTION +
             "区分计算结果、机理解释和建议，涉及制造工艺、材料性能或参数影响的推断须说明依据。"
             "围绕候选的材料、铺层、几何、缺陷条件讨论，结合 analysis_scope 说明验证范围。"
             "用 Markdown 分段，重点解释设计取舍和结果，不重复报告中的完整数据表。"
@@ -508,8 +510,8 @@ class ReportGenAgent(BaseAgent):
             f"- 会话任务编号：`{task.get('task_id') or '-'}`",
             f"- 运行编号：`{task.get('run_id') or '-'}`",
             f"- 设计对象：{task_payload['application']}",
-            f"- 工作压力：{working_pressure} MPa",
-            *([f"- 用户额外指定的极限承载力下限：{task_payload['design_targets']['ultimate_pressure_min_MPa']} MPa"]
+            f"- 工作压力：{format_number(working_pressure)} MPa",
+            *([f"- 用户额外指定的极限承载力下限：{format_number(task_payload['design_targets']['ultimate_pressure_min_MPa'])} MPa"]
               if float(task_payload['design_targets']['ultimate_pressure_min_MPa']) != working_pressure else []),
             f"- 边界条件：{describe_boundary_conditions(task_payload['boundary_conditions'])}",
             f"- 任务初始几何缺陷比：{summary['imperfection_ratio']}（比例，{summary['imperfection_source']}）",
@@ -532,9 +534,9 @@ class ReportGenAgent(BaseAgent):
                 "", f"### 候选 {candidate_id}",
                 f"- 来源：{candidate.get('source') or '-'}",
                 f"- 材料体系：{material.get('name') or material.get('display_name') or material.get('material_key') or '-'}",
-                f"- 几何：长度 {geometry.get('length_mm')} mm，半径 {geometry.get('radius_mm')} mm，厚度 {geometry.get('thickness_mm')} mm",
+                f"- 几何：长度 {format_number(geometry.get('length_mm'))} mm，半径 {format_number(geometry.get('radius_mm'))} mm，厚度 {format_number(geometry.get('thickness_mm'), None)} mm",
                 f"- 铺层：{layup.get('layup') or layup.get('angles_deg') or '-'}",
-                f"- 铺层参数：alpha={geometry.get('alpha_deg')} deg，beta={geometry.get('beta_deg')} deg；实际角度以铺层表达式为准",
+                f"- 铺层参数：alpha={format_number(geometry.get('alpha_deg'), None)} deg，beta={format_number(geometry.get('beta_deg'), None)} deg；实际角度以铺层表达式为准",
                 f"- 逐层属性核查：对称性={self._field_text(layup.get('symmetric'))}，平衡性={self._field_text(layup.get('balanced'))}",
                 f"- 初始几何缺陷比：{geometry.get('imperfection_ratio')}",
                 f"- 候选缺陷条件与任务：{'未记录' if geometry.get('imperfection_ratio') is None else '一致' if geometry['imperfection_ratio'] == summary['imperfection_ratio'] else '不一致'}",
@@ -551,9 +553,9 @@ class ReportGenAgent(BaseAgent):
             lines.extend([
                 "", f"### 排名 {candidate['screening_rank']}：{candidate.get('session_candidate_id') or candidate.get('candidate_id')}",
                 f"- 默认送检：{'是' if candidate.get('screening_selected') else '否'}",
-                f"- 预筛估计承载压力：{self._field_text(candidate.get('surrogate_ultimate_pressure_MPa'))} MPa",
-                f"- 面密度：{self._field_text(candidate.get('surrogate_weight') or candidate.get('weight_kg_per_m2'))} kg/m^2",
-                f"- 综合得分：{self._field_text(candidate.get('rank_score'))}",
+                f"- 预筛估计承载压力：{format_number(candidate.get('surrogate_ultimate_pressure_MPa'))} MPa",
+                f"- 面密度：{format_number(candidate.get('surrogate_weight') or candidate.get('weight_kg_per_m2'))} kg/m^2",
+                f"- 综合得分：{format_number(candidate.get('rank_score'))}",
                 f"- 筛选依据：{candidate.get('screening_summary') or '-'}",
                 f"- 入选或未入选原因：{candidate.get('selection_reason') or '-'}",
             ])
@@ -570,14 +572,14 @@ class ReportGenAgent(BaseAgent):
             lines.extend([
                 "", f"### {result.get('session_candidate_id') or '-'} / {result.get('candidate_id')}",
                 f"- 作业状态：{result.get('status') or '-'}",
-                *([f"- 实际求解几何：{result['solved_design']['geometry']}"]
+                *(["- 实际求解几何：" + "，".join(f"{key}={format_parameter(key, value)}" for key, value in result['solved_design']['geometry'].items())]
                   if (result.get("solved_design") or {}).get("geometry") else []),
                 f"- 实际求解缺陷比：{self._field_text(solved_defect, '未记录')}",
                 f"- 求解缺陷条件与任务：{'未记录' if solved_defect is None else '一致' if solved_defect == summary['imperfection_ratio'] else '不一致'}",
                 f"- 工作压力校核：{result.get('service_pressure_check_status') or '-'}",
                 f"- 工作压力最大 Hashin 指数：{self._field_text(result.get('service_hashin_index_max'))}",
-                f"- 线性屈曲压力：{self._field_text(result.get('linear_buckling_pressure_MPa'))} MPa",
-                f"- 渐进损伤容量峰值：{self._field_text(capacity)} MPa",
+                f"- 线性屈曲压力：{format_number(result.get('linear_buckling_pressure_MPa'))} MPa",
+                f"- 渐进损伤容量峰值：{format_number(capacity)} MPa",
                 f"- 容量与工作压力比较：{capacity_check}",
                 f"- 容量依据：{result.get('ultimate_pressure_basis') or '-'}",
                 f"- Riks 最大 LPF：{self._field_text(result.get('riks_lpf_max'))}",
@@ -625,7 +627,7 @@ class ReportGenAgent(BaseAgent):
             lines.extend([
                 f"- 推荐：{best.get('session_candidate_id') or '-'} / {best['candidate_id']}。",
                 f"- 推荐依据：在完成真实校核、容量证据完整且满足工作压力的方案中，按“{objective}”比较。",
-                f"- 确认容量：{best['ultimate_pressure_MPa']} MPa；工作压力：{working_pressure} MPa。",
+                f"- 确认容量：{format_number(best['ultimate_pressure_MPa'])} MPa；工作压力：{format_number(working_pressure)} MPa。",
                 "- 此结论属于当前模型的数值设计推荐，工程定型仍需工艺、网格与试验验证。",
             ])
         else:

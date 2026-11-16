@@ -25,6 +25,7 @@ from PyQt6.QtWidgets import (
 )
 
 from gui.i18n import DEFAULT_LANGUAGE, text as tr
+from core.display import format_number as _format_number, format_parameter
 from core.pressure_hull_profile import GEOMETRY_LABELS, TYPE_DISPLAY_NAMES
 from core.task_contract import describe_boundary_conditions, describe_load_conditions
 
@@ -38,15 +39,6 @@ def _format_generation_label(source: object, language: str = DEFAULT_LANGUAGE) -
         "UNKNOWN": "candidate.source.unknown",
     }
     return tr(source_keys.get(key, "candidate.source.unknown"), language=language) if key in source_keys else key
-
-
-def _format_number(value: object, digits: int = 3) -> str:
-    if value is None or value == "":
-        return "-"
-    try:
-        return f"{float(value):.{digits}f}"
-    except Exception:
-        return str(value)
 
 
 def _layup_sequence(layup: dict) -> list[object]:
@@ -303,7 +295,7 @@ class CandidateWidget(QWidget):
                 generation_label,
                 _format_number(candidate.get("surrogate_ultimate_pressure_MPa")),
                 _format_number(candidate.get("surrogate_weight")),
-                _format_number(candidate.get("rank_score"), 4),
+                _format_number(candidate.get("rank_score")),
                 _format_number(result.get("ultimate_pressure_MPa") if result else None),
                 status_value,
                 result.get("verdict", "-") if result else "-",
@@ -365,16 +357,16 @@ class CandidateWidget(QWidget):
         rule_check = candidate.get("rule_check", {})
 
         ply_items = "".join(
-            f"<li>第 {index + 1} 层：{angle}&deg;</li>"
+            f"<li>第 {index + 1} 层：{_format_number(angle, None)}&deg;</li>"
             for index, angle in enumerate(_layup_sequence(layup))
         )
         geometry_items = "".join(
-            f"<li>{GEOMETRY_LABELS.get(key, key)}: {_format_number(value)}</li>"
+            f"<li>{GEOMETRY_LABELS.get(key, key)}: {format_parameter(key, value)}</li>"
             for key, value in geometry.items()
             if key != "imperfection_ratio"
         )
         material_items = "".join(f"<li>{key}: {value}</li>" for key, value in material.items())
-        target_items = "".join(f"<li>{key}: {value}</li>" for key, value in design_targets.items())
+        target_items = "".join(f"<li>{key}: {format_parameter(key, value)}</li>" for key, value in design_targets.items())
         rule_errors = rule_check.get("errors") or ["无"]
         rule_suggestions = rule_check.get("suggestions") or ["无"]
         archive_id = candidate.get("persistent_candidate_id") or (result or {}).get("candidate_id", "-")
@@ -412,21 +404,21 @@ class CandidateWidget(QWidget):
             f"ASME RD-1172线性屈曲压力={_format_number(candidate.get('asme_linear_buckling_pressure_MPa'))} MPa，"
             f"PBIPF 预测极限压力为 {_format_number(candidate.get('surrogate_PBIPF_MPa'))} MPa，"
             f"面密度={_format_number(candidate.get('surrogate_weight'))} kg/m^2，"
-            f"评分={_format_number(candidate.get('rank_score'), 4)}<br>"
+            f"评分={_format_number(candidate.get('rank_score'))}<br>"
             f"线性屈曲压力来源：{candidate.get('linear_buckling_source') or '-'}</p>"
             "<h4>几何设计参数</h4><ul>"
             f"{geometry_items}</ul>"
             "<h4>分析条件</h4>"
-            f"<p>初始几何缺陷比：{_format_number(geometry.get('imperfection_ratio'), 6)}</p>"
+            f"<p>初始几何缺陷比：{_format_number(geometry.get('imperfection_ratio'), None)}</p>"
             "<h4>材料系统</h4><ul>"
             f"{material_items}</ul>"
             "<h4>载荷与边界</h4><ul>"
-            f"<li>{describe_load_conditions(load_conditions)}</li>"
+            f"<li>{describe_load_conditions(load_conditions, display=True)}</li>"
             f"<li>{describe_boundary_conditions(candidate.get('boundary_conditions', {}))}</li></ul>"
             "<h4>设计目标</h4><ul>"
             f"{target_items}</ul>"
             f"<h4>铺层定义</h4><p>铺层字符串：{layup.get('skin_layup', '-')}</p>"
-            f"<p>比例：0°={_format_number(layup.get('skin_f0'))}，±45°={_format_number(layup.get('skin_f45'))}，90°={_format_number(layup.get('skin_f90'))}</p>"
+            f"<p>比例：0°={_format_number(layup.get('skin_f0'), None)}，±45°={_format_number(layup.get('skin_f45'), None)}，90°={_format_number(layup.get('skin_f90'), None)}</p>"
             f"<ul>{ply_items or '<li>暂无铺层明细</li>'}</ul>"
             "<h4>规则检查</h4>"
             f"<p>是否通过校验：{rule_check.get('is_valid', False)}</p>"

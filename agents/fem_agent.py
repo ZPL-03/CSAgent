@@ -17,6 +17,7 @@ from abaqus.job_utils import (
 )
 from agents.base import BaseAgent
 from core.config_loader import load_app_config
+from core.display import format_number
 from core.fem_input_contract import attach_design_revision, design_revision_payload, validate_fem_input_or_raise
 from core.io_utils import read_json, write_json
 from core.paths import ABAQUS_RUNS_DIR, ABAQUS_TEMPLATE_DIR, IO_DIR, ROOT_DIR, to_project_relative_path
@@ -110,8 +111,8 @@ class FEMAgent(BaseAgent):
     def _diagnosis_summary(self, result: Dict) -> str:
         if result.get("status") == "success":
             verdict = result.get("verdict", "未判定")
-            linear_pressure = result.get("linear_buckling_pressure_MPa")
-            ultimate_pressure = result.get("ultimate_pressure_MPa")
+            linear_pressure = format_number(result.get("linear_buckling_pressure_MPa"))
+            ultimate_pressure = format_number(result.get("ultimate_pressure_MPa"))
             design_check_status = result.get("design_check_status")
             service_status = result.get("service_pressure_check_status")
             if design_check_status == "failed_at_service_pressure" or service_status == "failed":
@@ -119,7 +120,7 @@ class FEMAgent(BaseAgent):
                 service_index = result.get("service_hashin_index_max")
                 failure_mode = result.get("service_hashin_failure_mode") or result.get("failure_mode")
                 return (
-                    f"精确服务压力校核已完成，服务压力 {service_pressure} MPa，"
+                    f"服务压力校核已完成，服务压力 {format_number(service_pressure)} MPa，"
                     f"线性屈曲压力 {linear_pressure} MPa，最大 Hashin 指数 {service_index}；"
                     f"控制模式为 {failure_mode}，设计判定为“{verdict}”，"
                     "容量分析因服务压力校核未通过而未运行。"
@@ -128,7 +129,7 @@ class FEMAgent(BaseAgent):
                 target_pressure = result.get("target_pressure_checked_MPa")
                 target_index = result.get("target_hashin_index_max")
                 return (
-                    f"精确目标压力校核已完成，目标压力 {target_pressure} MPa，"
+                    f"目标压力校核已完成，目标压力 {format_number(target_pressure)} MPa，"
                     f"线性屈曲压力 {linear_pressure} MPa，最大 Hashin 指数 {target_index}；"
                     f"控制模式为 {result.get('target_hashin_failure_mode') or result.get('failure_mode')}，"
                     f"设计判定为“{verdict}”，容量分析因目标压力校核未通过而未运行。"
@@ -138,7 +139,7 @@ class FEMAgent(BaseAgent):
                 target_index = result.get("target_hashin_index_max")
                 capacity_status = result.get("capacity_assessment_status")
                 return (
-                    f"精确目标压力校核已完成，目标压力 {target_pressure} MPa，"
+                    f"目标压力校核已完成，目标压力 {format_number(target_pressure)} MPa，"
                     f"线性屈曲压力 {linear_pressure} MPa，最大 Hashin 指数 {target_index}；"
                     f"设计判定为“{verdict}”，容量分析状态为 {capacity_status}。"
                 )
@@ -148,7 +149,7 @@ class FEMAgent(BaseAgent):
             if reference_pressure is not None and lpf is not None:
                 return (
                     f"外压圆柱壳有限元校核已完成，线性屈曲压力 {linear_pressure} MPa；"
-                    f"极限压力按“{basis}”计算，基准外压 {reference_pressure} MPa，"
+                    f"极限压力按“{basis}”计算，基准外压 {format_number(reference_pressure)} MPa，"
                     f"最大 LPF={lpf}，得到极限压力 {ultimate_pressure} MPa，当前结论为“{verdict}”。"
                 )
             return (

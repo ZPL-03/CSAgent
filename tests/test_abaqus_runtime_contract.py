@@ -203,7 +203,7 @@ def test_diagnosis_summary_reports_service_pressure_failure_without_target_place
         }
     )
 
-    assert "服务压力 50.259081 MPa" in summary
+    assert "服务压力 50.3 MPa" in summary
     assert "最大 Hashin 指数 1.53507021" in summary
     assert "容量分析因服务压力校核未通过而未运行" in summary
     assert "None" not in summary

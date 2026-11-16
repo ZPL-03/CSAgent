@@ -10,9 +10,10 @@ from typing import Any
 
 from PyQt6.QtCore import QPointF, QRectF, Qt
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
-from PyQt6.QtWidgets import QFrame, QGridLayout, QHBoxLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QFrame, QGridLayout, QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from core.paths import CASES_DIR
+from core.display import format_number
 from gui.theme import resolve_theme
 
 
@@ -258,7 +259,7 @@ class ParetoPlotWidget(QWidget):
         if best_history:
             last = map_history(*best_history[-1])
             painter.setPen(colors["best"])
-            painter.drawText(QRectF(last.x() - 80, last.y() - 30, 96, 22), Qt.AlignmentFlag.AlignRight, f"{best_history[-1][1]:.2f} MPa")
+            painter.drawText(QRectF(last.x() - 80, last.y() - 30, 96, 22), Qt.AlignmentFlag.AlignRight, f"{format_number(best_history[-1][1])} MPa")
         self._draw_axis_labels(painter, colors, plot, "案例序号", "当前最优 MPa")
 
     def _draw_axis_labels(self, painter: QPainter, colors: dict[str, QColor], plot: QRectF, x_label: str, y_label: str) -> None:
@@ -356,9 +357,9 @@ class MonitorDashboardWidget(QWidget):
             self._set_card(self.case_card, "正式案例", "0", "案例库暂无可绘制指标")
             self.summary_label.setText("监控页读取正式案例库和 FEM 结果；没有真实数据时不绘制假 Pareto。")
             return
-        self._set_card(self.best_card, "当前最优", f"{best.ultimate_pressure_MPa:.2f} MPa", best.case_id)
-        self._set_card(self.mass_card, "结构面密度", f"{best.weight_kg_per_m2:.2f} kg/m²", "越低越好")
-        self._set_card(self.buckling_card, "线性屈曲", f"{best.linear_buckling_pressure_MPa:.2f} MPa", "FEM 线性阶段")
+        self._set_card(self.best_card, "当前最优", f"{format_number(best.ultimate_pressure_MPa)} MPa", best.case_id)
+        self._set_card(self.mass_card, "结构面密度", f"{format_number(best.weight_kg_per_m2)} kg/m²", "越低越好")
+        self._set_card(self.buckling_card, "线性屈曲", f"{format_number(best.linear_buckling_pressure_MPa)} MPa", "FEM 线性阶段")
         self._set_card(self.case_card, "正式案例", str(len(self.points)), f"Pareto 前沿 {len(front)} 个")
         self.summary_label.setText(
             " · ".join(
@@ -366,7 +367,7 @@ class MonitorDashboardWidget(QWidget):
                     f"累计读取 {len(self.points)} 个有 FEM 指标的正式案例",
                     f"Pareto 前沿 {len(front)} 个",
                     f"最优方案 {best.case_id}",
-                    f"L={best.length_mm:.1f} mm / R={best.radius_mm:.1f} mm / t={best.thickness_mm:.2f} mm",
+                    f"L={format_number(best.length_mm)} mm / R={format_number(best.radius_mm)} mm / t={format_number(best.thickness_mm, None)} mm",
                 ]
             )
         )

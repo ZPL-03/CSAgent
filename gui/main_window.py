@@ -37,6 +37,7 @@ from PyQt6.QtWidgets import (
 
 from agents.orchestrator import OrchestratorAgent
 from core.config_loader import load_app_config, load_llm_config
+from core.display import format_number
 from core.conversation_flow import ConversationFlowController, ConversationState
 from core.task_parser import TaskParser, quantity_request_message
 from core.paths import ASSETS_DIR, CASE_LIBRARY_DIR, CASES_DIR, CONFIG_DIR, RESULTS_DIR, ROOT_DIR as PROJECT_ROOT
@@ -3758,12 +3759,12 @@ class MainWindow(QMainWindow):
             "<h3>当前任务</h3>"
             f"<p><b>会话任务编号：</b>{task.get('task_id')}</p>"
             f"<p><b>应用场景：</b>{task_payload.get('application')}</p>"
-            f"<p><b>工况：</b>{describe_load_conditions(task_payload.get('load_conditions', {}))}</p>"
+            f"<p><b>工况：</b>{describe_load_conditions(task_payload.get('load_conditions', {}), display=True)}</p>"
             f"<p><b>边界条件：</b>{describe_boundary_conditions(task_payload.get('boundary_conditions', {}))}</p>"
             f"<p><b>候选池：</b>{generated_count} / 目标 {candidate_pool_target}</p>"
             f"<p><b>初筛目标：</b>Top-{requested_top_k}（当前最多 {effective_top_k}）</p>"
             f"<p><b>材料：</b>{material.get('name')} | E1={material.get('E1_GPa')} GPa | 密度={material.get('density_kg_per_m3')} kg/m^3</p>"
-            f"<p><b>目标：</b>P_ult >= {task_payload.get('design_targets', {}).get('ultimate_pressure_min_MPa')} MPa，{task_payload.get('design_targets', {}).get('primary_objective')}</p>"
+            f"<p><b>目标：</b>P_ult >= {format_number(task_payload.get('design_targets', {}).get('ultimate_pressure_min_MPa'))} MPa，{task_payload.get('design_targets', {}).get('primary_objective')}</p>"
             f"<p><b>阶段：</b>{self.session.stage}</p>"
         )
 

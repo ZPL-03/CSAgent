@@ -214,9 +214,14 @@ def normalize_load_conditions(load_conditions: Any) -> Dict[str, Any]:
     return load_condition_payload(DEFAULT_LOAD_TYPE, pressure)
 
 
-def describe_load_conditions(load_conditions: Any) -> str:
+def describe_load_conditions(load_conditions: Any, *, display: bool = False) -> str:
+    """描述工况；显示出口可简化压力，检索和计算说明保留原值。"""
     normalized = normalize_load_conditions(load_conditions)
-    return f"{normalized['label']}：p={normalized.get('external_pressure_MPa', 0.0)} MPa"
+    pressure = normalized.get("external_pressure_MPa", 0.0)
+    if display:
+        from core.display import format_number
+        pressure = format_number(pressure)
+    return f"{normalized['label']}：p={pressure} MPa"
 
 
 def equivalent_in_plane_load(load_conditions: Any) -> float:
