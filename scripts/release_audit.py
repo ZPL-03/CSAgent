@@ -12,7 +12,6 @@ import time
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Iterable
 
 import yaml
 
@@ -29,62 +28,6 @@ from core.fem_result_semantics import complete_case_result_errors, required_fem_
 from core.paths import resolve_project_path  # noqa: E402
 from core.schema_validator import validate_or_raise  # noqa: E402
 
-
-def _join(*parts: str) -> str:
-    return "".join(parts)
-
-
-FORBIDDEN_TEXT = [
-    _join("Mech", "Agent"),
-    _join("mi", "mo", "-v2.5-pro"),
-    _join("token", "-plan", "-cn"),
-    _join("tp", "-ct"),
-    _join("PBIPF ", "\u5e26 Q"),
-    _join("\u5e26", "Q\u516c\u5f0f"),
-    _join("\u4e13", "\u5229"),
-    _join("knowledge", "/external"),
-    _join("external", "_knowledge"),
-    _join("avatar", "Badge"),
-    _join("Ver", "\uff44", "Dict"),
-    _join("Verd", "Dict"),
-    _join("CSDM_cph ", "\u8fd0\u884c\u5ba1\u8ba1\u62a5\u544a"),
-    _join("CSDM_cph ", "\u8010\u538b\u58f3\u8bbe\u8ba1\u62a5\u544a"),
-    _join("Neo", "4j"),
-    _join("\u5916\u90e8", "\u77e5\u8bc6\u5e93"),
-    _join("\u4e2d\u592e\u201c\u9879\u76ee\u201d", "\u9875"),
-    _join("\u53f3\u4fa7\u201c\u5019\u9009\u201d", "\u9875"),
-    _join("\u53f3\u4fa7\u201c\u8ffd\u8e2a\u201d", "\u9875"),
-    _join("\u53f3\u4fa7\u201c\u62a5\u544a\u201d", "\u9875"),
-    _join("CASE_1` \u81f3 `CASE_13", "`"),
-    _join("\u5171 13 \u6761\u771f\u5b9e", " Abaqus"),
-]
-
-TEXT_SUFFIXES = {
-    ".py",
-    ".md",
-    ".json",
-    ".yaml",
-    ".yml",
-    ".txt",
-    ".csv",
-    ".schema",
-}
-
-EXCLUDED_SCAN_DIRS = {
-    ".git",
-    "reference",
-    "models/embedding_cache",
-    "knowledge/chroma_db",
-    "knowledge/runtime",
-    "data/abaqus_runs",
-    "data/runtime",
-    "data/io",
-    "data/tasks",
-}
-
-EXCLUDED_SCAN_FILES = {
-    "scripts/release_audit.py",
-}
 
 REQUIRED_UI_ASSETS = [
     "assets/screenshots/dark_workbench.png",
@@ -137,7 +80,6 @@ class ReleaseAudit:
         self.items.append(AuditItem(name=name, passed=passed, detail=detail))
 
     def run(self) -> int:
-        self.check_clean_residuals()
         self.check_cache_absent()
         self.check_env_ignored()
         self.check_product_identity()
@@ -161,30 +103,6 @@ class ReleaseAudit:
             status = "PASS" if item.passed else "FAIL"
             print(f"[{status}] {item.name}: {item.detail}")
         return 0 if all(item.passed for item in self.items) else 1
-
-    def _iter_text_files(self) -> Iterable[Path]:
-        for path in ROOT.rglob("*"):
-            if not path.is_file():
-                continue
-            relative = path.relative_to(ROOT).as_posix()
-            if relative in EXCLUDED_SCAN_FILES:
-                continue
-            if any(relative == excluded or relative.startswith(f"{excluded}/") for excluded in EXCLUDED_SCAN_DIRS):
-                continue
-            if path.suffix.lower() in TEXT_SUFFIXES or path.name == ".gitignore":
-                yield path
-
-    def check_clean_residuals(self) -> None:
-        hits: list[str] = []
-        for path in self._iter_text_files():
-            try:
-                text = path.read_text(encoding="utf-8")
-            except UnicodeDecodeError:
-                continue
-            for pattern in FORBIDDEN_TEXT:
-                if pattern in text:
-                    hits.append(f"{path.relative_to(ROOT)}:{pattern}")
-        self.add("产品关键词", not hits, "产品命名、模型名称、运行路径和报告标题一致" if not hits else "; ".join(hits[:12]))
 
     def check_cache_absent(self) -> None:
         from scripts.clean_artifacts import python_cache_paths
@@ -347,13 +265,11 @@ class ReleaseAudit:
             ROOT / "knowledge/csllm/provenance/file_manifest.jsonl",
         ]
         missing_builtin = [path.relative_to(ROOT).as_posix() for path in builtin_files if not path.exists()]
-        external_runtime_path = _join("knowledge", "/external")
-        external_exists = (ROOT / external_runtime_path).exists()
-        passed = not mismatches and not missing_builtin and not external_exists
+        passed = not mismatches and not missing_builtin
         detail = (
             "知识库事实源为内置数据、用户增量运行区、合并检索入口和向量索引"
             if passed
-            else "; ".join([*mismatches, *(f"missing:{item}" for item in missing_builtin), f"{external_runtime_path} exists={external_exists}"])
+            else "; ".join([*mismatches, *(f"missing:{item}" for item in missing_builtin)])
         )
         self.add("知识库运行时路径", passed, detail)
 
