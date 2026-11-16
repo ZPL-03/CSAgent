@@ -131,77 +131,6 @@ def _assert_unique_candidates(candidates: list[dict[str, Any]]) -> None:
         raise AssertionError("候选池存在结构重复方案")
 
 
-def _attach_deterministic_downstream(orchestrator: OrchestratorAgent, output_dir: Path) -> None:
-    """把 FEM 和知识回流替换为可审计的快速验收适配器，报告阶段仍使用正式报告智能体。"""
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    if hasattr(orchestrator, "candidate_gen") and hasattr(orchestrator.candidate_gen, "case_retriever"):
-        orchestrator.candidate_gen.case_retriever.use_vector_index = False
-        orchestrator.candidate_gen.case_retriever._case_memory_failed = True
-
-    def prepare_candidate_for_fem(task: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
-        next_index = len(getattr(prepare_candidate_for_fem, "_seen", [])) + 1
-        seen = list(getattr(prepare_candidate_for_fem, "_seen", []))
-        seen.append(candidate.get("candidate_id"))
-        setattr(prepare_candidate_for_fem, "_seen", seen)
-        formal_id = f"C_ACCEPT_{next_index}"
-        prepared = dict(candidate)
-        prepared.pop("persistent_candidate_id", None)
-        prepared["candidate_id"] = formal_id
-        prepared["display_name"] = formal_id
-        prepared["session_candidate_id"] = candidate["candidate_id"]
-        return prepared
-
-    def prepare_candidates_for_fem(task: dict[str, Any], candidates: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        prepared: list[dict[str, Any]] = []
-        setattr(prepare_candidate_for_fem, "_seen", [])
-        for candidate in candidates:
-            prepared.append(prepare_candidate_for_fem(task, candidate))
-        return prepared
-
-    def evaluate_prepared_candidate(task: dict[str, Any], candidate: dict[str, Any]) -> dict[str, Any]:
-        predicted = float(candidate.get("surrogate_ultimate_pressure_MPa") or 45.0)
-        result = {
-            "candidate_id": candidate["candidate_id"],
-            "display_name": candidate["display_name"],
-            "session_candidate_id": candidate["session_candidate_id"],
-            "status": "success",
-            "verdict": "通过",
-            "linear_buckling_pressure_MPa": round(float(candidate.get("asme_linear_buckling_pressure_MPa") or predicted), 3),
-            "ultimate_pressure_MPa": round(max(predicted * 0.96, 45.0), 3),
-            "failure_mode": "acceptance_adapter",
-            "visualization_path": "",
-            "odb_path": "",
-        }
-        (output_dir / f"result_{candidate['candidate_id']}.json").write_text(
-            json.dumps(result, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-        return result
-
-    def persist_knowledge_records(
-        task: dict[str, Any],
-        fem_designs: list[dict[str, Any]],
-        results: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        updates = []
-        for index, design in enumerate(fem_designs, start=1):
-            updates.append(
-                {
-                    "status": "stored",
-                    "case_id": f"CASE_ACCEPT_{index}",
-                    "candidate_id": design.get("candidate_id"),
-                    "session_candidate_id": design.get("session_candidate_id"),
-                }
-            )
-        return updates
-
-    orchestrator.prepare_candidate_for_fem = prepare_candidate_for_fem  # type: ignore[method-assign]
-    orchestrator.prepare_candidates_for_fem = prepare_candidates_for_fem  # type: ignore[method-assign]
-    orchestrator.evaluate_prepared_candidate = evaluate_prepared_candidate  # type: ignore[method-assign]
-    orchestrator.persist_knowledge_records = persist_knowledge_records  # type: ignore[method-assign]
-
-
 def _expected_float(expected: dict[str, Any], *keys: str) -> float | None:
     for key in keys:
         if expected.get(key) is not None:
@@ -304,12 +233,10 @@ def _validate_completed_state(
     return summary
 
 
-def _run_case(case: dict[str, Any], output_dir: Path, use_real_fem: bool) -> dict[str, Any]:
+def _run_case(case: dict[str, Any], output_dir: Path) -> dict[str, Any]:
     instruction = str(case["instruction"])
     expected = case.get("expected") if isinstance(case.get("expected"), dict) else None
     orchestrator = OrchestratorAgent()
-    if not use_real_fem:
-        _attach_deterministic_downstream(orchestrator, output_dir)
     events: list[tuple[str, str, dict[str, Any]]] = []
     store = WorkflowEventStore(output_dir / "workflow_acceptance.sqlite3")
     controller = ConversationFlowController(
@@ -394,7 +321,6 @@ def main() -> int:
     parser.add_argument("--instructions", type=Path, help="JSON 输入文件，内容为字符串数组或 instructions 字段。")
     parser.add_argument("--max-cases", type=int, default=0, help="最多运行前 N 条验收输入；0 表示运行全部输入。")
     parser.add_argument("--disable-llm", action="store_true", help="关闭 LLM 自动调用，仅验证确定性候选闭合和工作流。")
-    parser.add_argument("--real-fem", action="store_true", help="使用真实 Abaqus FEM 链路；默认使用快速验收适配器。")
     parser.add_argument("--verbose", action="store_true", help="在控制台输出智能体内部日志。")
     args = parser.parse_args()
 
@@ -411,13 +337,12 @@ def main() -> int:
 
     summaries = []
     for case in _select_instruction_cases(_load_instruction_cases(args.instructions), args.max_cases):
-        summaries.append(_run_case(case, output_dir, use_real_fem=args.real_fem))
+        summaries.append(_run_case(case, output_dir))
 
     report = {
         "created_at": datetime.now().isoformat(timespec="seconds"),
         "output_dir": str(output_dir),
         "llm_enabled": os.getenv("CSDM_cph_DISABLE_LLM_AUTO", "0").strip().lower() not in {"1", "true", "yes", "on"},
-        "real_fem": bool(args.real_fem),
         "case_count": len(summaries),
         "cases": summaries,
     }
@@ -428,7 +353,6 @@ def main() -> int:
         "summary_path": str(summary_path),
         "output_dir": str(output_dir),
         "llm_enabled": report["llm_enabled"],
-        "real_fem": report["real_fem"],
         "case_count": report["case_count"],
         "cases": [
             {

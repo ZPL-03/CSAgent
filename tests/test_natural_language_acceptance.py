@@ -33,28 +33,33 @@ def test_acceptance_signature_preserves_radius_reference():
         _assert_unique([candidate, deepcopy(candidate)])
 
 
-def _patch_deterministic_downstream(monkeypatch, orchestrator: OrchestratorAgent, tmp_path) -> None:
+def _patch_fem_boundary(monkeypatch, orchestrator: OrchestratorAgent, tmp_path) -> None:
+    """替换外部 Abaqus 边界，保留正式候选、事件和报告流程。"""
+
     def evaluate_prepared_candidate(task, candidate):
-        predicted = float(candidate.get("surrogate_ultimate_pressure_MPa") or 45.0)
+        ultimate_pressure = float(candidate["surrogate_ultimate_pressure_MPa"])
+        linear_pressure = float(candidate["asme_linear_buckling_pressure_MPa"])
         return {
             "candidate_id": candidate["candidate_id"],
             "display_name": candidate["display_name"],
             "session_candidate_id": candidate["session_candidate_id"],
             "status": "success",
             "verdict": "通过",
-            "linear_buckling_pressure_MPa": float(candidate.get("asme_linear_buckling_pressure_MPa") or predicted),
-            "ultimate_pressure_MPa": round(max(predicted, 45.0), 3),
-            "failure_mode": "deterministic_acceptance_adapter",
+            "linear_buckling_pressure_MPa": linear_pressure,
+            "ultimate_pressure_MPa": ultimate_pressure,
+            "failure_mode": "test_fem_boundary",
+            "solved_design": deepcopy(candidate),
         }
 
     def persist_knowledge_records(task, fem_designs, results):
         return [
             {
                 "status": "stored",
-                "case_id": "CASE_ACCEPTANCE",
-                "candidate_id": fem_designs[0]["candidate_id"],
-                "session_candidate_id": fem_designs[0]["session_candidate_id"],
+                "case_id": f"CASE_TEST_{index}",
+                "candidate_id": design["candidate_id"],
+                "session_candidate_id": design["session_candidate_id"],
             }
+            for index, design in enumerate(fem_designs, start=1)
         ]
 
     def generate_report(task, results, candidates=None):
@@ -247,10 +252,10 @@ def test_multi_natural_language_inputs_run_candidate_and_screening_pipeline(monk
         "Design a composite external-pressure cylindrical pressure hull, external pressure 26 MPa, ultimate pressure at least 38 MPa, generate 4 candidates, keep 2 after screening",
     ],
 )
-def test_natural_language_inputs_complete_runtime_workflow_with_real_candidate_screening(monkeypatch, tmp_path, instruction):
+def test_natural_language_inputs_complete_workflow_with_fem_contract(monkeypatch, tmp_path, instruction):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     orchestrator = OrchestratorAgent()
-    _patch_deterministic_downstream(monkeypatch, orchestrator, tmp_path)
+    _patch_fem_boundary(monkeypatch, orchestrator, tmp_path)
     events: list[tuple[str, str, dict]] = []
     store = WorkflowEventStore(tmp_path / "workflow.sqlite3")
     controller = ConversationFlowController(
@@ -284,7 +289,7 @@ def test_natural_language_inputs_complete_runtime_workflow_with_real_candidate_s
     assert all(candidate_index(result["candidate_id"]) is not None for result in state.results)
     assert len({result["candidate_id"] for result in state.results}) == len(state.results)
     assert all(result["session_candidate_id"].startswith("TMP_") for result in state.results)
-    assert state.knowledge_updates[0]["case_id"] == "CASE_ACCEPTANCE"
+    assert state.knowledge_updates[0]["case_id"] == "CASE_TEST_1"
 
     state = controller.continue_after_confirmation(state, True)
 

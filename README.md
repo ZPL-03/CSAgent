@@ -167,7 +167,7 @@ python -B scripts/release_audit.py
 D:\anaconda3\envs\AGENT\python.exe scripts\run_natural_language_acceptance.py --disable-llm
 ```
 
-该入口使用完整工作流运行时推进任务解析、候选生成、代理初筛、有限元阶段、知识回流和报告导出，并检查候选数量、初筛数量、结构去重、运行事件、快照状态和报告路径。默认有限元阶段使用快速验收适配器，不消耗 Abaqus 求解资源；需要调用当前配置的 LLM 时去掉 `--disable-llm`，需要真实 Abaqus 链路时增加 `--real-fem`。
+该入口使用完整工作流运行时推进任务解析、候选生成、代理初筛、当前配置的 Abaqus 有限元阶段、知识回流和报告导出，并检查候选数量、初筛数量、结构去重、运行事件、快照状态和报告路径。`--disable-llm` 只关闭自然语言自动调用，不替换有限元求解器；未配置可用 Abaqus 命令时，验收直接报告求解不可用。
 
 批量生成初始案例：
 
