@@ -139,18 +139,37 @@ def test_stress_coverage_rejects_outer_surfaces_and_per_element_gaps() -> None:
     assert ply_stress_coverage(frame([(1, n) for n in range(1, 61)] + [(2, n) for n in range(61, 121)]), 40)["status"] == "incomplete"
 
 
-def test_cleanup_preserves_solver_evidence_logs(tmp_path: Path) -> None:
-    agent = FEMAgent.__new__(FEMAgent)
-    agent._run_dir = lambda _candidate_id: tmp_path
-    for suffix in (".msg", ".dat", ".sta", ".log", ".lck", ".com"):
-        (tmp_path / f"C1{suffix}").write_text("evidence", encoding="utf-8")
+def test_finished_job_cleanup_preserves_model_and_imperfection_evidence(tmp_path: Path) -> None:
+    from abaqus.job_utils import cleanup_job_artifacts, solver_log_tails
 
-    agent._cleanup_run_artifacts("C1", keep_logs=True)
+    workdir = tmp_path / "C1"
+    workdir.mkdir()
+    for name in ("C1.inp", "C1.odb", "C1.cae", "C1.fil", "C1_post.monitor.json",
+                 "C1_mode1.json", "candidate_input.json", "material.for", "strength.inc",
+                 "C1_post.msg", "C1_post.sta", "C1_post.monitor.log", "build_C1.py"):
+        (workdir / name).write_text("evidence", encoding="utf-8")
+    (workdir / "C1_post.simdir").mkdir()
+    (workdir / "C1_post.simdir/matrix.bin").write_bytes(b"matrix")
 
-    for suffix in (".msg", ".dat", ".sta", ".log"):
-        assert (tmp_path / f"C1{suffix}").exists()
-    for suffix in (".lck", ".com"):
-        assert not (tmp_path / f"C1{suffix}").exists()
+    assert solver_log_tails(workdir, ["C1_post"])["C1_post.msg"] == "evidence"
+    cleanup_job_artifacts(workdir, ["C1", "C1_post"])
+
+    assert {path.name for path in workdir.iterdir()} == {
+        "C1.inp", "C1.odb", "C1.cae", "C1.fil", "C1_post.monitor.json", "C1_mode1.json",
+        "candidate_input.json", "material.for", "strength.inc",
+    }
+
+
+def test_job_lock_prevents_cleanup(tmp_path: Path) -> None:
+    from abaqus.job_utils import cleanup_job_artifacts
+
+    workdir = tmp_path / "C1"
+    workdir.mkdir()
+    for name in ("C1.lck", "C1.sta", "build_C1.py"):
+        (workdir / name).touch()
+    with pytest.raises(RuntimeError, match="作业锁"):
+        cleanup_job_artifacts(workdir, ["C1"])
+    assert {path.name for path in workdir.iterdir()} == {"C1.lck", "C1.sta", "build_C1.py"}
 
 
 def test_completed_capacity_payload_keeps_both_exact_load_artifact_pairs() -> None:

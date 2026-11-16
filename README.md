@@ -137,7 +137,7 @@ GUI 的“监控”页提供最近运行记录下拉框、刷新运行记录和�
 
 ## 启动
 
-内置 RAG 压缩文件、SQLite 索引和向量矩阵使用 Git LFS 保存。首次检出后执行 `git lfs install` 和 `git lfs pull`，确保工作目录中是完整文件，而不是 LFS 指针文本。运行生成的 INP、ODB、子程序和监测证据保存在各候选作业目录；不能把有效求解工件当作普通缓存清理。
+内置 RAG 压缩文件、SQLite 索引和向量矩阵使用 Git LFS 保存。首次检出后执行 `git lfs install` 和 `git lfs pull`，确保工作目录中是完整文件，而不是 LFS 指针文本。各候选作业目录保留 INP、ODB、CAE、输入快照、结果展示数据、子程序、材料强度 include 和 Riks 监测结果；后屈曲输入通过 `*Imperfection` 引用的首阶缺陷场 `.fil` 同时保留。
 
 ```powershell
 D:\anaconda3\envs\AGENT\python.exe main.py
@@ -159,7 +159,7 @@ python -B scripts/clean_artifacts.py --apply
 python -B scripts/release_audit.py
 ```
 
-自动清理范围为 Python、pytest 和 Ruff 缓存。求解工件仅在显式提供 `--candidate-id C<N>`、没有案例引用且不存在作业锁时允许删除；正式案例、资料库、模型权重和浏览器登录状态不属于缓存。
+通用缓存命令处理 Python、pytest 和 Ruff 缓存。Abaqus 作业退出并保存结果后，求解智能体清理状态文件、日志、模拟中间数据、回放文件和生成的建模脚本；失败日志末尾写入结果的 `error_log.solver_logs`。作业锁存在时不清理，删除失败直接报错。完整求解目录仅在显式提供 `--candidate-id C<N>`、没有案例引用且不存在作业锁时允许删除。
 
 多条自然语言输入端到端验收：
 
@@ -179,7 +179,7 @@ D:\anaconda3\envs\AGENT\python.exe scripts\build_initial_cases.py --reset --coun
 
 ## 有限元说明
 
-自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出。进入 Abaqus 前，`core/fem_input_contract.py` 必须确认候选包含完整圆柱壳几何、显式逐层角度、材料参数、外压、边界、设计目标和稳定 `design_revision_id`；运行时脚本再次校验同一合同，不对缺失材料、铺层、几何或目标静默使用默认值。Riks 作业正常完成或具有匹配的后峰受控终止证据，且 ODB 载荷路径出现明确后峰下降时，才确认极限点；观测最大 LPF、未收敛末帧或达到增量上限不能写成极限压力。已收敛帧的各铺层应力按二维 Hashin 公式计算首次铺层失效起始压力和目标压力处失效指数，并保留单元号、铺层积分点和控制失效模式；该结果是损伤起始证据，不是渐进损伤极限强度。未运行渐进损伤模型时，几何非线性极限点、首次铺层失效与材料极限强度分开记录，不生成材料强度通过结论。求解日志、状态文件、输入文件和 ODB 作为审计证据保留。失败重试改变厚度或分析设置时生成新的 `design_revision_id` 并记录 `parent_design_revision_id`，有限元结果按实际修订号回写。材料库覆盖 `T700/Epoxy`、`T800G/5228`、`M40J/TDE-85` 和 `IM7-8552`。
+自动桥接脚本位于 `abaqus/runtime_build_pressure_hull.py`，使用 JSON 输入输出。进入 Abaqus 前，`core/fem_input_contract.py` 必须确认候选包含完整圆柱壳几何、显式逐层角度、材料参数、外压、边界、设计目标和稳定 `design_revision_id`；运行时脚本再次校验同一合同，不对缺失材料、铺层、几何或目标静默使用默认值。Riks 作业正常完成或具有匹配的后峰受控终止证据，且 ODB 载荷路径出现明确后峰下降时，才确认极限点；观测最大 LPF、未收敛末帧或达到增量上限不能写成极限压力。已收敛帧的各铺层应力按二维 Hashin 公式计算首次铺层失效起始压力和目标压力处失效指数，并保留单元号、铺层积分点和控制失效模式；该结果是损伤起始证据，不是渐进损伤极限强度。未运行渐进损伤模型时，几何非线性极限点、首次铺层失效与材料极限强度分开记录，不生成材料强度通过结论。输入文件、ODB、缺陷场和数值监测结果用于复算。失败重试改变厚度或分析设置时生成新的 `design_revision_id` 并记录 `parent_design_revision_id`，有限元结果按实际修订号回写。材料库覆盖 `T700/Epoxy`、`T800G/5228`、`M40J/TDE-85` 和 `IM7-8552`。
 
 CS_LLM 的 FEM-ready 候选通过 `core/fem_candidate_transfer.py` 导入。导入器只接受完整 JSON 服务响应，复核合同版本、正式有限元表格 SHA256、候选数量和编号、每个 `design_revision_id`、候选来源、历史筛选角色、当前未求解状态、FEM 输入完整性和总体 `design_fingerprint`；Markdown 只用于展示，不参与机器输入。候选角色区分同几何历史基线、同几何探索和最近邻迁移探索，任何历史参考值都不能写成当前 Abaqus 通过结论。命令行入口为 `python scripts/import_csllm_fem_candidates.py <response.json>`，验证后的候选包写入 `data/io/`。`python scripts/run_csllm_fem_candidates.py <response.json> --candidate-id TMP_N` 将指定候选送入原有正式编号、仿真队列和 Abaqus 链路；求解完成后统一执行知识回流，保留 `design_revision_id`、源表行号、源表 SHA256、A/B/D 复算证据、边界实现和服务/目标压力 Hashin 证据。求解成功表示作业完成，设计是否通过由结果中的 `verdict` 和设计校核状态判定。
 

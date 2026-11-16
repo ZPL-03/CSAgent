@@ -5,18 +5,11 @@ from __future__ import annotations
 import csv
 import json
 import os
-import sys
 from datetime import datetime
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
-
-PROJECT_ROOT = Path(__file__).resolve().parent.parent
-if str(PROJECT_ROOT) not in sys.path:
-    sys.path.insert(0, str(PROJECT_ROOT))
-
-UI_LAYOUT_VERSION = 25
 
 from PyQt6 import sip
 from PyQt6.QtCore import QObject, QRectF, QSettings, QSignalBlocker, QSize, Qt, QThread, QTimer, QUrl, pyqtSignal
@@ -38,7 +31,6 @@ from PyQt6.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QStackedWidget,
-    QTextBrowser,
     QVBoxLayout,
     QWidget,
 )
@@ -47,7 +39,7 @@ from agents.orchestrator import OrchestratorAgent
 from core.config_loader import load_app_config, load_llm_config
 from core.conversation_flow import ConversationFlowController, ConversationState
 from core.task_parser import TaskParser, quantity_request_message
-from core.paths import ASSETS_DIR, CASE_LIBRARY_DIR, CASES_DIR, CONFIG_DIR, RESULTS_DIR, ensure_project_dirs
+from core.paths import ASSETS_DIR, CASE_LIBRARY_DIR, CASES_DIR, CONFIG_DIR, RESULTS_DIR, ROOT_DIR as PROJECT_ROOT
 from core.task_contract import (
     describe_boundary_conditions,
     describe_load_conditions,
@@ -70,6 +62,9 @@ from gui.workflow_widget import WorkflowWidget
 from workflow.event_store import WorkflowEventStore
 from workflow.events import WorkflowEvent
 from workflow.simulation_queue import SimulationJobQueue
+
+
+UI_LAYOUT_VERSION = 25
 
 
 @dataclass
@@ -1310,7 +1305,6 @@ class MainWindow(QMainWindow):
         fallback = backends[1] if len(backends) > 1 else {}
         abaqus = app_config.get("abaqus") if isinstance(app_config.get("abaqus"), dict) else {}
         pipeline = app_config.get("pipeline") if isinstance(app_config.get("pipeline"), dict) else {}
-        ratio = pipeline.get("candidate_source_ratio") if isinstance(pipeline.get("candidate_source_ratio"), dict) else {}
         knowledge = app_config.get("project_knowledge") if isinstance(app_config.get("project_knowledge"), dict) else {}
         conversation = app_config.get("conversation") if isinstance(app_config.get("conversation"), dict) else {}
         confirm_steps = conversation.get("confirmation_steps", [])
@@ -1323,7 +1317,6 @@ class MainWindow(QMainWindow):
             "ui": ("界面偏好", f"{self.locale.language} · {self.locale.theme}"),
             "files": ("配置文件", "config/app_config.yaml · config/llm_config.yaml · .env"),
         }
-        values["files"] = (values["files"][0], "YAML 配置 · .env 隔离")
         for key, (title, body) in values.items():
             label = labels.get(key)
             if label is not None:
@@ -1590,14 +1583,10 @@ class MainWindow(QMainWindow):
                 "求解器集成 · ABAQUS",
                 [
                     ("命令", self._settings_path_field("abaqus.command", abaqus.get("command", "abaqus"), "file")),
-                    ("CAE 参数", self._settings_line("abaqus.cae_args", abaqus.get("cae_args", "cae noGUI="))),
-                    ("Python 参数", self._settings_line("abaqus.python_args", abaqus.get("python_args", "python"))),
                     ("用户子程序", self._settings_path_field("abaqus.user_subroutine", abaqus.get("user_subroutine", ""), "file")),
                     ("启用用户子程序", self._settings_combo("abaqus.use_user_subroutine", abaqus.get("use_user_subroutine", False), [("否", "false"), ("是", "true")])),
                     ("作业超时秒数", self._settings_line("abaqus.job_timeout_seconds", abaqus.get("job_timeout_seconds", 3600))),
                     ("最大重试", self._settings_line("abaqus.max_retries", abaqus.get("max_retries", 3))),
-                    ("轮询间隔秒数", self._settings_line("abaqus.poll_interval_seconds", abaqus.get("poll_interval_seconds", 5))),
-                    ("清理模式", self._settings_line("abaqus.cleanup_patterns", ", ".join(abaqus.get("cleanup_patterns", [])))),
                 ],
             ),
             self._settings_form_card(
@@ -1966,14 +1955,10 @@ class MainWindow(QMainWindow):
             "llm.timeout_seconds": primary.get("timeout_seconds", 180),
             "llm.json_output_tokens": primary.get("json_output_tokens", 4096),
             "abaqus.command": abaqus.get("command", "abaqus"),
-            "abaqus.cae_args": abaqus.get("cae_args", "cae noGUI="),
-            "abaqus.python_args": abaqus.get("python_args", "python"),
             "abaqus.user_subroutine": abaqus.get("user_subroutine", ""),
             "abaqus.use_user_subroutine": abaqus.get("use_user_subroutine", False),
             "abaqus.job_timeout_seconds": abaqus.get("job_timeout_seconds", 3600),
             "abaqus.max_retries": abaqus.get("max_retries", 3),
-            "abaqus.poll_interval_seconds": abaqus.get("poll_interval_seconds", 5),
-            "abaqus.cleanup_patterns": ", ".join(abaqus.get("cleanup_patterns", [])),
             "pipeline.ratio.llm": ratio.get("llm", 2),
             "pipeline.ratio.case_transfer": ratio.get("case_transfer", 1),
             "pipeline.ratio.doe": ratio.get("doe", 1),
@@ -2025,15 +2010,10 @@ class MainWindow(QMainWindow):
 
         abaqus = app_config["abaqus"]
         abaqus["command"] = self._settings_value("abaqus.command") or "abaqus"
-        abaqus["cae_args"] = self._settings_value("abaqus.cae_args") or abaqus.get("cae_args", "cae noGUI=")
-        abaqus["python_args"] = self._settings_value("abaqus.python_args") or abaqus.get("python_args", "python")
         abaqus["user_subroutine"] = self._settings_value("abaqus.user_subroutine")
         abaqus["use_user_subroutine"] = self._settings_bool("abaqus.use_user_subroutine", bool(abaqus.get("use_user_subroutine", False)))
         abaqus["job_timeout_seconds"] = self._settings_int("abaqus.job_timeout_seconds", int(abaqus.get("job_timeout_seconds", 3600) or 3600))
         abaqus["max_retries"] = self._settings_int("abaqus.max_retries", int(abaqus.get("max_retries", 3) or 3))
-        abaqus["poll_interval_seconds"] = self._settings_int("abaqus.poll_interval_seconds", int(abaqus.get("poll_interval_seconds", 5) or 5))
-        cleanup_patterns = [item.strip() for item in self._settings_value("abaqus.cleanup_patterns").split(",") if item.strip()]
-        abaqus["cleanup_patterns"] = cleanup_patterns
 
         ratio_values = {
             "llm": max(0, self._settings_int("pipeline.ratio.llm", 0)),
@@ -3802,17 +3782,3 @@ class MainWindow(QMainWindow):
                     thread.wait(3000)
             self._clear_worker_refs()
             super().closeEvent(event)
-
-
-def main() -> int:
-    ensure_project_dirs()
-    app = QApplication(sys.argv)
-    install_application_font(app)
-    window = MainWindow()
-    window._ensure_window_within_work_area(clamp_to_target=True)
-    window.show()
-    return app.exec()
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

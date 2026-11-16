@@ -5,7 +5,8 @@ from __future__ import annotations
 import shutil
 import os
 import subprocess
-import time
+import re
+import stat
 from pathlib import Path
 from typing import Dict, Iterable, Tuple
 
@@ -61,13 +62,56 @@ def run_command(command: Iterable[str], workdir: Path, timeout: int | None = Non
     return process.returncode, process.stdout, process.stderr
 
 
-def wait_for_result_file(result_path: Path, timeout_seconds: int, poll_interval_seconds: int) -> bool:
-    deadline = time.time() + timeout_seconds
-    while time.time() < deadline:
-        if result_path.exists():
-            return True
-        time.sleep(poll_interval_seconds)
-    return False
+def ensure_job_unlocked(workdir: Path) -> None:
+    """作业目录有锁或为链接时，不写入或清理其中的文件。"""
+    if workdir.is_symlink() or (
+        workdir.exists() and getattr(workdir.lstat(), "st_file_attributes", 0) & stat.FILE_ATTRIBUTE_REPARSE_POINT
+    ):
+        raise ValueError(f"作业目录不能是链接：{workdir}")
+    locks = sorted(workdir.glob("*.lck"))
+    if locks:
+        raise RuntimeError(f"作业锁仍存在：{', '.join(path.name for path in locks)}")
+
+
+def job_transient_paths(workdir: Path, job_names: Iterable[str]) -> list[Path]:
+    """列出作业的求解中间文件，保留模型、结果、输入快照和数值证据。"""
+    names = tuple(job_names)
+    if not names or any(not re.fullmatch(r"C[1-9][0-9]*(?:_service|_target|_post)?", name) for name in names):
+        raise ValueError("无效的 Abaqus 作业名")
+    suffixes = (
+        ".023", ".com", ".jnl", ".sta", ".prt", ".sim", ".simdir", ".log",
+        ".env", ".odb_f", ".msg", ".dat", ".res", ".mdl", ".stt",
+        ".pac", ".sel", ".abq", ".monitor.log", ".monitor.stop",
+    )
+    paths = {workdir / (name + suffix) for name in names for suffix in suffixes}
+    paths.update(workdir / f"build_{name}.py" for name in names)
+    for pattern in ("abaqus.rpy*", "abaqus*.rec", "candidate_retry_*.json", "*.obj", "*.mod",
+                    "standardU.dll", "standardU.lib", "standardU.exp", "standardU.pdb"):
+        paths.update(workdir.glob(pattern))
+    return sorted(path for path in paths if path.exists() or path.is_symlink())
+
+
+def cleanup_job_artifacts(workdir: Path, job_names: Iterable[str]) -> None:
+    """在求解进程退出且结果落盘后删除中间文件，删除错误直接暴露。"""
+    ensure_job_unlocked(workdir)
+    paths = job_transient_paths(workdir, job_names)
+    for path in paths:
+        if path.is_symlink() or not path.resolve().is_relative_to(workdir.resolve()):
+            raise ValueError(f"清理目标越过作业目录：{path}")
+    for path in paths:
+        if path.is_dir():
+            shutil.rmtree(path)
+        else:
+            path.unlink()
+
+
+def solver_log_tails(workdir: Path, job_names: Iterable[str]) -> dict[str, str]:
+    """将失败作业的日志末尾写入结果诊断，原日志随后可清理。"""
+    return {
+        name + suffix: read_tail_text(workdir / (name + suffix))
+        for name in job_names for suffix in (".msg", ".dat", ".sta", ".log", ".monitor.log")
+        if (workdir / (name + suffix)).is_file()
+    }
 
 
 def read_tail_text(path: Path, max_chars: int = 4000) -> str:
