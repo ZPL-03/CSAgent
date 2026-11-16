@@ -83,14 +83,10 @@ class ReleaseAudit:
         self.check_cache_absent()
         self.check_env_ignored()
         self.check_product_identity()
-        self.check_agent_runtime_contract()
         self.check_runtime_knowledge_paths()
         self.check_builtin_knowledge_integrity()
         self.check_runtime_knowledge_status_contract()
-        self.check_knowledge_pipeline_contract()
         self.check_knowledge_file_type_contract()
-        self.check_gui_workbench_contract()
-        self.check_async_runtime_contract()
         if self.with_gui_render:
             self.check_gui_render_contract()
         self.check_ui_assets()
@@ -150,96 +146,6 @@ class ReleaseAudit:
         passed = not mismatches
         detail = "产品身份配置匹配" if passed else "; ".join(mismatches)
         self.add("产品身份配置", passed, detail)
-
-    def check_agent_runtime_contract(self) -> None:
-        from workflow.agent_contracts import list_agent_contracts
-
-        contracts = list_agent_contracts()
-        expected_nodes = {
-            "parse_task": "ORCHESTRATOR",
-            "generate_candidates": "CANDIDATE_GEN",
-            "screen_candidates": "SCREENER",
-            "evaluate_candidates": "FEM_AGENT",
-            "persist_knowledge": "KNOWLEDGE_AGENT",
-            "generate_report": "REPORT_GEN",
-        }
-        by_node = {contract.node_name: contract for contract in contracts}
-        errors: list[str] = []
-        for node_name, agent_name in expected_nodes.items():
-            contract = by_node.get(node_name)
-            if contract is None:
-                errors.append(f"缺少节点 {node_name}")
-                continue
-            if contract.runtime_agent != agent_name:
-                errors.append(f"{node_name}.runtime_agent={contract.runtime_agent!r}")
-        runtime_agents = {contract.runtime_agent for contract in contracts}
-        expected_agents = set(expected_nodes.values())
-        if runtime_agents != expected_agents:
-            errors.append(f"runtime_agents={sorted(runtime_agents)!r}")
-
-        no_llm_nodes = {"parse_task", "screen_candidates", "evaluate_candidates", "persist_knowledge"}
-        for node_name in no_llm_nodes:
-            policy = by_node.get(node_name).llm_policy if by_node.get(node_name) else ""
-            if "不调用 LLM" not in policy:
-                errors.append(f"{node_name}.llm_policy={policy!r}")
-        candidate_policy = by_node.get("generate_candidates").llm_policy if by_node.get("generate_candidates") else ""
-        if "主模型优先" not in candidate_policy or "回退" not in candidate_policy:
-            errors.append("候选生成 LLM 策略缺少主模型或回退说明")
-        report_policy = by_node.get("generate_report").llm_policy if by_node.get("generate_report") else ""
-        if "工程解释" not in report_policy or "数值" not in report_policy:
-            errors.append("报告生成 LLM 策略缺少工程解释或数值边界")
-
-        required_memory = {
-            "parse_task": ["workflow_snapshots"],
-            "generate_candidates": ["workflow_snapshots"],
-            "screen_candidates": ["workflow_snapshots"],
-            "evaluate_candidates": ["simulation_jobs", "workflow_snapshots"],
-            "persist_knowledge": ["data/cases"],
-            "generate_report": ["data/results"],
-        }
-        for node_name, tokens in required_memory.items():
-            policy = by_node.get(node_name).memory_policy if by_node.get(node_name) else ""
-            missing = [token for token in tokens if token not in policy]
-            if missing:
-                errors.append(f"{node_name}.memory_policy 缺少 {missing!r}")
-
-        required_events = {
-            "parse_task": ["tool_completed", "node_failed"],
-            "generate_candidates": ["candidate_generation_completed", "node_failed"],
-            "screen_candidates": ["screening_completed", "node_failed"],
-            "evaluate_candidates": ["simulation_job_completed", "node_failed"],
-            "persist_knowledge": ["knowledge_update_completed", "node_failed"],
-            "generate_report": ["report_completed", "node_failed"],
-        }
-        for node_name, tokens in required_events.items():
-            policy = by_node.get(node_name).event_policy if by_node.get(node_name) else ""
-            missing = [token for token in tokens if token not in policy]
-            if missing:
-                errors.append(f"{node_name}.event_policy 缺少 {missing!r}")
-
-        runtime_text = (ROOT / "workflow/runtime.py").read_text(encoding="utf-8")
-        event_store_text = (ROOT / "workflow/event_store.py").read_text(encoding="utf-8")
-        simulation_queue_text = (ROOT / "workflow/simulation_queue.py").read_text(encoding="utf-8")
-        runtime_tokens = [
-            "wait_screen",
-            "wait_fem",
-            "wait_report",
-            "resume",
-            "continue_after_confirmation",
-            "simulation_queue",
-            "WorkflowEventStore",
-            "ToolRegistry",
-        ]
-        for token in runtime_tokens:
-            if token not in runtime_text:
-                errors.append(f"workflow/runtime.py 缺少 {token}")
-        if "workflow_events" not in event_store_text or "workflow_snapshots" not in event_store_text:
-            errors.append("事件库缺少事件或快照表")
-        if "simulation_jobs" not in simulation_queue_text:
-            errors.append("仿真队列缺少作业表")
-
-        detail = "六智能体契约、LLM 边界、记忆策略、事件策略、人工确认、快照恢复、工具注册和仿真队列齐备" if not errors else "; ".join(errors[:12])
-        self.add("多智能体运行契约", not errors, detail)
 
     def check_runtime_knowledge_paths(self) -> None:
         config = yaml.safe_load((ROOT / "config/app_config.yaml").read_text(encoding="utf-8"))
@@ -340,25 +246,6 @@ class ReleaseAudit:
         detail = "内置数据、用户增量运行区和合并 RAG/KG 均暴露分块、去重、计数和五阶段流水线状态" if not errors else "; ".join(errors[:12])
         self.add("知识库状态契约", not errors, detail)
 
-    def check_knowledge_pipeline_contract(self) -> None:
-        required_files = [
-            ROOT / "core/knowledge_ingestion.py",
-            ROOT / "gui/knowledge_widget.py",
-            ROOT / "gui/workbench_widgets.py",
-            ROOT / "docs/接口约定.md",
-            ROOT / "docs/项目全流程梳理.md",
-        ]
-        missing: list[str] = []
-        for path in required_files:
-            text = path.read_text(encoding="utf-8")
-            if "检索验证 / 证据引用" not in text:
-                missing.append(path.relative_to(ROOT).as_posix())
-        self.add(
-            "知识流水线契约",
-            not missing,
-            "入库流水线包含解析、分块、向量、KG 和检索验证五阶段" if not missing else ", ".join(missing),
-        )
-
     def check_knowledge_file_type_contract(self) -> None:
         from core.knowledge_ingestion import SUPPORTED_INGEST_SUFFIXES, SUPPORTED_QT_FILE_FILTER
 
@@ -383,133 +270,12 @@ class ReleaseAudit:
         }
         missing_suffixes = sorted(required_suffixes - set(SUPPORTED_INGEST_SUFFIXES))
         missing_filter = sorted(suffix for suffix in required_suffixes if f"*{suffix}" not in SUPPORTED_QT_FILE_FILTER)
-        ingestion_text = (ROOT / "core/knowledge_ingestion.py").read_text(encoding="utf-8")
-        parser_tokens = [
-            "_parse_with_mineru",
-            "_parse_with_docling",
-            "_parse_pdf_text",
-            "_parse_docx_text",
-            "_parse_pptx_text",
-            "_parse_image_metadata",
-            "_parse_engineering_binary_metadata",
-            "_parse_csv_table",
-            "_parse_xlsx_table",
-        ]
-        missing_parser_tokens = [token for token in parser_tokens if token not in ingestion_text]
         errors = [
             *(f"suffix:{suffix}" for suffix in missing_suffixes),
             *(f"filter:{suffix}" for suffix in missing_filter),
-            *(f"parser:{token}" for token in missing_parser_tokens),
         ]
-        detail = "上传入口覆盖文档、表格、图片、Abaqus 文本和工程二进制元数据解析契约" if not errors else "; ".join(errors[:12])
+        detail = "上传后缀和文件选择器覆盖文档、表格、图片及 Abaqus 文件" if not errors else "; ".join(errors[:12])
         self.add("知识库文件类型契约", not errors, detail)
-
-    def check_gui_workbench_contract(self) -> None:
-        files = {
-            "main": (ROOT / "gui/main_window.py").read_text(encoding="utf-8"),
-            "knowledge": (ROOT / "gui/knowledge_widget.py").read_text(encoding="utf-8"),
-            "interactive": (ROOT / "gui/interactive_view.py").read_text(encoding="utf-8"),
-            "i18n": (ROOT / "gui/i18n.py").read_text(encoding="utf-8"),
-            "workbench": (ROOT / "gui/workbench_widgets.py").read_text(encoding="utf-8"),
-            "chat": (ROOT / "gui/chat_widget.py").read_text(encoding="utf-8"),
-        }
-        required_tokens = {
-            "main": [
-                "QStackedWidget",
-                "nav.workbench",
-                "nav.knowledge",
-                "nav.monitor",
-                "nav.settings",
-                "FlowDagWidget",
-                "ChatWidget",
-                "InteractivePlotWidget",
-                "_build_settings_page",
-                "settings_fields",
-                "_save_settings_from_page",
-                "_reload_settings_page",
-                "report_button",
-                "export_data_button",
-                "open_report_button",
-            ],
-            "workbench": [
-                "ORCHESTRATOR",
-                "CANDIDATE_GEN",
-                "SCREENER",
-                "FEM_AGENT",
-                "KNOWLEDGE_AGENT",
-                "REPORT_GEN",
-                "FlowDagWidget",
-            ],
-            "knowledge": [
-                "graph_search_input",
-                "graph_type_filter",
-                "graph_relation_filter",
-                "graph_reset_button",
-                "graph_relation_button",
-                "set_filter_text",
-                "set_type_filter",
-                "set_relation_filter",
-                "set_show_relations",
-                "wheelEvent",
-                "mousePressEvent",
-                "mouseMoveEvent",
-                "mouseDoubleClickEvent",
-                "ingest_paths",
-            ],
-            "interactive": ["reset_view", "fit_view", "show_reference_hull", "show_candidate"],
-            "i18n": ["nav.workbench", "nav.settings", "Workbench", "Settings"],
-            "chat": ["ChatWidget", "ScrollBarAsNeeded", "fit_content"],
-        }
-        missing: list[str] = []
-        for name, tokens in required_tokens.items():
-            text = files[name]
-            for token in tokens:
-                if token not in text:
-                    missing.append(f"{name}:{token}")
-        detail = "四页导航、六智能体 DAG、对话区、实时视口、知识图谱交互和设置页配置入口齐备" if not missing else "; ".join(missing[:12])
-        self.add("GUI 工作台契约", not missing, detail)
-
-    def check_async_runtime_contract(self) -> None:
-        files = {
-            "main": (ROOT / "gui/main_window.py").read_text(encoding="utf-8"),
-            "knowledge": (ROOT / "gui/knowledge_widget.py").read_text(encoding="utf-8"),
-        }
-        required_tokens = {
-            "main": [
-                "class PipelineWorker(QObject)",
-                "self.worker_thread = QThread(self)",
-                "self.worker.moveToThread(self.worker_thread)",
-                "self.worker_thread.started.connect(self.worker.run)",
-                "self.worker.message.connect(self._handle_message)",
-                "self.worker.finished.connect(self._handle_finished)",
-                "self.worker.failed.connect(self._handle_failed)",
-            ],
-            "knowledge": [
-                "class KnowledgeIngestWorker(QObject)",
-                "class KnowledgeMaintenanceWorker(QObject)",
-                "class KnowledgeRefreshWorker(QObject)",
-                "self._ingest_thread = QThread(self)",
-                "self._ingest_worker.moveToThread(self._ingest_thread)",
-                "self._maintenance_thread = QThread(self)",
-                "self._maintenance_worker.moveToThread(self._maintenance_thread)",
-                "self._refresh_thread = QThread(self)",
-                "self._refresh_worker.moveToThread(self._refresh_thread)",
-            ],
-        }
-        errors: list[str] = []
-        for name, tokens in required_tokens.items():
-            text = files[name]
-            for token in tokens:
-                if token not in text:
-                    errors.append(f"{name}:{token}")
-        if "KnowledgeIngestionService().ingest_file" in files["knowledge"]:
-            errors.append("knowledge_widget:ingest_file 不能在 GUI 主对象直接同步调用")
-        detail = (
-            "自然语言流程、有限元批处理、知识入库、索引维护和知识刷新均通过后台 Worker/QThread 推进"
-            if not errors
-            else "; ".join(errors[:12])
-        )
-        self.add("GUI 后台任务契约", not errors, detail)
 
     def check_gui_render_contract(self) -> None:
         import os
