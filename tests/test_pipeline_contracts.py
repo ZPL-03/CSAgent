@@ -340,6 +340,7 @@ def test_llm_backend_uses_fallback_backend_after_primary_unusable_response(monke
                 return Response()
 
             Message.content = "fallback-ok"
+            Choice.finish_reason = "stop"
             return Response()
 
     class FakeChat:
@@ -380,7 +381,7 @@ def test_llm_backend_uses_fallback_backend_after_primary_unusable_response(monke
             "json_mode": False,
             "max_tokens": 16,
             "status": "success",
-            "finish_reason": None,
+            "finish_reason": "stop",
             "content_chars": 11,
             "latency_ms": backend.last_call_trace[1]["latency_ms"],
         },
@@ -1367,10 +1368,6 @@ def test_final_recommendation_obeys_objective_and_requires_complete_evidence(mon
                                                  "expected_section_points": 8, "incomplete_element_positions": 0}
         results.append(result)
     agent = ReportGenAgent()
-    payload = agent._build_llm_explanation_payload(agent._build_structured_summary(task, results, candidates))
-    with pytest.raises(ValueError, match="重复执行"):
-        agent._validate_llm_engineering_text("建议对入选候选优先开展真实有限元复核。", payload)
-    agent._validate_llm_engineering_text("建议开展网格加密后的独立有限元复核。", payload)
     report = agent.run({"task": task, "candidates": candidates, "results": results,
                         "output_dir": str(tmp_path / "reports")})
     assert f"- 推荐：{expected}" in report["content"]
@@ -1389,9 +1386,9 @@ def test_report_uses_llm_only_for_grounded_engineering_explanation(monkeypatch):
         max_tokens = 1800
 
         def chat(self, system_prompt, user_prompt, max_tokens_override=None, json_mode=False, **_kwargs):
-            assert "不得新增候选编号、数值" in system_prompt
+            assert "field_semantics" in system_prompt
             assert "制造工艺适配性" in user_prompt
-            assert "只做定性解释" in user_prompt
+            assert "结构化事实 JSON" in user_prompt
             assert json_mode is False
             return (
                 "### 制造工艺适配性\n"
@@ -1507,15 +1504,6 @@ def test_report_does_not_treat_surface_density_unit_as_material_code(monkeypatch
         agent._validate_llm_engineering_text("M40J 材料需要复核。", payload)
 
 
-def test_report_line_cleanup_preserves_measurements_without_placeholders(monkeypatch):
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    agent = ReportGenAgent()
-    text = "- 检查 15 MPa 工况。\n- 不引入加强筋。"
-    cleaned = agent._deterministic_clean_llm_engineering_text(text, {})
-    assert cleaned == "- 检查 15 MPa 工况。"
-    assert "已记录指标" not in cleaned
-
-
 def test_report_respects_controlled_termination(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     agent = ReportGenAgent()
@@ -1561,24 +1549,20 @@ def test_report_llm_context_preserves_numeric_facts_and_completed_analysis_scope
     assert payload["results"][0]["riks_increment_count"] == 221
     assert payload["results"][0]["riks_limit_point_confirmed"] is False
     assert payload["results"][0]["ultimate_pressure_MPa"] is None
-    assert payload["interpretation_constraints"]
+    assert payload["field_semantics"]["riks_lpf_max"] == "Riks 路径的最大载荷比例系数。"
 
 
-def test_report_postprocess_removes_duplicate_heading_and_mixed_verdict_text(monkeypatch):
+def test_report_postprocess_preserves_content_and_normalizes_headings(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     agent = ReportGenAgent()
-    malformed_verdict = "Ver" + "\uff44" + "Dict"
-
     cleaned = agent._postprocess_engineering_explanation(
         "### 工程解释与制造建议\n"
-        "### 有限元结果解读\n"
-        f"- {malformed_verdict}为通过，说明结论由结构化结果给出。"
+        "## 有限元结果解读\n"
+        "- 压力为 ３０ MPa，verdict 为通过。"
     )
 
     assert "工程解释与制造建议" not in cleaned
-    assert "Verdict" not in cleaned
-    assert malformed_verdict not in cleaned
-    assert "结论为通过" in cleaned
+    assert cleaned == "### 有限元结果解读\n- 压力为 30 MPa,verdict 为通过。"
 
 
 def test_report_strips_reasoning_block_before_validation(monkeypatch):
@@ -1668,7 +1652,7 @@ def test_report_emits_llm_trace_when_engineering_explanation_fails(monkeypatch):
     assert "deepseek-v4-pro" in str(trace_payload["trace"])
 
 
-def test_report_cleans_llm_explanation_before_using_it(monkeypatch):
+def test_report_rejects_unsupported_explanation_without_rewrite(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task, results, candidates = _report_sample()
     agent = ReportGenAgent()
@@ -1681,24 +1665,18 @@ def test_report_cleans_llm_explanation_before_using_it(monkeypatch):
 
         def chat(self, system_prompt, user_prompt, max_tokens_override=None, json_mode=False, **_kwargs):
             self.calls += 1
-            if self.calls == 1:
-                return "### 缺陷控制\n- 建议控制到 0.3 mm，并可考虑 T800 替代材料。"
-            assert "报告解释文本约束清理器" in system_prompt
-            return (
-                "### 缺陷与质量控制\n"
-                "- 建议围绕圆度、铺层角偏差和分层风险开展质量控制，不引入额外阈值或替代材料。"
-            )
+            return "### 缺陷控制\n- 建议控制到 0.3 mm，并可考虑 T800 替代材料。"
 
     backend = ControlledBackend()
     agent.llm_backend = backend
 
     markdown = agent._render_markdown(task, results, candidates)
 
-    assert "额外阈值或替代材料" in markdown
+    assert "### 缺陷与质量控制" in markdown
     assert "0.3 mm" not in markdown
     assert "T800" not in markdown
-    assert backend.calls == 2
-    assert agent._last_llm_explanation_used is True
+    assert backend.calls == 1
+    assert agent._last_llm_explanation_used is False
 
 
 def test_report_numeric_validation_accepts_rounding_at_display_precision(monkeypatch):

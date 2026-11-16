@@ -268,26 +268,17 @@ class ReportGenAgent(BaseAgent):
                 "imperfection_ratios": sorted({item["imperfection_ratio"] for item in summary.get("all_candidates", [])
                                                if item.get("imperfection_ratio") is not None}),
             },
-            "interpretation_constraints": [
-                "数值由报告模板输出；解释不复述数值不代表原始数据缺失。",
-                "只有缺失或为null的字段才能描述为未提供，不得把已完成的校核描述为尚未执行。",
-                "目标压力通过不等于已确认极限承载力；Riks未确认极限点时不能用线性屈曲压力替代。",
-                "各候选铺层分别读取，不得把一份候选的外侧直角层推广到所有候选。",
-                "没有试验或性能字段支持时，不比较材料韧性、固化残余应力和层间损伤性能。",
-                "progressive_damage_complete为true表示容量分析包含场变量损伤退化，不能写成没有渐进损伤。",
-                "damage_state_maxima只表示局部触发标志的最大值，不能据此断言整体损伤已完全发展。",
-                "riks_lpf_max是载荷比例系数，不是增量步数或增量大小。",
-                "目标压力的弹性起始失效检查与含损伤的Riks容量分析属于不同阶段，不得混淆范围。",
-                "post_peak_drop_20_percent表示峰后受控终止，不是异常中断，也不能说作业没有终止或全部正常结束。",
-                "symmetric或balanced为false表示该属性不满足，不表示铺层或属性数据缺失。",
-                "all_candidates包含全部方案，screened_candidates仅包含预筛入选方案；未求解方案不能写成有限元通过方案。",
-                "铺层模板名称不决定对称性，必须读取各候选的symmetric与balanced布尔属性。",
-                "制造工艺尚未指定；只能提出工艺评审建议，不能写成候选已经采用某种工艺。",
-                "面密度和承载力分别描述，不在没有效率定义或试验时推断质量效率、刚度优劣或缺陷可接受性。",
-                "未显式建模的范围为金属封头、法兰、连接及层间分层；试验认证未执行。",
-                "初始几何缺陷条件已提供；不能把未指定制造验收阈值写成未提供分析缺陷比或幅值。",
-                "满足工作压力不等于满足另一个未指定的安全系数或安全裕度要求。",
-            ],
+            "field_semantics": {
+                "candidate_sets": "all_candidates 为全部候选，screened_candidates 为预筛入选候选，results 为实际校核结果。",
+                "layup": "symmetric 和 balanced 是逐层核查结果；false 表示属性不满足，null 表示没有记录。",
+                "pressure_checks": "工作压力和目标压力对应弹性起始失效检查；极限承载力取自已确认极限点的含损伤 Riks 分析。",
+                "progressive_damage_complete": "容量分析是否包含场变量损伤退化。",
+                "damage_state_maxima": "局部损伤触发标志的最大值，不表示整体损伤程度。",
+                "riks_lpf_max": "Riks 路径的最大载荷比例系数。",
+                "post_peak_drop_20_percent": "峰后受控终止状态。",
+                "imperfection_ratio": "分析使用的初始几何缺陷比，制造验收阈值需另行给定。",
+            },
+            "analysis_scope": "复合材料圆柱壳数值模型，未建模金属封头、法兰连接和层间分层；制造工艺和试验认证不在求解范围内。",
         }
 
     def _numeric_tokens(self, text: str) -> List[float]:
@@ -336,7 +327,7 @@ class ReportGenAgent(BaseAgent):
     def _validate_llm_engineering_text(self, text: str, payload: Dict[str, Any]) -> None:
         if "<think" in text.lower() or "</think>" in text.lower():
             raise ValueError("LLM 报告解释包含推理标签")
-        if any(term in text for term in ["结构化结果", "对应工程量", "__MAT_CODE"]):
+        if any(term in text for term in ["对应工程量", "__MAT_CODE"]):
             raise ValueError("LLM 报告解释包含占位式表达")
         if not self._llm_text_uses_only_known_numbers(text, payload):
             raise ValueError("LLM 报告解释包含结构化数据之外的数值")
@@ -370,14 +361,6 @@ class ReportGenAgent(BaseAgent):
                for result in payload.get("results") or []):
             if "未报告校核终止" in text or "作业均正常完成" in text:
                 raise ValueError("峰后受控终止不能描述为作业未终止或均正常完成")
-        results = payload.get("results") or []
-        if results and all(not complete_case_result_errors(result) for result in results):
-            for sentence in re.split(r"[。；\n]", text):
-                if any(term in sentence for term in ("网格", "敏感性", "独立", "交叉", "加密", "不同工况")):
-                    continue
-                if re.search(r"(?:建议|需要|应|必须|优先).{0,32}(?:开展|进行|执行|完成).{0,12}"
-                             r"(?:有限元|FEM)(?:复核|校核|求解|分析)", sentence, flags=re.IGNORECASE):
-                    raise ValueError("有限元校核已有完整证据，不能建议重复执行相同校核")
 
     def _normalize_llm_math(self, text: str) -> str:
         from pylatexenc.latex2text import LatexNodes2Text
@@ -441,78 +424,21 @@ class ReportGenAgent(BaseAgent):
             cleaned_lines.append(raw_line)
         return "\n".join(cleaned_lines).strip()
 
-    def _deterministic_clean_llm_engineering_text(self, text: str, payload: Dict[str, Any]) -> str:
-        text = self._strip_llm_reasoning_blocks(text)
-        known_codes = self._material_codes(json.dumps(payload, ensure_ascii=False, default=str))
-        forbidden_structure_terms = ["加强筋", "加筋", "夹芯", "金属衬套"]
-        cleaned_lines: List[str] = []
-        for raw_line in text.splitlines():
-            line = raw_line.strip()
-            if not line:
-                cleaned_lines.append("")
-                continue
-            if any(term in line for term in forbidden_structure_terms):
-                continue
-            line_codes = self._material_codes(line)
-            if not line_codes.issubset(known_codes):
-                continue
-            line = re.sub(r"^\s*[0-9]+[.、]\s*", "", line)
-            cleaned_lines.append(line)
-        cleaned = "\n".join(cleaned_lines).strip()
-        return cleaned
-
-    def _sanitize_llm_engineering_text(self, text: str, payload: Dict[str, Any]) -> str:
-        if self.llm_backend is None:
-            return text
-        known_material_codes = sorted(self._material_codes(json.dumps(payload, ensure_ascii=False, default=str)))
-        system_prompt = (
-            "你是报告解释文本约束清理器。只改写用户给出的中文说明，不新增事实。"
-            "删除所有数字、单位、阈值、候选编号、排序编号、替代材料牌号和具体设备参数；"
-            "可以保留允许材料牌号列表中的材料牌号。"
-            "优化建议只保留材料、铺层、厚度、缺陷质量控制、有限元和试验复核，不保留新增结构型式建议。"
-            "保留制造工艺适配性、铺层/材料原因、缺陷与质量控制、有限元结果解读、后续验证建议五类定性内容。"
-            "输出 Markdown，只使用三级标题和短横线项目；不要输出表格、JSON、编号列表或代码块。"
-            "必须按结构化事实纠正范围和缺失性陈述；已完成的场变量损伤分析不能说成未提供或未执行。"
-            "不输出 LaTeX 数学标记。"
-            "解释只给出有条件的复核建议，不断言制造工艺已确定，也不推断铺层对称性、质量效率或刚度优劣。"
-        )
-        user_prompt = (
-            f"允许保留的材料牌号：{', '.join(known_material_codes) if known_material_codes else '无'}\n\n"
-            f"结构化事实 JSON：{json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
-            "请清理以下报告解释文本：\n"
-            f"{text}"
-        )
-        answer = self.llm_backend.chat(
-            system_prompt,
-            user_prompt,
-            max_tokens_override=min(max(int(self.llm_backend.max_tokens), 1800), 2400),
-            json_mode=False,
-        ).strip()
-        self.emit_llm_trace(self.llm_backend, {"purpose": "report_explanation_sanitize"})
-        return self._normalize_llm_math(self._strip_llm_reasoning_blocks(answer))
-
     def _render_llm_engineering_explanation(self, summary: Dict[str, Any]) -> str:
         if self.llm_backend is None:
             return ""
         payload = self._build_llm_explanation_payload(summary)
         system_prompt = (
             "你是复合材料外压圆柱耐压壳设计报告解释助手。"
-            "只能基于用户提供的 JSON 结构化事实撰写中文工程解释。"
-            "不得新增候选编号、数值、材料名、工况或有限元结论；不得改写 verdict、压力、面密度和排序。"
-            "可以从复合材料圆柱壳常用制造评审角度讨论纤维缠绕、预浸带铺放、固化、圆度控制和无损检测，"
-            "但不能把 JSON 中没有的设备、厂家、具体张力、固化温度、检验阈值或替代材料牌号写成事实。"
-            "优化建议限定在当前候选变量域内，只讨论材料、铺层、厚度、缺陷质量控制、有限元和试验复核，"
-            "不要引入加强筋、夹芯、金属衬套或其他未在输入中出现的结构型式。"
-            "数值事实已经由报告模板输出，解释段禁止出现数字、角度、单位、阈值和候选编号，只做定性解释。"
-            "解释只给出有条件的制造和验证建议，不断言候选已经采用某种工艺，"
-            "不从模板名称推断对称性，不推断质量效率、初始刚度优劣或制造缺陷已被验收。"
-            "必须遵循 interpretation_constraints；不复述数据不代表缺少数据，不重复建议执行已经完成的相同校核。"
-            "输出 Markdown，只使用三级标题和短横线项目；不要输出表格、JSON、编号列表或代码块。"
+            "依据输入中的任务、候选和校核结果撰写中文工程说明，字段含义见 field_semantics。"
+            "数值、材料、工况、候选编号和校核结论以输入为准；引用数值时保留单位和对应对象。"
+            "区分计算结果、机理解释和建议，涉及制造工艺、材料性能或参数影响的推断须说明依据。"
+            "围绕候选的材料、铺层、几何、缺陷条件讨论，结合 analysis_scope 说明验证范围。"
+            "用 Markdown 分段，重点解释设计取舍和结果，不重复报告中的完整数据表。"
         )
         user_prompt = (
             "请生成报告中的“工程解释与制造建议”段落，必须覆盖：制造工艺适配性、铺层/材料原因、缺陷与质量控制、"
-            "有限元结果解读、后续验证建议。只做定性解释，不要复述 JSON 中的数字，不要给出新的数字、阈值、候选编号或替代材料牌号；"
-            "如果结构化数据缺少某项，请明确说明当前结构化数据未提供。\n\n"
+            "有限元结果解读、后续验证建议。建议应对应输入中的具体问题；缺少判断依据时说明所需信息。\n\n"
             f"结构化事实 JSON：\n{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}"
         )
         try:
@@ -526,33 +452,21 @@ class ReportGenAgent(BaseAgent):
             self.emit_llm_trace(self.llm_backend, {"purpose": "report_engineering_explanation", "failed": True})
             raise
         self.emit_llm_trace(self.llm_backend, {"purpose": "report_engineering_explanation"})
-        if not answer:
-            return ""
         answer = self._normalize_llm_math(self._strip_llm_reasoning_blocks(answer))
+        answer = self._postprocess_engineering_explanation(answer)
         if not answer:
-            return ""
-        try:
-            self._validate_llm_engineering_text(answer, payload)
-        except ValueError:
-            answer = self._sanitize_llm_engineering_text(answer, payload)
-            try:
-                self._validate_llm_engineering_text(answer, payload)
-            except ValueError:
-                answer = self._deterministic_clean_llm_engineering_text(answer, payload)
-                self._validate_llm_engineering_text(answer, payload)
-        return self._postprocess_engineering_explanation(answer)
+            raise ValueError("LLM 报告解释为空")
+        self._validate_llm_engineering_text(answer, payload)
+        return answer
 
     def _postprocess_engineering_explanation(self, text: str) -> str:
-        """清理报告解释段的标题层级和数值占位语，避免与模板标题重复。"""
-        text = re.sub(r"(?is)<think>.*?</think>", "", str(text or ""))
+        """统一标题层级和字符宽度，保留正文内容供事实校验。"""
         cleaned_lines: List[str] = []
         for raw_line in text.splitlines():
             line = unicodedata.normalize("NFKC", raw_line.rstrip())
             stripped = line.strip()
             if not stripped:
                 cleaned_lines.append("")
-                continue
-            if stripped.lower().startswith("<think") or stripped.lower().endswith("</think>"):
                 continue
             if re.fullmatch(r"#{1,6}\s*工程解释与制造建议", stripped) or stripped == "工程解释与制造建议":
                 continue
@@ -561,10 +475,6 @@ class ReportGenAgent(BaseAgent):
                 line = f"### {stripped}"
             elif re.match(r"^\s*\d+[.、]\s+", stripped):
                 line = "- " + re.sub(r"^\s*\d+[.、]\s+", "", stripped)
-            line = re.sub(r"[Vv]erd[Dd]?ict", "结论", line)
-            line = line.replace("为对应工程量", "由已记录指标给出")
-            line = line.replace("为结构化结果中的对应工程量", "由已记录指标给出")
-            line = line.replace("对应工程量", "已记录指标")
             cleaned_lines.append(line)
         cleaned = "\n".join(cleaned_lines).strip()
         while "\n\n\n" in cleaned:

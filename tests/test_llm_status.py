@@ -120,7 +120,14 @@ def test_probe_llm_backends_reports_live_status_without_secrets(monkeypatch) -> 
     assert "sk-" + "1234567890abcdef" not in text
 
 
-def test_llm_backend_records_reasoning_budget_empty_content(monkeypatch) -> None:
+@pytest.mark.parametrize("content,finish_reason,expected", [
+    ("", "length", "推理 token 预算耗尽"),
+    ("报告正文被截断", "length", "未完整结束"),
+    ("部分正文", "content_filter", "未完整结束"),
+    ("正文", None, "未完整结束"),
+])
+def test_llm_backend_rejects_incomplete_answers(monkeypatch, content, finish_reason, expected) -> None:
+    from types import SimpleNamespace
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "0")
     backend = LLMBackend(
         {
@@ -141,18 +148,10 @@ def test_llm_backend_records_reasoning_budget_empty_content(monkeypatch) -> None
 
     class FakeCompletions:
         def create(self, **payload):
-            class Message:
-                content = ""
-                reasoning_content = "先进行推理但预算耗尽"
-
-            class Choice:
-                message = Message()
-                finish_reason = "length"
-
-            class Response:
-                choices = [Choice()]
-
-            return Response()
+            return SimpleNamespace(choices=[SimpleNamespace(
+                message=SimpleNamespace(content=content, reasoning_content="内部推理"),
+                finish_reason=finish_reason,
+            )])
 
     class FakeChat:
         completions = FakeCompletions()
@@ -163,9 +162,10 @@ def test_llm_backend_records_reasoning_budget_empty_content(monkeypatch) -> None
 
     backend._openai_cls = FakeOpenAI
 
-    with pytest.raises(LLMCallError, match="推理 token 预算耗尽"):
+    with pytest.raises(LLMCallError, match=expected):
         backend.chat("system", "user", max_tokens_override=16)
 
     assert backend.last_call_trace[0]["reasoning_chars"] > 0
-    assert backend.last_call_trace[0]["finish_reason"] == "length"
+    assert backend.last_call_trace[0]["finish_reason"] == finish_reason
+    assert backend.last_call_trace[0]["status"] == "failed"
     assert "reasoning-key" not in str(backend.last_call_trace)
