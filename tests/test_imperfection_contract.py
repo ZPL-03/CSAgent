@@ -120,17 +120,14 @@ def test_fixed_defect_reaches_candidates_surrogate_fem_and_case_record(monkeypat
     assert promoted["geometry"]["imperfection_ratio"] == defect
     assert imperfection_amplitude_mm(promoted["geometry"]) == pytest.approx(defect * 100)
     fem = FEMAgent()
-    adjusted = fem.apply_adjustment(promoted, "convergence_fail", 0)
-    assert adjusted["geometry"]["imperfection_ratio"] == defect
-    assert adjusted["parent_design_revision_id"] == promoted["design_revision_id"]
-    annotated = fem._annotate_result(adjusted, {"status": "failed", "error_type": "convergence_fail"})
+    annotated = fem._annotate_result(promoted, {"status": "failed", "error_type": "convergence_fail"})
     knowledge = object.__new__(KnowledgeAgent)
-    stored = knowledge._sanitize_design(adjusted)
+    stored = knowledge._sanitize_design(promoted)
     result = knowledge._sanitize_abaqus_results(annotated)
-    assert compute_design_revision_id(stored) == adjusted["design_revision_id"]
+    assert compute_design_revision_id(stored) == promoted["design_revision_id"]
     assert compute_design_revision_id(result["solved_design"]) == result["design_revision_id"]
     assert result["solved_design"]["geometry"]["imperfection_ratio"] == defect
-    assert ReportGenAgent()._compact_candidate_record(adjusted)["imperfection_ratio"] == defect
+    assert ReportGenAgent()._compact_candidate_record(promoted)["imperfection_ratio"] == defect
     report = ReportGenAgent()._render_markdown(task, [annotated], candidates)
     assert f"任务初始几何缺陷比：{defect}（比例，用户指定）" in report
     assert f"实际求解缺陷比：{defect}" in report

@@ -101,13 +101,10 @@ def test_new_fem_candidates_require_fixed_defect_before_reserving_ids(monkeypatc
 def test_result_annotation_preserves_actual_solver_design() -> None:
     candidate = _generated_candidate()
     agent = FEMAgent()
-    candidate["geometry"]["thickness_mm"] = 10.0
-    adjusted = agent.apply_adjustment(candidate, "convergence_fail", 1)
-    result = agent._annotate_result(adjusted, {"status": "failed"})
-    assert result["solved_design"]["geometry"] == adjusted["geometry"]
-    assert result["solved_design"]["layup"] == adjusted["layup"]
-    assert result["solved_design"]["design_revision_id"] == adjusted["design_revision_id"]
-    assert candidate["geometry"] != adjusted["geometry"]
+    result = agent._annotate_result(candidate, {"status": "failed"})
+    assert result["solved_design"]["geometry"] == candidate["geometry"]
+    assert result["solved_design"]["layup"] == candidate["layup"]
+    assert result["solved_design"]["design_revision_id"] == candidate["design_revision_id"]
 
 
 def test_missing_fem_fields_fail_closed_instead_of_using_defaults() -> None:
@@ -183,17 +180,32 @@ def test_ultimate_pressure_target_cannot_be_below_service_pressure() -> None:
         validate_fem_input_or_raise(candidate)
 
 
-def test_retry_design_change_creates_child_revision() -> None:
+@pytest.mark.parametrize("failure", ["mesh_error", "geometry_issue", "convergence_fail", "pressure_negative", "process_crash"])
+def test_solver_failure_preserves_submitted_design_without_resubmission(monkeypatch, failure) -> None:
     candidate = _generated_candidate()
+    candidate["candidate_id"] = "C1"
+    candidate["analysis"]["use_user_subroutine"] = False
+    candidate = attach_design_revision(candidate)
+    original = deepcopy(candidate)
     agent = FEMAgent()
+    calls = []
+    monkeypatch.setattr("agents.fem_agent.is_abaqus_available", lambda _: True)
 
-    adjusted = agent.apply_adjustment(candidate, "convergence_fail", 0)
+    def solve(submitted, result_path):
+        calls.append(deepcopy(submitted))
+        return agent._empty_result_payload(submitted, "failed", failure)
 
-    assert adjusted["geometry"]["imperfection_ratio"] == candidate["geometry"]["imperfection_ratio"]
-    assert adjusted["analysis"] != candidate["analysis"]
-    assert adjusted["design_revision_id"] != candidate["design_revision_id"]
-    assert adjusted["parent_design_revision_id"] == candidate["design_revision_id"]
-    assert validate_fem_input(adjusted) == []
+    monkeypatch.setattr(agent, "_run_real", solve)
+    result = agent.run(candidate)
+    assert len(calls) == 1
+    assert candidate == original
+    assert result["status"] == "failed"
+    assert result["retry_count"] == 0
+    assert result["error_type"] == failure
+    assert result["solved_design"]["geometry"] == original["geometry"]
+    assert result["solved_design"]["layup"] == original["layup"]
+    assert result["solved_design"]["analysis"] == calls[0]["analysis"]
+    assert validate_fem_input(calls[0]) == []
 
 
 def test_task_parser_converts_depth_and_uses_service_pressure_as_default_target() -> None:

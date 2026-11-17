@@ -2011,7 +2011,6 @@ def test_settings_page_persists_editable_runtime_configuration(monkeypatch, tmp_
             "user_subroutine": "",
             "use_user_subroutine": False,
             "job_timeout_seconds": 3600,
-            "max_retries": 3,
         },
         "pipeline": {
             "candidate_source_ratio": {"llm": 2, "case_transfer": 1, "doe": 1},

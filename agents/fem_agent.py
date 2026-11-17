@@ -21,7 +21,6 @@ from core.display import format_number
 from core.fem_input_contract import attach_design_revision, design_revision_payload, validate_fem_input_or_raise
 from core.io_utils import read_json, write_json
 from core.paths import ABAQUS_RUNS_DIR, ABAQUS_TEMPLATE_DIR, IO_DIR, ROOT_DIR, to_project_relative_path
-from core.pressure_hull_profile import expand_layup_for_fem
 from core.schema_validator import validate_or_raise
 from core.task_contract import describe_boundary_conditions, describe_load_conditions
 
@@ -43,16 +42,6 @@ class FEMAgent(BaseAgent):
         "user_subroutine_path",
         "material_strength_include",
     }
-    non_retryable_error_types = {
-        "limit_point_not_confirmed",
-        "progressive_damage_not_configured",
-        "invalid_fem_input",
-        "service_load_solver_failed",
-        "target_load_solver_failed",
-        "subroutine_compilation_failed",
-        "capacity_solver_failed",
-    }
-
     def __init__(self, progress_callback=None, config: Dict | None = None) -> None:
         super().__init__(progress_callback=progress_callback)
         self.config = config or load_app_config()
@@ -159,9 +148,9 @@ class FEMAgent(BaseAgent):
 
         error_type = str(result.get("error_type") or "failed")
         mapping = {
-            "mesh_error": "网格划分阶段出现异常，建议放宽网格尺寸后重试。",
+            "mesh_error": "网格划分失败，需根据网格诊断检查几何拓扑、单元质量与网格设置。",
             "geometry_issue": "几何装配阶段出现异常，建议检查半径、厚度和端部约束。",
-            "convergence_fail": "非线性或特征值求解未稳定收敛，建议增大厚度、降低缺陷幅值或细化增量控制。",
+            "convergence_fail": "求解未收敛，需核对求解日志、约束、接触、材料模型及增量设置。",
             "pressure_negative": "求得负压力特征值，通常意味着载荷方向或边界设置需要复核。",
             "limit_point_not_confirmed": "Riks 作业未在成功状态下形成明确后峰下降，观测最大 LPF 不能作为极限压力。",
             "progressive_damage_not_configured": "当前运行未启用可执行的渐进损伤模型，不能给出材料极限强度结论。",
@@ -203,39 +192,6 @@ class FEMAgent(BaseAgent):
         }
         annotated["diagnosis_summary"] = self._diagnosis_summary(annotated)
         return annotated
-
-    def apply_adjustment(self, candidate: Dict, failure_type: str, attempt: int) -> Dict:
-        adjusted = deepcopy(candidate)
-        parent_revision_id = str(candidate.get("design_revision_id") or "")
-        geometry = dict(adjusted["geometry"])
-        adjustment: Dict[str, object] = {"attempt": attempt + 1, "failure_type": failure_type}
-
-        if failure_type == "mesh_error":
-            current_mesh_size = float(candidate.get("analysis", {}).get("mesh_size_mm", 0.0))
-            adjusted.setdefault("analysis", {})
-            adjusted["analysis"]["mesh_size_mm"] = round(max(current_mesh_size * 1.15, 6.0) if current_mesh_size else 8.0, 3)
-            adjustment["strategy"] = "增大壳体网格尺寸以绕开局部畸变"
-        elif failure_type == "geometry_issue":
-            geometry["thickness_mm"] = round(min(max(geometry["thickness_mm"] + 0.5, 5.0), 20.0), 3)
-            adjustment["strategy"] = "提高壁厚"
-        elif failure_type == "convergence_fail":
-            adjusted.setdefault("analysis", {})
-            adjusted["analysis"]["buckling_modes"] = int(adjusted["analysis"].get("buckling_modes", 8)) + 4
-            geometry["thickness_mm"] = round(min(geometry["thickness_mm"] + 0.8, 20.0), 3)
-            adjustment["strategy"] = "增加特征值搜索规模并提高壁厚"
-        elif failure_type == "pressure_negative":
-            adjusted.setdefault("analysis", {})
-            adjusted["analysis"]["buckling_modes"] = max(int(adjusted["analysis"].get("buckling_modes", 8)), 12) + 4
-            adjustment["strategy"] = "增加屈曲模态搜索数量并复核压力方向"
-        else:
-            adjustment["strategy"] = "清理临时文件后重试"
-
-        adjusted["geometry"] = geometry
-        adjusted["layup"] = expand_layup_for_fem(adjusted.get("layup"), geometry)
-        adjusted["last_adjustment"] = adjustment
-        adjusted = attach_design_revision(adjusted, parent_revision_id=parent_revision_id)
-        validate_fem_input_or_raise(adjusted)
-        return adjusted
 
     def _empty_result_payload(self, candidate: Dict, status: str, error_type: str | None = None) -> Dict:
         candidate_id = candidate["candidate_id"]
@@ -300,7 +256,7 @@ class FEMAgent(BaseAgent):
         result = self._annotate_result(
             candidate,
             {
-                **self._empty_result_payload(candidate, "max_retries_exceeded", "abaqus_unavailable"),
+                **self._empty_result_payload(candidate, "failed", "abaqus_unavailable"),
                 "error_log": f"未找到 ABAQUS 命令：{self.abaqus_config['command']}",
             },
         )
@@ -311,7 +267,6 @@ class FEMAgent(BaseAgent):
     def run(self, candidate: Dict) -> Dict:
         validate_or_raise("candidate.schema.json", candidate)
         validate_fem_input_or_raise(candidate)
-        retries = int(self.abaqus_config["max_retries"])
         current = deepcopy(candidate)
         current.setdefault("analysis", {})
         current["analysis"].setdefault("use_user_subroutine", bool(self.abaqus_config.get("use_user_subroutine", False)))
@@ -331,35 +286,20 @@ class FEMAgent(BaseAgent):
             self.emit(f"{candidate_id} 未找到 ABAQUS 命令，真实有限元求解无法启动")
             return self._abaqus_unavailable_result(current)
 
-        for attempt in range(retries):
-            if result_path.exists():
-                result_path.unlink()
-
-            write_json(self._input_path(candidate_id), current)
-            write_json(run_dir / "candidate_input.json", current)
-            self.emit(f"{candidate_id} 第 {attempt + 1} 次真实 ABAQUS 求解")
-            result = self._annotate_result(current, self._run_real(current, result_path))
-            result["retry_count"] = attempt
-            failure_type = result.get("error_type") or "failed"
-            if result["status"] != "success":
-                detail = result.get("error_log")
-                result["error_log"] = dict(detail) if isinstance(detail, dict) else {"reason": detail}
-                result["error_log"]["solver_logs"] = solver_log_tails(run_dir, job_names)
-                if attempt == retries - 1 and failure_type not in self.non_retryable_error_types:
-                    result["status"] = "max_retries_exceeded"
-            validate_or_raise("abaqus_result.schema.json", result)
-            write_json(result_path, result)
-            cleanup_job_artifacts(run_dir, job_names)
-
-            if result["status"] == "success":
-                return result
-
-            self.emit(f"{candidate_id} 失败类型：{failure_type}")
-            if failure_type in self.non_retryable_error_types or attempt == retries - 1:
-                return result
-
-            current = self.apply_adjustment(current, failure_type, attempt)
-            strategy = current.get("last_adjustment", {}).get("strategy", "默认重试")
-            self.emit(f"{candidate_id} 准备重试，调整策略：{strategy}")
-
-        raise RuntimeError("FEM_AGENT 未按预期返回结果")
+        if result_path.exists():
+            result_path.unlink()
+        write_json(self._input_path(candidate_id), current)
+        write_json(run_dir / "candidate_input.json", current)
+        self.emit(f"{candidate_id} 开始 ABAQUS 求解")
+        result = self._annotate_result(current, self._run_real(current, result_path))
+        result["retry_count"] = 0
+        # 求解失败保留所提交的设计；诊断日志写入结果后再清理一次性工件。
+        if result["status"] != "success":
+            detail = result.get("error_log")
+            result["error_log"] = dict(detail) if isinstance(detail, dict) else {"reason": detail}
+            result["error_log"]["solver_logs"] = solver_log_tails(run_dir, job_names)
+            self.emit(f"{candidate_id} 失败类型：{result.get('error_type') or 'failed'}")
+        validate_or_raise("abaqus_result.schema.json", result)
+        write_json(result_path, result)
+        cleanup_job_artifacts(run_dir, job_names)
+        return result

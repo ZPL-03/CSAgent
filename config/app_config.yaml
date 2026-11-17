@@ -19,7 +19,6 @@ paths:
 
 abaqus:
   command: abaqus
-  max_retries: 3
   job_timeout_seconds: 3600
   user_subroutine: abaqus/subroutines/zhangusdfld.for
   use_user_subroutine: true

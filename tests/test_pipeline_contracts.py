@@ -149,12 +149,9 @@ def test_designs_use_task_imperfection_without_rewriting_case_source(monkeypatch
     assert migrated["geometry"]["imperfection_ratio"] == expected
     assert migrated["provenance"]["proposed_imperfection_ratio"] == 0.003
     assert all(item["geometry"]["imperfection_ratio"] == expected for item in agent.run(task))
-    for failure in ("geometry_issue", "convergence_fail"):
-        from agents.fem_agent import FEMAgent
-        from agents.orchestrator import OrchestratorAgent
-        fem_input = OrchestratorAgent().prepare_candidate_for_fem(task, migrated)
-        adjusted = FEMAgent().apply_adjustment(fem_input, failure, 0)
-        assert adjusted["geometry"]["imperfection_ratio"] == expected
+    from agents.orchestrator import OrchestratorAgent
+    fem_input = OrchestratorAgent().prepare_candidate_for_fem(task, migrated)
+    assert fem_input["geometry"]["imperfection_ratio"] == expected
 
 
 def test_initial_case_task_uses_fixed_analysis_defect_and_working_pressure():
