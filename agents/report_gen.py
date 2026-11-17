@@ -14,7 +14,10 @@ from xml.sax.saxutils import escape
 from agents.base import BaseAgent
 from core.config_loader import load_llm_config
 from core.display import NUMBER_DISPLAY_INSTRUCTION, format_number, format_parameter
-from core.fem_result_semantics import complete_case_result_errors
+from core.fem_result_semantics import (
+    complete_case_result_errors, is_passed_design_check, is_successful_result,
+    result_semantic_errors, verified_capacity_pressure,
+)
 from core.io_utils import write_text
 from core.llm_backend import LLMBackend, auto_llm_enabled
 from core.paths import RESULTS_DIR
@@ -111,9 +114,23 @@ class ReportGenAgent(BaseAgent):
         task_payload = task_payload_from_request(task)
         design_targets = dict(task_payload.get("design_targets", {}))
         target_pressure = float(design_targets.get("ultimate_pressure_min_MPa") or 0.0)
-        passed = [result for result in results if result.get("verdict") == "通过"]
+        assessments = []
+        for result in results:
+            errors = result_semantic_errors(result)
+            if not errors and is_passed_design_check(result):
+                state = "passed"
+            elif not errors and is_successful_result(result) and result.get("verdict") == "不通过":
+                state = "failed"
+            else:
+                state = "unknown"
+            assessments.append({
+                "candidate_id": result.get("candidate_id"),
+                "session_candidate_id": result.get("session_candidate_id"),
+                "state": state, "semantic_errors": list(errors),
+            })
         confirmed_ultimate_results = [
-            result for result in results if result.get("ultimate_pressure_MPa") is not None
+            result for result in results if verified_capacity_pressure(result) is not None
+            and result.get("ultimate_pressure_MPa") is not None
             and result.get("riks_limit_point_confirmed") is True
         ]
         best_pressure = max(
@@ -132,7 +149,11 @@ class ReportGenAgent(BaseAgent):
             "ultimate_pressure_min_MPa": target_pressure,
             "primary_objective": design_targets.get("primary_objective"),
             "result_count": len(results),
-            "passed_count": len(passed),
+            "passed_count": sum(item["state"] == "passed" for item in assessments),
+            "failed_count": sum(item["state"] == "failed" for item in assessments),
+            "unknown_count": sum(item["state"] == "unknown" for item in assessments),
+            "result_assessments": assessments,
+            "recommendation": self._recommendation_facts(task_payload, results, candidates),
             "best_pressure_candidate": best_pressure.get("candidate_id") if best_pressure else None,
             "best_pressure_MPa": best_pressure.get("ultimate_pressure_MPa") if best_pressure else None,
             "lightest_candidate": lightest.get("candidate_id") if lightest else None,
@@ -186,6 +207,55 @@ class ReportGenAgent(BaseAgent):
             ],
         }
 
+    def _recommendation_facts(self, task_payload: Dict, results: List[Dict], candidates: List[Dict]) -> Dict:
+        """按完整求解证据和任务目标排序，供报告正文与模型解释共同使用。"""
+        required_capacity = max(float(task_payload["load_conditions"]["external_pressure_MPa"]),
+                                float(task_payload["design_targets"]["ultimate_pressure_min_MPa"]))
+        objective = str(task_payload["design_targets"]["primary_objective"])
+        defect = task_imperfection_ratio(task_payload)
+        ranked, excluded = [], []
+        for result in results:
+            reasons = list(complete_case_result_errors(result))
+            if not is_passed_design_check(result):
+                reasons.append("设计校核没有通过")
+            capacity = verified_capacity_pressure(result)
+            if capacity is None or capacity < required_capacity:
+                reasons.append("确认容量未达到任务要求")
+            candidate = next((item for item in candidates if str(item.get("candidate_id")) in {
+                str(result.get("session_candidate_id")), str(result.get("candidate_id")),
+            }), {})
+            solved_geometry = (result.get("solved_design") or {}).get("geometry") or {}
+            geometry = solved_geometry or (candidate.get("geometry") if not result.get("retry_count") else {}) or {}
+            if solved_geometry.get("imperfection_ratio") not in (None, defect):
+                reasons.append("求解缺陷条件与任务不一致")
+            if objective == "最大极限压力":
+                score = -capacity if capacity is not None else float("inf")
+            elif objective == "最小厚度":
+                score = float(geometry.get("thickness_mm") or float("inf"))
+            else:
+                density = result.get("weight_kg_per_m2")
+                if density is None:
+                    density = candidate.get("surrogate_weight") or candidate.get("weight_kg_per_m2")
+                score = float(density) if density is not None else float("inf")
+                if objective == "最小壳体质量":
+                    length, radius = geometry.get("length_mm"), geometry.get("radius_mm")
+                    score = score * 2 * math.pi * float(radius) * float(length) / 1_000_000 \
+                        if length is not None and radius is not None else float("inf")
+            if not math.isfinite(score):
+                reasons.append("缺少目标比较数据")
+            identity = {"candidate_id": result.get("candidate_id"),
+                        "session_candidate_id": result.get("session_candidate_id")}
+            if reasons:
+                excluded.append({**identity, "reasons": reasons})
+            else:
+                ranked.append({**identity, "objective_value": -score if objective == "最大极限压力" else score,
+                               "capacity_MPa": capacity, "sort_value": score})
+        ranked.sort(key=lambda item: item["sort_value"])
+        for item in ranked:
+            item.pop("sort_value")
+        return {"objective": objective, "required_capacity_MPa": required_capacity,
+                "selected": ranked[0] if ranked else None, "ranked": ranked, "excluded": excluded}
+
 
     def _field_text(self, value: Any, default: str = "-") -> str:
         if value is None:
@@ -208,14 +278,13 @@ class ReportGenAgent(BaseAgent):
         results = summary.get("results") or []
         materials = sorted({str(item.get("material")) for item in candidates if item.get("material")})
         layups = [str(item.get("layup")) for item in candidates if item.get("layup")]
-        passed = [item for item in results if item.get("verdict") == "通过"]
-        failed = [item for item in results if item.get("verdict") and item.get("verdict") != "通过"]
         result_notes = [str(item.get("diagnosis_summary")) for item in results if item.get("diagnosis_summary")]
 
         material_text = "、".join(materials) if materials else "当前结构化数据未提供材料体系"
         layup_text = "；".join(layups[:3]) if layups else "当前结构化数据未提供铺层表达式"
         verdict_text = (
-            f"有限元校核中通过 {len(passed)} 个、未通过 {len(failed)} 个。"
+            f"有限元结果记录中通过 {summary.get('passed_count', 0)} 个、"
+            f"未通过 {summary.get('failed_count', 0)} 个、未判定 {summary.get('unknown_count', 0)} 个。"
             if results
             else "当前结构化数据未提供有限元校核结果。"
         )
@@ -241,10 +310,14 @@ class ReportGenAgent(BaseAgent):
     def _build_llm_explanation_payload(self, summary: Dict[str, Any]) -> Dict[str, Any]:
         passed_count = int(summary.get("passed_count") or 0)
         result_count = int(summary.get("result_count") or 0)
+        failed_count = int(summary.get("failed_count") or 0)
+        unknown_count = int(summary.get("unknown_count") or 0)
         if result_count <= 0:
             overall = "当前未提供有限元校核结果"
-        elif passed_count <= 0:
+        elif failed_count == result_count:
             overall = "当前校核样本未满足设计目标"
+        elif passed_count <= 0:
+            overall = "当前没有已通过设计校核的结果，部分结果尚未判定"
         elif passed_count == result_count:
             overall = "当前校核样本均满足设计目标"
         else:
@@ -262,7 +335,11 @@ class ReportGenAgent(BaseAgent):
             "all_candidates": [dict(candidate) for candidate in summary.get("all_candidates", [])],
             "results": [{key: value for key, value in result.items() if key != "design_verdict_basis"}
                         for result in summary.get("results", [])],
-            "aggregate": {"overall": overall, "result_count": result_count, "passed_count": passed_count},
+            "aggregate": {"overall": overall, "result_count": result_count, "passed_count": passed_count,
+                          "failed_count": failed_count, "unknown_count": unknown_count,
+                          "population": "有限元结果记录"},
+            "result_assessments": summary.get("result_assessments", []),
+            "recommendation": summary.get("recommendation"),
             "analysis_conditions": {
                 "task_imperfection_ratio": summary.get("imperfection_ratio"),
                 "imperfection_source": summary.get("imperfection_source"),
@@ -270,7 +347,9 @@ class ReportGenAgent(BaseAgent):
                                                if item.get("imperfection_ratio") is not None}),
             },
             "field_semantics": {
-                "candidate_sets": "all_candidates 为全部候选，screened_candidates 为预筛入选候选，results 为实际校核结果。",
+                "candidate_sets": "all_candidates 为全部候选，screened_candidates 为预筛入选候选，results 为实际校核结果；aggregate 只统计 results，未送检候选不在统计母集中。",
+                "result_assessments": "passed 为设计校核通过，failed 为设计校核不通过，unknown 为求解失败、未判定或结果语义不一致。",
+                "recommendation": "selected 为按任务目标选出的推荐对象，ranked 为具备完整证据且可比较的方案，excluded 记录未入选原因。",
                 "layup": "symmetric 和 balanced 是逐层核查结果；false 表示属性不满足，null 表示没有记录。",
                 "pressure_checks": "工作压力和目标压力对应弹性起始失效检查；极限承载力取自已确认极限点的含损伤 Riks 分析。",
                 "progressive_damage_complete": "容量分析是否包含场变量损伤退化。",
@@ -503,7 +582,6 @@ class ReportGenAgent(BaseAgent):
         task_payload = task_payload_from_request(task)
         summary = self._build_structured_summary(task, results, candidates)
         working_pressure = float(task_payload["load_conditions"]["external_pressure_MPa"])
-        required_capacity = max(working_pressure, float(task_payload["design_targets"]["ultimate_pressure_min_MPa"]))
         lines = [
             "# CSAgent 总体设计方案报告", "",
             "## 设计需求与校核依据", "",
@@ -594,40 +672,13 @@ class ReportGenAgent(BaseAgent):
                 f"- 模态云图数据：{result.get('visualization_json') or '-'}",
             ])
         lines.extend(["", "## 最终推荐设计方案", ""])
-        eligible = [
-            result for result in results
-            if result.get("status") == "success" and result.get("verdict") == "通过"
-            and not complete_case_result_errors(result)
-            and result.get("ultimate_pressure_MPa") is not None
-            and float(result["ultimate_pressure_MPa"]) >= required_capacity
-            and ((result.get("solved_design") or {}).get("geometry") or {}).get("imperfection_ratio") in (None, summary["imperfection_ratio"])
-        ]
-        objective = str(task_payload["design_targets"]["primary_objective"])
-        def recommendation_key(result):
-            candidate = next((item for item in candidates if
-                              str(item.get("candidate_id")) in {str(result.get("session_candidate_id")), str(result.get("candidate_id"))}), {})
-            geometry = (result.get("solved_design") or {}).get("geometry") or (
-                candidate.get("geometry") if not result.get("retry_count") else {}) or {}
-            if objective == "最大极限压力":
-                return -float(result["ultimate_pressure_MPa"])
-            if objective == "最小厚度":
-                return float(geometry.get("thickness_mm") or float("inf"))
-            density = result.get("weight_kg_per_m2")
-            if density is None:
-                return float("inf")
-            if objective == "最小壳体质量":
-                length, radius = geometry.get("length_mm"), geometry.get("radius_mm")
-                if length is None or radius is None:
-                    return float("inf")
-                return float(density) * 2 * math.pi * float(radius) * float(length) / 1_000_000
-            return float(density)
-        comparable = [item for item in eligible if recommendation_key(item) != float("inf")]
-        if comparable:
-            best = min(comparable, key=recommendation_key)
+        recommendation = summary["recommendation"]
+        best = recommendation["selected"]
+        if best:
             lines.extend([
                 f"- 推荐：{best.get('session_candidate_id') or '-'} / {best['candidate_id']}。",
-                f"- 推荐依据：在完成真实校核、容量证据完整且满足工作压力的方案中，按“{objective}”比较。",
-                f"- 确认容量：{format_number(best['ultimate_pressure_MPa'])} MPa；工作压力：{format_number(working_pressure)} MPa。",
+                f"- 推荐依据：在完成真实校核、容量证据完整且满足任务压力要求的方案中，按“{recommendation['objective']}”比较。",
+                f"- 确认容量：{format_number(best['capacity_MPa'])} MPa；工作压力：{format_number(working_pressure)} MPa。",
                 "- 此结论属于当前模型的数值设计推荐，工程定型仍需工艺、网格与试验验证。",
             ])
         else:

@@ -37,6 +37,37 @@ def test_recommendation_uses_solved_thickness_and_explicit_capacity_constraint(m
     assert "当前没有同时具备完整通过证据" in text
 
 
+def test_report_and_model_share_three_state_counts_and_recommendation(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = normalize_task_payload({"load_conditions": {"external_pressure_MPa": 20},
+                                   "design_targets": {"ultimate_pressure_min_MPa": 20,
+                                                      "primary_objective": "最小厚度"}})
+    results = [_result(1, 10.8), {**_result(2, 10.4), "verdict": "不通过"},
+               {"candidate_id": "C3", "status": "failed", "verdict": None}]
+    agent = ReportGenAgent()
+    summary = agent._build_structured_summary(task, results, [])
+    payload = agent._build_llm_explanation_payload(summary)
+    assert [summary[key] for key in ("passed_count", "failed_count", "unknown_count")] == [1, 1, 1]
+    assert [row["state"] for row in payload["result_assessments"]] == ["passed", "failed", "unknown"]
+    assert payload["recommendation"]["selected"]["candidate_id"] == "C1"
+    assert payload["recommendation"] == summary["recommendation"]
+    assert "- 推荐：TMP_1 / C1" in agent._render_markdown(task, results, [])
+
+
+def test_solver_failure_is_not_a_failed_design_check(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = normalize_task_payload({"load_conditions": {"external_pressure_MPa": 20}})
+    agent = ReportGenAgent()
+    results = [{"candidate_id": "C1", "status": "failed", "verdict": None},
+               {"candidate_id": "C2", "status": "failed", "verdict": "通过"}]
+    summary = agent._build_structured_summary(task, results, [])
+    payload = agent._build_llm_explanation_payload(summary)
+    assert payload["aggregate"]["failed_count"] == payload["aggregate"]["passed_count"] == 0
+    assert payload["aggregate"]["unknown_count"] == 2
+    assert payload["recommendation"]["selected"] is None
+    assert summary["result_assessments"][1]["semantic_errors"]
+
+
 def test_case_write_receives_actual_solved_design():
     captured = {}
     orchestrator = object.__new__(OrchestratorAgent)
