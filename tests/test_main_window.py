@@ -1989,6 +1989,7 @@ def test_settings_page_exposes_editable_runtime_configuration(monkeypatch) -> No
 
         assert "llm.primary.model" in window.settings_fields
         assert "abaqus.command" in window.settings_fields
+        assert "abaqus.max_retries" not in window.settings_fields
         assert "knowledge.chunk_token_size" in window.settings_fields
         assert "primary" in window.settings_health_labels
         assert "fallback" in window.settings_health_labels

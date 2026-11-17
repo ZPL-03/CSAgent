@@ -1587,7 +1587,6 @@ class MainWindow(QMainWindow):
                     ("用户子程序", self._settings_path_field("abaqus.user_subroutine", abaqus.get("user_subroutine", ""), "file")),
                     ("启用用户子程序", self._settings_combo("abaqus.use_user_subroutine", abaqus.get("use_user_subroutine", False), [("否", "false"), ("是", "true")])),
                     ("作业超时秒数", self._settings_line("abaqus.job_timeout_seconds", abaqus.get("job_timeout_seconds", 3600))),
-                    ("最大重试", self._settings_line("abaqus.max_retries", abaqus.get("max_retries", 3))),
                 ],
             ),
             self._settings_form_card(
@@ -1959,7 +1958,6 @@ class MainWindow(QMainWindow):
             "abaqus.user_subroutine": abaqus.get("user_subroutine", ""),
             "abaqus.use_user_subroutine": abaqus.get("use_user_subroutine", False),
             "abaqus.job_timeout_seconds": abaqus.get("job_timeout_seconds", 3600),
-            "abaqus.max_retries": abaqus.get("max_retries", 3),
             "pipeline.ratio.llm": ratio.get("llm", 2),
             "pipeline.ratio.case_transfer": ratio.get("case_transfer", 1),
             "pipeline.ratio.doe": ratio.get("doe", 1),
@@ -2014,7 +2012,6 @@ class MainWindow(QMainWindow):
         abaqus["user_subroutine"] = self._settings_value("abaqus.user_subroutine")
         abaqus["use_user_subroutine"] = self._settings_bool("abaqus.use_user_subroutine", bool(abaqus.get("use_user_subroutine", False)))
         abaqus["job_timeout_seconds"] = self._settings_int("abaqus.job_timeout_seconds", int(abaqus.get("job_timeout_seconds", 3600) or 3600))
-        abaqus["max_retries"] = self._settings_int("abaqus.max_retries", int(abaqus.get("max_retries", 3) or 3))
 
         ratio_values = {
             "llm": max(0, self._settings_int("pipeline.ratio.llm", 0)),
