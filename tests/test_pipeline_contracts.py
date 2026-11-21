@@ -437,7 +437,8 @@ def test_all_backend_failures_are_sanitized_and_reported(monkeypatch, failure_ki
     agent = ReportGenAgent(progress_callback=lambda *args: events.append(args))
     agent.llm_backend = backend
     task, results, candidates = _report_sample()
-    agent._render_markdown(task, results, candidates)
+    with pytest.raises(LLMCallError):
+        agent._render_markdown(task, results, candidates)
     trace_events = [event for _, _, event in events if event["event_type"] == "llm_call_trace"]
     assert len(trace_events) == 1
     assert trace_events[0]["payload"]["context"]["failed"] is True
@@ -1274,17 +1275,14 @@ def _report_sample():
     return task, [result], [candidate]
 
 
-def test_report_falls_back_to_structured_engineering_explanation(monkeypatch):
+def test_report_without_model_contains_deterministic_conclusion_only(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task, results, candidates = _report_sample()
     agent = ReportGenAgent()
 
     markdown = agent._render_markdown(task, results, candidates)
 
-    assert "## 工程解释与制造建议" in markdown
-    assert "### 制造工艺适配性" in markdown
-    assert "缺陷与质量控制" in markdown
-    assert markdown.index("## 有限元校核结果") < markdown.index("## 工程解释与制造建议")
+    assert markdown.index("## 有限元校核结果") < markdown.index("## 最终推荐设计方案")
     assert agent._last_llm_explanation_used is False
 
 
@@ -1301,8 +1299,8 @@ def test_report_display_rounding_does_not_change_capacity_verdict(monkeypatch, c
     text = ReportGenAgent()._render_markdown(task, results, candidates)
 
     assert "工作压力：9.6 MPa" in text
-    assert "渐进损伤容量峰值：9.6 MPa" in text
-    assert f"容量与工作压力比较：{verdict}" in text
+    assert "容量路径峰值（未确认）：9.6 MPa" in text
+    assert "容量与工作压力比较：未确认容量" in text
     assert (task, results, candidates) == snapshot
 
 
@@ -1330,10 +1328,10 @@ def test_report_generates_one_complete_design_document(monkeypatch, tmp_path):
                                    "output_dir": str(tmp_path)})
     assert report["report_kind"] == "overall"
     assert set(report["report_outputs"]) == {"overall"}
-    assert sorted(path.name for path in tmp_path.iterdir() if path.is_file()) == ["overall_design_report.md", "overall_design_report.pdf"]
+    assert sorted(path.name for path in tmp_path.iterdir() if path.is_file()) == ["overall_design_report.md", "overall_design_report.pdf", "overall_design_report_facts.json"]
     text = Path(report["markdown_path"]).read_text(encoding="utf-8")
     sections = ["设计需求与校核依据", "全部候选方案与生成依据", "代理预筛方案与筛选理由",
-                "有限元校核结果", "最终推荐设计方案", "工程解释与制造建议"]
+                "有限元校核结果", "最终推荐设计方案"]
     assert [text.index("## " + title) for title in sections] == sorted(text.index("## " + title) for title in sections)
     assert "候选 TMP_2" in text and extra["rationale"] in text
     assert "排名低于本轮保留数量" in text
@@ -1408,14 +1406,15 @@ def test_report_rejection_is_not_reported_as_solver_or_connection_failure(monkey
             return r"- 增加 $9999\,\mathrm{MPa}$ 要求。"
 
     agent.llm_backend = UnsupportedFactBackend()
-    agent._render_engineering_explanation(agent._build_structured_summary(task, results, candidates))
+    with pytest.raises(ValueError):
+        agent._render_engineering_explanation(agent._build_structured_summary(task, results, candidates))
 
     assert not agent._last_llm_explanation_used
     rejection = [event[2] for event in events if event[2]["event_type"] == "report_explanation_rejected"]
     assert len(rejection) == 1
     assert rejection[0]["payload"]["report_kind"] == "overall"
     assert agent._last_llm_explanation_audit["status"] == "rejected"
-    assert "生成失败" not in rejection[0]["message"]
+    assert agent._last_llm_explanation_audit["raw_response"] == r"- 增加 $9999\,\mathrm{MPa}$ 要求。"
 
 
 def test_report_llm_context_preserves_numeric_facts_and_completed_analysis_scope(monkeypatch):
@@ -1438,7 +1437,7 @@ def test_report_llm_context_preserves_numeric_facts_and_completed_analysis_scope
     )
     agent = ReportGenAgent()
     summary = agent._build_structured_summary(task, results, candidates)
-    payload = agent._build_llm_explanation_payload(summary)
+    payload = agent._build_llm_explanation_payload(summary)["context"]
 
     assert "30.0 MPa" in payload["task"]["load_case"]
     assert payload["task"]["ultimate_pressure_min_MPa"] == 35.0
@@ -1491,10 +1490,10 @@ def test_report_emits_llm_trace_when_engineering_explanation_fails(monkeypatch):
 
     agent.llm_backend = ControlledBackend()
 
-    markdown = agent._render_markdown(task, results, candidates)
+    with pytest.raises(RuntimeError, match="all llm backends failed"):
+        agent._render_markdown(task, results, candidates)
 
     assert agent._last_llm_explanation_used is False
-    assert "### 制造工艺适配性" in markdown
     trace_events = [
         payload
         for _, _, payload in events
@@ -1528,35 +1527,33 @@ def test_report_rejects_unsupported_explanation_without_rewrite(monkeypatch):
     backend = ControlledBackend()
     agent.llm_backend = backend
 
-    markdown = agent._render_markdown(task, results, candidates)
+    with pytest.raises(ValueError):
+        agent._render_markdown(task, results, candidates)
 
-    assert "### 缺陷与质量控制" in markdown
-    assert "0.3 mm" not in markdown
-    assert "T800" not in markdown
     assert backend.calls == 1
     assert agent._last_llm_explanation_used is False
 
 
-def test_report_fallback_uses_explicit_layup_not_unused_angle_parameters(monkeypatch):
+def test_report_review_facts_use_solved_layup_not_unused_angle_parameters(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     agent = ReportGenAgent()
-    text = agent._render_deterministic_engineering_explanation({
-        "all_candidates": [{"alpha_deg": 65.233, "beta_deg": 60.581,
-                                  "layup": "[90/45/-45/0]", "material": "T700/Epoxy"}],
-    })
-    assert "[90/45/-45/0]" in text
-    assert "65.233" not in text
-    assert "60.581" not in text
+    from core.report_facts import build_report_facts
+    task, results, candidates = _report_sample()
+    results[0]["solved_design"] = {"geometry": {"length_mm": 500, "radius_mm": 100, "thickness_mm": 12},
+                                    "layup": {"layup": "[90/45/-45/0]"}}
+    facts = build_report_facts(agent._build_structured_summary(task, results, candidates))
+    assert next(row["value"] for row in facts if row["candidate_id"] == "C1" and row["metric"] == "layup") == "[90/45/-45/0]"
 
 
 def test_pdf_renderer_uses_native_table_and_plain_inline_text(monkeypatch, tmp_path):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     agent = ReportGenAgent()
-    text = "# 校核结果\n\n| 样本 | 压力 |\n| --- | --- |\n| `C1` | **15 MPa** |\n\n- 已完成求解。\n"
+    text = "# 校核结果\n\n## 结果\n\n### 压力\n\n| 样本 | 压力 |\n| --- | --- |\n| `C1` | **15 MPa** |\n\n- 已完成求解。\n"
     font = agent._register_font()
     story = agent._build_pdf_story(text, font)
     from reportlab.platypus import Table
     assert sum(isinstance(item, Table) for item in story) == 1
+    assert all(item.style.keepWithNext for item in story[:3])
     assert agent._paragraph_text_for_pdf("`C1` **完成**") == "C1 完成"
     path = tmp_path / "report.pdf"
     agent._write_pdf(text, path)

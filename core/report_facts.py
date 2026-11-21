@@ -1,11 +1,10 @@
-"""报告事实契约：模型选择对象与指标，代码回填原值、单位和状态并渲染。"""
+"""报告事实与目标比较量；提案、确认结果和派生值分别标记。"""
 
 from __future__ import annotations
 
-import json
 import math
-from typing import Any
 
+from abaqus.cylindrical_geometry import radius_reference
 from core.display import format_number, format_parameter
 
 
@@ -29,25 +28,34 @@ METRICS = {
     "design_check": ("设计校核状态", None),
     "riks_limit_point_confirmed": ("Riks 极限点确认", None),
     "riks_termination_reason": ("Riks 终止原因", None),
+    "required_capacity_MPa": ("容量比较下限", "MPa"),
+    "objective_value": ("优化目标比较值", None),
+    "capacity_margin_percent": ("容量相对工作压力的余量", "%"),
+    "candidate_count": ("候选总数", "个"),
+    "result_count": ("实际校核数", "个"),
+    "comparable_count": ("满足推荐条件的方案数", "个"),
+    "analysis_scope": ("分析范围", None),
+    "recommendation_status": ("推荐状态", None),
+    "length_mm": ("实际求解长度", "mm"),
+    "radius_mm": ("实际求解半径", "mm"),
+    "radius_reference": ("实际求解半径基准", None),
+    "thickness_mm": ("实际求解厚度", "mm"),
+    "material": ("实际求解材料", None),
+    "layup": ("实际求解铺层", None),
 }
-FOLLOW_UPS = {
-    "manufacturing_review": "制造评审需确定工艺参数和检验标准。",
-    "defect_sensitivity": "缺陷敏感性分析需保持材料、几何、铺层和载荷一致，只改变缺陷条件进行对照。",
-    "mesh_convergence": "通过网格收敛性和逐层应力覆盖检查评估离散误差。",
-    "pressure_test": "数值模型的工程适用性需要静水压试验及工艺证据验证。",
-}
-FACT_REF_KEYS = {"candidate_id", "metric"}
+ANALYSIS_SCOPE = "逐层圆柱壳、初始几何缺陷、弹性首层失效与含损伤 Riks；未建模封头、法兰、层间分层及制造过程，未提供试验认证。"
 
 
 def build_report_facts(summary: dict) -> list[dict]:
     """任务、提案和实际求解分别建账；未确认容量不作为极限承载事实。"""
     facts: list[dict] = []
 
-    def add(candidate_id, metric, value, status):
+    def add(candidate_id, metric, value, status, unit=None):
         if isinstance(value, float) and not math.isfinite(value):
             raise ValueError(f"报告事实 {candidate_id}/{metric} 不是有限数值")
         facts.append({"candidate_id": candidate_id, "metric": metric, "value": value,
-                      "unit": METRICS[metric][1], "status": status})
+                      "unit": unit if unit is not None else METRICS[metric][1], "status": status,
+                      "label": METRICS[metric][0]})
 
     for metric in ("external_pressure_MPa", "ultimate_pressure_min_MPa", "imperfection_ratio"):
         add(None, metric, summary.get(metric), "specified")
@@ -83,74 +91,59 @@ def build_report_facts(summary: dict) -> list[dict]:
             linked = next((row for row in summary.get("results", []) if row.get("session_candidate_id") == cid), None)
             state = assessments.get(linked["candidate_id"], "unknown") if linked else "not_run"
             add(cid, "design_check", state, state)
+    recommendation = summary.get("recommendation") or {}
+    ranked = recommendation.get("ranked") or []
+    best = recommendation.get("selected")
+    add(None, "required_capacity_MPa", recommendation.get("required_capacity_MPa"), "task_input")
+    add(None, "candidate_count", len(summary.get("all_candidates", [])), "recorded")
+    add(None, "result_count", len(summary.get("results", [])), "recorded")
+    add(None, "comparable_count", len(ranked), "derived")
+    add(None, "analysis_scope", ANALYSIS_SCOPE, "scope")
+    add(None, "recommendation_status", "有满足条件的方案" if best else "没有满足完整校核及目标比较条件的方案", "derived")
+    units = {"最大极限压力": "MPa", "最小厚度": "mm", "最小壳体质量": "kg"}
+    for row in ranked:
+        cid = row["candidate_id"]
+        add(cid, "objective_value", row["objective_value"], "derived", units.get(recommendation["objective"], "kg/m^2"))
+        pressure = summary.get("external_pressure_MPa")
+        if pressure and pressure > 0:
+            add(cid, "capacity_margin_percent", (row["capacity_MPa"] / pressure - 1) * 100, "derived")
+    # 求解重试可能改变厚度，解释实际结果时只读取 solved_design，而不借用提案尺寸。
+    for row in summary.get("results", []):
+        geometry = row.get("solved_geometry") or {}
+        for metric, value in geometry.items():
+            if metric in {"length_mm", "radius_mm", "thickness_mm"}:
+                add(row["candidate_id"], metric, value, "solved_input")
+        if geometry.get("radius_mm") is not None:
+            add(row["candidate_id"], "radius_reference", radius_reference(geometry), "solved_input")
+        for metric in ("material", "layup"):
+            if row.get(metric) is not None:
+                add(row["candidate_id"], metric, row[metric], "solved_input")
     return facts
 
 
-def validate_report_selection(answer: str, facts: list[dict], recommendation: dict) -> dict:
-    """校验引用并回填事实，拒绝未知或重复引用及与代码排序不一致的推荐。"""
-    def unique_object(pairs):
-        value = {}
-        for key, item in pairs:
-            if key in value:
-                raise ValueError("报告 JSON 含重复字段")
-            value[key] = item
-        return value
-
-    try:
-        payload = json.loads(answer, object_pairs_hook=unique_object)
-    except (TypeError, json.JSONDecodeError) as exc:
-        raise ValueError("报告需要结构化事实选择 JSON") from exc
-    if not isinstance(payload, dict) or set(payload) != {"fact_refs", "recommendation_candidate_id", "follow_up_codes"}:
-        raise ValueError("报告字段必须为 fact_refs、recommendation_candidate_id、follow_up_codes")
-    selected = payload["fact_refs"]
-    if not isinstance(selected, list) or not selected or len(selected) > len(facts):
-        raise ValueError("报告 fact_refs 必须是非空事实引用子集")
-    index = {(row["candidate_id"], row["metric"]): row for row in facts}
-    if len(index) != len(facts):
-        raise ValueError("报告事实索引含重复对象与指标")
-    seen = set()
-    resolved = []
-    for reference in selected:
-        if not isinstance(reference, dict) or set(reference) != FACT_REF_KEYS:
-            raise ValueError("报告事实引用只接受 candidate_id/metric")
-        if reference["candidate_id"] is not None and not isinstance(reference["candidate_id"], str):
-            raise ValueError("报告 candidate_id 类型无效")
-        if not isinstance(reference["metric"], str):
-            raise ValueError("报告 metric 类型无效")
-        key = (reference["candidate_id"], reference["metric"])
-        expected = index.get(key)
-        if key in seen or expected is None:
-            raise ValueError(f"报告事实引用未知或重复：{key}")
-        seen.add(key)
-        # 数值、单位和状态仅来自索引；模型不复制浮点值，也不能覆盖记录。
-        resolved.append(dict(expected))
-    expected_id = (recommendation.get("selected") or {}).get("candidate_id")
-    if payload["recommendation_candidate_id"] != expected_id:
-        raise ValueError("报告推荐对象与任务目标及完整求解证据不一致")
-    codes = payload["follow_up_codes"]
-    if not isinstance(codes, list) or any(not isinstance(code, str) or code not in FOLLOW_UPS for code in codes):
-        raise ValueError("报告含无依据的验证建议或制造阈值")
-    if len(set(codes)) != len(codes):
-        raise ValueError("报告验证建议重复")
-    return {**payload, "facts": resolved}
-
-
-def render_report_selection(selection: dict) -> str:
-    """显示精度不参与事实匹配或工程判定，模型不提供可执行的自由文本。"""
-    lines = ["### 事实解读"]
-    for fact in selection["facts"]:
-        value: Any = fact["value"]
-        if value is None:
-            value = "未确认"
-        elif isinstance(value, bool):
-            value = "是" if value else "否"
-        elif isinstance(value, (int, float)):
-            value = (format_number(value, 3) if fact["metric"].endswith("hashin_index_max")
-                     else format_parameter(fact["metric"], value))
-        label, unit = METRICS[fact["metric"]]
-        unit = "（无量纲）" if unit == "1" else " " + unit if unit else ""
-        status = "" if fact["metric"] == "design_check" else f"；状态={fact['status']}"
-        lines.append(f"- {fact['candidate_id'] or '任务'}：{label}={value}{unit}{status}。")
-    lines.extend(["", "### 验证建议"])
-    lines.extend("- " + FOLLOW_UPS[code] for code in selection["follow_up_codes"])
-    return "\n".join(lines)
+def format_fact_value(fact: dict) -> str:
+    """显示值保留当前单位；显示舍入不参与判定或数值比较。"""
+    value = fact["value"]
+    if fact["metric"] == "analysis_scope":
+        return "含初始几何缺陷的圆柱壳损伤容量分析"
+    if fact["metric"] == "radius_reference":
+        return {"inner": "内半径", "middle_surface": "中面半径", "outer": "外半径"}[value]
+    if fact["metric"] == "riks_termination_reason" and value is not None:
+        return {"post_peak_drop_20_percent": "峰后载荷下降达到 20% 阈值，受控终止",
+                "solver_termination": "求解器终止"}.get(str(value), str(value))
+    if value is None:
+        display = "未确认"
+    elif isinstance(value, bool):
+        display = ("已确认" if value else "未确认") if fact["metric"] == "riks_limit_point_confirmed" else "是" if value else "否"
+    elif isinstance(value, (int, float)):
+        display = (format_number(value, 2) if fact["unit"] == "%"
+                   else format_number(value, 4) if fact["metric"] == "objective_value"
+                   else format_number(value, 3) if fact["metric"].endswith("hashin_index_max")
+                   else format_parameter(fact["metric"], value))
+    else:
+        display = {"passed": "通过", "failed": "不通过", "unknown": "未判定",
+                   "not_run": "未求解"}.get(str(value), str(value))
+    # 数量的量词由句子承担，物理量的单位由事实显示值承担。
+    unit = ("" if fact["unit"] == "个" else "（无量纲）" if fact["unit"] == "1"
+            else " " + fact["unit"] if fact["unit"] else "")
+    return display + unit

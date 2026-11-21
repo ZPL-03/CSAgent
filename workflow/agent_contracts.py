@@ -103,10 +103,10 @@ AGENT_CONTRACTS: tuple[AgentContract, ...] = (
         responsibility="基于结构化任务、候选和有限元结果生成 Markdown/PDF 报告。",
         input_contract="task 字典、results 列表、candidates 列表。",
         output_contract="report 字典；包含总体设计方案报告 Markdown/PDF 路径、正文、LLM 工程解释状态和仅含 overall 的 report_outputs。",
-        llm_policy="只在工程解释和制造建议中受控调用 LLM；数值、排序和结论由结构化数据确定。",
+        llm_policy="在最终推荐中生成工程评议；数值、排序和校核结论由结构化数据确定。",
         memory_policy="读取当前快照、候选池、有限元结果和知识回流状态，写入 report、report_outputs 和 data/results 报告文件。",
         event_policy="发出 report_generation_started、report_completed、report_failed、tool_completed 或 node_failed 事件。",
-        failure_policy="LLM 解释失败时退回确定性解释；报告文件生成失败时写入节点失败事件。",
+        failure_policy="LLM 解释按配置后端顺序验证，全部失败或工件生成失败时写入节点失败事件，不发布替代报告。",
     ),
 )
 

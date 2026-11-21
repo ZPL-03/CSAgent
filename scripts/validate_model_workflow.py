@@ -46,7 +46,7 @@ def assess_workflow(result: dict) -> dict:
     explanation_audit = result["report"].get("llm_explanation_audit") or {}
     model_failures = []
     if not used or explanation_audit.get("status") != "accepted":
-        model_failures.append("模型报告事实选择未通过")
+        model_failures.append("模型工程评议未通过")
         if explanation_audit.get("error"):
             model_failures.append(explanation_audit["error"])
     failures = flow_failures + model_failures

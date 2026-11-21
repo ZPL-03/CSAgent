@@ -82,7 +82,7 @@ P       = d1 * lg(Q) * t / R
 | 快速筛选 | `agents/screener.py` | 使用 ASME RD-1172 线性屈曲压力和 PBIPF 公式预测极限压力并排序 |
 | 有限元校核 | `agents/fem_agent.py` | 生成 ABAQUS 耐压壳脚本并读取标准结果 JSON |
 | 知识回流 | `agents/knowledge_agent.py` | 写入案例库、案例记忆和代理公式校准数据 |
-| 报告生成 | `agents/report_gen.py` | 基于结构化任务、初筛理由和有限元结果输出报告；工程解释与制造建议可由受控 LLM 补充 |
+| 报告生成 | `agents/report_gen.py` | 基于任务、初筛和 FEM 输出总体报告，在最终推荐中解释目标、承载余量、方案取舍及验证事项；数值与推荐由程序计算 |
 
 ## 工作流运行时
 
@@ -202,7 +202,7 @@ $LASTEXITCODE
 
 上述命令调用对应模型，通过桌面端共用的人工确认状态图执行真实 Abaqus、知识回流和报告导出，并校验完成快照、运行事件及有限元队列，不属于离线单元测试。模型配置缺失直接失败，不自动切换模型。默认任务固定 L=500 mm、R=100 mm、缺陷比=0.008，生成两项候选并求解 Top-1；`--instruction` 可指定其他任务。任务没有给出候选数或预筛数时，分别用 `--candidate-count-reply` 和 `--screen-count-reply` 提供对应确认节点的用户回答；缺失、非整数或越界回答直接失败。每次运行使用 `data/runtime/model_validation/<时间>_<后端>_<模式>/` 独立目录，台账、案例、向量库、代理校准文件和报告均不写入正式数据目录。内置知识包、嵌入模型和压力回归资料只读，历史案例库不复制，因此该入口不验证正式历史案例的检索效果。`workflow.json` 保存完整业务结果，`validation.json` 分别记录来源计数、模型采用状态、调用轨迹和失败原因。必须同时检查验证文件与进程退出码；原生进程崩溃可能留下 `running` 或未正常退出的记录，不能算通过。
 
-工程流程验收检查当前任务约束、实际求解设计、完整有限元结果、案例入库和 PDF。`source_counter`、`generation_audit`、`llm_candidate_branch` 单独记录候选分支诊断；合法 DOE 承担精确候选构造时，不要求 LLM 来源数量大于零。`flow_status` 与 `model_report_status` 分别记录工程流程和模型报告结果，两者均通过才返回成功；模型事实选择被拒绝或调用失败时，确定性报告的生成不能替代模型报告通过。
+工程流程验收检查任务约束、实际求解设计、完整有限元结果、案例入库和 PDF。`source_counter`、`generation_audit`、`llm_candidate_branch` 单独记录候选分支诊断；合法 DOE 承担精确构造时，不要求 LLM 来源数量大于零。`flow_status` 与 `model_report_status` 分别记录工程流程和模型报告结果，两者均通过才返回成功。报告评议的职责、事实绑定与失败行为见 [工程设计报告](docs/工程设计报告.md)。
 
 仅验证模型候选和报告时使用 `--replay-workflow <已有 workflow.json 的路径>`，与 `--run-real-abaqus` 互斥。重放目录保存 `candidate_replay.json`、`report_replay.json`、`model_events.json` 和 `validation.json`。原始求解证据只读，源文件路径与 SHA256 随验证结果保存；重生成候选不关联旧 FEM 结果，不创建求解器、不写案例库。该模式记录 `flow_status=not_run`、`solver_executed=false`，源证据检查单独记录为 `source_flow_status`，不代替新版本的真实全流程验收。
 

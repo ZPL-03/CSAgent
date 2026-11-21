@@ -17,7 +17,7 @@ from core.doe_sampler import DOESampler
 from core.fem_input_contract import attach_design_revision, validate_fem_input
 from core.llm_backend import LLMBackend, backend_trust_env
 from core.pressure_hull_profile import normalize_layup
-from core.report_facts import build_report_facts, render_report_selection, validate_report_selection
+from core.report_facts import build_report_facts, format_fact_value
 from core.rule_checker import RuleChecker
 from core.task_contract import normalize_task_payload
 
@@ -33,10 +33,9 @@ def task():
 def test_report_design_state_renders_once_without_mutating_facts(state):
     fact = {"candidate_id": "C1", "metric": "design_check", "value": state,
             "unit": None, "status": state}
-    selection = {"facts": [fact], "follow_up_codes": []}
-    snapshot = deepcopy(selection)
-    assert render_report_selection(selection).count(state) == 1
-    assert selection == snapshot
+    snapshot = deepcopy(fact)
+    assert format_fact_value(fact) == {"passed": "通过", "failed": "不通过", "unknown": "未判定", "not_run": "未求解"}[state]
+    assert fact == snapshot
 
 
 @pytest.mark.parametrize("source", ["LLM", "CASE_TRANSFER", "DOE"])
@@ -106,61 +105,23 @@ def report_summary():
     }
 
 
-def selection(facts):
-    return {"fact_refs": [{"candidate_id": fact["candidate_id"], "metric": fact["metric"]} for fact in facts],
-            "recommendation_candidate_id": "C1", "follow_up_codes": ["manufacturing_review"]}
-
-
-@pytest.mark.parametrize("mutation", ["unknown_candidate", "manufacturing", "candidate_metric", "task_metric", "duplicate",
-                                      "value", "unit", "status", "empty", "wrong_type"])
-def test_report_rejects_unknown_or_duplicate_references_and_model_fact_overrides(mutation):
-    facts = build_report_facts(report_summary())
-    payload = selection([facts[0]])
-    reference = payload["fact_refs"][0]
-    if mutation == "unknown_candidate":
-        reference["candidate_id"] = "UNKNOWN"
-    elif mutation == "manufacturing":
-        reference["metric"] = "manufacturing_imperfection_limit"
-    elif mutation == "candidate_metric":
-        reference.update(candidate_id="C3", metric="ultimate_pressure_MPa")
-    elif mutation == "task_metric":
-        reference["metric"] = "ultimate_pressure_MPa"
-    elif mutation == "duplicate":
-        payload["fact_refs"].append(dict(reference))
-    elif mutation in {"value", "unit", "status"}:
-        reference[mutation] = {"value": 122.8, "unit": "mm", "status": "passed"}[mutation]
-    elif mutation == "empty":
-        payload["fact_refs"] = []
-    elif mutation == "wrong_type":
-        reference["candidate_id"] = ["C1"]
-    with pytest.raises(ValueError):
-        validate_report_selection(json.dumps(payload), facts, {"selected": {"candidate_id": "C1"}})
-
-
-def test_report_accepts_negative_prediction_and_keeps_ratio_amplitude_and_state():
+def test_report_facts_keep_prediction_ratio_amplitude_and_state():
     facts = build_report_facts(report_summary())
     original = deepcopy(facts)
-    valid = validate_report_selection(json.dumps(selection(facts)), facts, {"selected": {"candidate_id": "C1"}})
-    assert valid["facts"] == facts
-    rendered = render_report_selection(valid)
-    assert "实际求解缺陷比=0.006（无量纲）" in rendered
-    assert "实际缺陷幅值=0.6 mm" in rendered
-    assert "代理承载压力估计=-2.5 MPa" in rendered
-    assert "C1：确认极限承载压力=122.8 MPa" in rendered
-    assert "C2：确认极限承载压力=55 MPa" in rendered
-    assert "任务：目标极限压力下限=30 MPa" in rendered
-    assert "目标压力最大 Hashin 指数=0.057（无量纲）" in rendered
-    assert "122.81234" not in rendered
-    assert facts == original and valid["facts"] == original
-    assert "post_peak_drop_20_percent" in rendered
-    assert "not_run" in rendered
-
-
-def test_report_rejects_full_fact_json_instead_of_reference_contract():
-    facts = build_report_facts(report_summary())
-    payload = {"facts": facts, "recommendation_candidate_id": "C1", "follow_up_codes": []}
-    with pytest.raises(ValueError):
-        validate_report_selection(json.dumps(payload), facts, {"selected": {"candidate_id": "C1"}})
+    by_key = {(row["candidate_id"], row["metric"]): row for row in facts}
+    assert format_fact_value(by_key["C1", "solved_imperfection_ratio"]) == "0.006（无量纲）"
+    assert format_fact_value(by_key["C1", "imperfection_amplitude_mm"]) == "0.6 mm"
+    for metric in ("candidate_count", "result_count", "comparable_count"):
+        fact = by_key[None, metric]
+        assert fact["unit"] == "个"
+        assert format_fact_value(fact) == str(fact["value"])
+    assert by_key["C3", "surrogate_ultimate_pressure_MPa"]["value"] == -2.5
+    assert by_key["C1", "ultimate_pressure_MPa"]["value"] == 122.81234
+    assert by_key["C1", "target_hashin_index_max"]["value"] == 0.05712345
+    assert format_fact_value(by_key["C1", "riks_termination_reason"]) == "峰后载荷下降达到 20% 阈值，受控终止"
+    assert by_key["C1", "riks_termination_reason"]["value"] == "post_peak_drop_20_percent"
+    assert by_key["C3", "design_check"]["value"] == "not_run"
+    assert facts == original
 
 
 def test_unconfirmed_capacity_cannot_be_rendered_as_a_verified_limit(monkeypatch):
@@ -176,40 +137,34 @@ def test_unconfirmed_capacity_cannot_be_rendered_as_a_verified_limit(monkeypatch
     assert summary["recommendation"]["selected"] is None
 
 
-def test_report_rejects_fabricated_recommendation_and_duplicate_json_fields():
-    facts = build_report_facts(report_summary())
-    payload = selection(facts)
-    payload["recommendation_candidate_id"] = "C3"
-    with pytest.raises(ValueError):
-        validate_report_selection(json.dumps(payload), facts, {"selected": {"candidate_id": "C1"}})
-    with pytest.raises(ValueError):
-        validate_report_selection('{"fact_refs":[],"fact_refs":[]}', facts, {})
+def test_report_model_review_and_rejection_are_separate_from_export(monkeypatch):
+    from tests.test_report_design_evidence import _result
 
-
-@pytest.mark.parametrize("extra", ["conclusion", "theory", "manufacturing_limit"])
-def test_free_claims_cannot_bypass_structured_report(extra):
-    facts = build_report_facts(report_summary())
-    payload = {**selection(facts), extra: "对称均衡可以证明 D16 为零"}
-    with pytest.raises(ValueError):
-        validate_report_selection(json.dumps(payload), facts, {"selected": {"candidate_id": "C1"}})
-
-
-def test_report_model_response_and_rejection_are_separate_from_render_success(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     agent = ReportGenAgent()
-    summary = {**report_summary(), "recommendation": {"selected": {"candidate_id": "C1"}}}
+    current = task()
+    current["design_targets"]["ultimate_pressure_min_MPa"] = 30
+    current["design_targets"]["primary_objective"] = "最小厚度"
+    current["load_conditions"]["external_pressure_MPa"] = 30
+    summary = agent._build_structured_summary(current, [_result(1, 10)], [])
     def respond(_system, user, **kwargs):
         assert kwargs["json_mode"] is True
         payload = json.loads(user)
-        example = validate_report_selection(json.dumps(payload["response_example"]), payload["facts"],
-                                            payload["recommendation"])
-        assert example["recommendation_candidate_id"] == "C1"
-        return json.dumps(selection(payload["facts"]))
-    agent.llm_backend = SimpleNamespace(max_tokens=1800, chat=respond)
+        if set(payload) == {"report", "evidence"}:
+            return json.dumps({"accepted": True, "issues": []})
+        refs = "、".join("{{" + ref + "}}" for ref in payload["required_assessment_refs"])
+        scope = next(row["ref"] for row in payload["facts"] if row["metric"] == "analysis_scope")
+        return json.dumps({"recommendation_candidate_id": payload["recommendation"]["selected"]["candidate_id"],
+                           "assessment": "推荐判断依据为" + refs + "，仅在完成当前校核的方案中比较。",
+                           "tradeoffs": [],
+                           "verification": ["计算边界为{{" + scope + "}}；需核查实际连接能否实现任务约束再决定放行。"]})
+    agent.llm_backend = SimpleNamespace(max_tokens=4096, chat=respond)
     text = agent._render_engineering_explanation(summary)
-    assert agent._last_llm_explanation_used and "0.6 mm" in text
+    assert agent._last_llm_explanation_used and "30 MPa" in text
+    assert agent._last_llm_explanation_audit["review"]["recommendation_candidate_id"] == "C1"
     agent.llm_backend.chat = lambda *_args, **_kw: "实际缺陷比不得超过 0.006"
-    agent._render_engineering_explanation(summary)
+    with pytest.raises(ValueError):
+        agent._render_engineering_explanation(summary)
     assert not agent._last_llm_explanation_used
     assert agent._last_llm_explanation_audit["status"] == "rejected"
     assert agent._last_llm_explanation_audit["raw_response"] == "实际缺陷比不得超过 0.006"
