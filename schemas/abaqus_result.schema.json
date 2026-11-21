@@ -44,11 +44,9 @@
     "linear_buckling_odb": {"type": ["string", "null"]},
     "postbuckling_odb": {"type": ["string", "null"]},
     "service_odb": {"type": ["string", "null"]},
-    "target_odb": {"type": ["string", "null"]},
     "abaqus_inp": {"type": ["string", "null"]},
     "postbuckling_inp": {"type": ["string", "null"]},
     "service_inp": {"type": ["string", "null"]},
-    "target_inp": {"type": ["string", "null"]},
     "visualization_json": {"type": ["string", "null"]},
     "artifact_dir": {"type": ["string", "null"]},
     "error_type": {"type": ["string", "null"]},
@@ -90,15 +88,7 @@
     "service_hashin_index_max": {"type": ["number", "null"], "minimum": 0},
     "service_hashin_failure_mode": {"type": ["string", "null"]},
     "service_hashin_element_label": {"type": ["integer", "null"], "minimum": 0},
-    "service_hashin_section_point": {"type": ["string", "null"]},
-    "target_failure_criterion": {"type": ["string", "null"]},
-    "target_abaqus_job_status": {"type": ["string", "null"]},
-    "target_pressure_check_status": {"type": ["string", "null"], "enum": ["passed", "failed", "not_reached", "solver_failed", null]},
-    "target_pressure_checked_MPa": {"type": ["number", "null"]},
-    "target_hashin_index_max": {"type": ["number", "null"], "minimum": 0},
-    "target_hashin_failure_mode": {"type": ["string", "null"]},
-    "target_hashin_element_label": {"type": ["integer", "null"], "minimum": 0},
-    "target_hashin_section_point": {"type": ["string", "null"]}
+    "service_hashin_section_point": {"type": ["string", "null"]}
   },
   "additionalProperties": true
 }

@@ -17,10 +17,10 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 
-from abaqus.job_utils import compiler_environment
-from core.paths import ensure_project_dirs
+from abaqus.job_utils import compiler_environment  # noqa: E402
+from core.paths import ensure_project_dirs  # noqa: E402
 
 load_dotenv(ROOT / ".env")
 

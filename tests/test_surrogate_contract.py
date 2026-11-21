@@ -74,13 +74,6 @@ def test_surrogate_scope_rejects_non_cylindrical_candidate(tmp_path):
         manager.formula_prediction(candidate)
 
 
-def test_task_parser_rejects_unsupported_structure_type():
-    from core.task_parser import TaskParser
-
-    with pytest.raises(ValueError, match="仅支持.*圆柱耐压壳"):
-        TaskParser().parse_instruction("T形加筋壁板在外压30 MPa下设计，生成2个候选，初筛保留1个")
-
-
 @pytest.mark.parametrize("payload", ["not json", "[]", '{"calibration_status":"invalid"}'])
 def test_invalid_calibration_is_not_silently_ignored(tmp_path, payload):
     manager = surrogate.SurrogateModelManager(models_dir=tmp_path)

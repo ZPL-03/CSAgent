@@ -41,11 +41,6 @@ def resolve_backend_configs(config: Dict[str, Any]) -> List[Dict[str, Any]]:
     return backends
 
 
-def resolve_backend_config(config: Dict[str, Any]) -> Dict[str, Any]:
-    """返回首个可用 OpenAI 兼容后端配置。"""
-    return resolve_backend_configs(config)[0]
-
-
 @dataclass
 class BackendRuntime:
     """单个 OpenAI 兼容后端运行时配置。"""

@@ -20,13 +20,13 @@ if hasattr(sys.stderr, "reconfigure"):
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from dotenv import load_dotenv
+from dotenv import load_dotenv  # noqa: E402
 
-from agents.orchestrator import OrchestratorAgent
-from core.conversation_flow import ConversationFlowController, ConversationState
-from core.paths import RESULTS_DIR, RUNTIME_DIR
-from core.task_contract import requested_candidate_pool_size, requested_screen_top_k, task_payload_from_request
-from workflow.event_store import WorkflowEventStore
+from agents.orchestrator import OrchestratorAgent  # noqa: E402
+from core.conversation_flow import ConversationFlowController, ConversationState  # noqa: E402
+from core.paths import RESULTS_DIR, RUNTIME_DIR  # noqa: E402
+from core.task_contract import requested_candidate_pool_size, requested_screen_top_k, task_payload_from_request  # noqa: E402
+from workflow.event_store import WorkflowEventStore  # noqa: E402
 
 
 DEFAULT_INSTRUCTION_CASES = [
@@ -34,7 +34,6 @@ DEFAULT_INSTRUCTION_CASES = [
         "instruction": "请设计复合材料耐压圆柱壳，工作压力 30 MPa，长度 500 mm，半径 100 mm，生成 8 个候选，初筛保留 3 个候选",
         "expected": {
             "external_pressure_MPa": 30,
-            "ultimate_pressure_min_MPa": 30,
             "candidate_count": 8,
             "screened_count": 3
         }
@@ -43,7 +42,6 @@ DEFAULT_INSTRUCTION_CASES = [
         "instruction": "面向深海设备舱设计复合材料圆柱耐压壳，工作压力 28 MPa，长度 600 mm，半径 120 mm，两端简支，生成 8 个候选，初筛保留 3 个候选",
         "expected": {
             "external_pressure_MPa": 28,
-            "ultimate_pressure_min_MPa": 28,
             "candidate_count": 8,
             "screened_count": 3
         }
@@ -52,7 +50,6 @@ DEFAULT_INSTRUCTION_CASES = [
         "instruction": "Design a composite cylindrical pressure hull for 25 MPa hydrostatic pressure, length 500 mm, radius 100 mm, simply supported ends, generate 8 candidates and retain 3 screened candidates.",
         "expected": {
             "external_pressure_MPa": 25,
-            "ultimate_pressure_min_MPa": 25,
             "candidate_count": 8,
             "screened_count": 3
         }
@@ -61,7 +58,6 @@ DEFAULT_INSTRUCTION_CASES = [
         "instruction": "复合材料耐压圆柱壳，工作压力 32 MPa，可参考长度 520 mm、半径 105 mm、厚度 11 mm，生成 8 个候选，初筛保留 3 个候选",
         "expected": {
             "external_pressure_MPa": 32,
-            "ultimate_pressure_min_MPa": 32,
             "candidate_count": 8,
             "screened_count": 3
         }
@@ -70,7 +66,6 @@ DEFAULT_INSTRUCTION_CASES = [
         "instruction": "请设计无人潜航器用复合材料耐压圆柱壳，工作压力 22 MPa，长度 500 mm，半径 100 mm",
         "expected": {
             "external_pressure_MPa": 22,
-            "ultimate_pressure_min_MPa": 22,
             "candidate_count": 8,
             "screened_count": 3
         },
@@ -81,7 +76,6 @@ DEFAULT_INSTRUCTION_CASES = [
         "instruction": "复合材料耐压圆柱壳，工作压力 35 MPa，要求两端固支，生成 8 个候选，初筛保留 3 个候选",
         "expected": {
             "external_pressure_MPa": 35,
-            "ultimate_pressure_min_MPa": 35,
             "candidate_count": 8,
             "screened_count": 3
         }
@@ -90,7 +84,6 @@ DEFAULT_INSTRUCTION_CASES = [
         "instruction": "为深海耐压舱设计轻量化复合材料圆柱壳，工作压力 18 MPa，长度 500 mm，半径 100 mm，生成 8 个候选",
         "expected": {
             "external_pressure_MPa": 18,
-            "ultimate_pressure_min_MPa": 18,
             "candidate_count": 8,
             "screened_count": 3
         },
@@ -100,7 +93,6 @@ DEFAULT_INSTRUCTION_CASES = [
         "instruction": "Composite cylindrical pressure hull design: working pressure 40 MPa, generate 8 candidate designs and retain 3 screened candidates.",
         "expected": {
             "external_pressure_MPa": 40,
-            "ultimate_pressure_min_MPa": 40,
             "candidate_count": 8,
             "screened_count": 3
         }
@@ -160,11 +152,6 @@ def _validate_expected_contract(summary: dict[str, Any], expected: dict[str, Any
         summary.get("external_pressure_MPa"),
         _expected_float(expected, "external_pressure_MPa", "pressure"),
     )
-    _assert_close(
-        "目标极限压力",
-        summary.get("ultimate_pressure_min_MPa"),
-        _expected_float(expected, "ultimate_pressure_min_MPa", "target"),
-    )
     expected_candidates = _expected_int(expected, "candidate_count", "total_candidates", "total")
     if expected_candidates is not None and int(summary.get("candidate_count", -1)) != expected_candidates:
         raise AssertionError(f"候选数量不符合期望：{summary.get('candidate_count')} != {expected_candidates}")
@@ -220,7 +207,6 @@ def _validate_completed_state(
         "report_pdf": state.report.get("pdf_path"),
         "report_outputs": state.report.get("report_outputs"),
         "external_pressure_MPa": task_payload["load_conditions"].get("external_pressure_MPa"),
-        "ultimate_pressure_min_MPa": task_payload["design_targets"].get("ultimate_pressure_min_MPa"),
         "source_counter": {
             source: sum(1 for candidate in state.candidates if candidate.get("source") == source)
             for source in sorted({str(candidate.get("source")) for candidate in state.candidates})

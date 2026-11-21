@@ -12,7 +12,7 @@ from core.task_contract import task_imperfection_ratio
 from core.fem_result_semantics import verified_capacity_pressure
 from core.io_utils import read_json
 from core.paths import CASE_LIBRARY_DIR, CASES_DIR
-from core.task_contract import equivalent_in_plane_load, normalize_boundary_conditions, normalize_load_conditions
+from core.task_contract import normalize_boundary_conditions, normalize_load_conditions
 
 
 @dataclass
@@ -142,12 +142,21 @@ class CaseRetriever:
     def _score(self, task: Dict, record: Dict) -> float:
         design = record.get("design", {})
         geometry = design.get("geometry", {})
-        design_targets = task.get("design_targets", {})
         geometry_center = self._geometry_center(task)
-        load_gap = abs(
-            equivalent_in_plane_load(task.get("load_conditions", {}))
-            - equivalent_in_plane_load(design.get("load_conditions", {}))
-        )
+        # 部分检索条件缺少压力时，不以任务默认压力参与案例距离计算。
+        pressures = []
+        for payload in (task, design):
+            conditions = payload.get("load_conditions", {})
+            has_pressure = (
+                any(key in conditions for key in ("external_pressure_MPa", "pressure_MPa"))
+                if isinstance(conditions, dict) else bool(conditions)
+            )
+            pressures.append(
+                positive_number(normalize_load_conditions(conditions)["external_pressure_MPa"], "external_pressure_MPa")
+                if has_pressure else None
+            )
+        working_pressure, case_pressure = pressures
+        load_gap = abs(working_pressure - case_pressure) if None not in pressures else 0.0
         geometry_gap = 0.0
         weights = {"length_mm": 0.02, "radius_mm": 0.08, "thickness_mm": 1.5, "imperfection_ratio": 1000.0}
         for key, center in geometry_center.items():
@@ -164,10 +173,11 @@ class CaseRetriever:
                     return float("inf")
                 value = shell_radii(geometry)[radius_reference(task)]
             geometry_gap += abs(value - center) * weights[key]
-        target = design_targets.get("ultimate_pressure_min_MPa")
-        target_pressure = positive_number(target, "ultimate_pressure_min_MPa") if target is not None else None
         result_pressure = verified_capacity_pressure(record.get("abaqus_results", {}))
-        pressure_gap = abs(result_pressure - target_pressure) if result_pressure is not None and target_pressure is not None else 0.0
+        pressure_gap = (
+            abs(result_pressure - working_pressure)
+            if result_pressure is not None and working_pressure is not None else 0.0
+        )
         return load_gap + geometry_gap + pressure_gap * 2.0
 
     def _ranking_key(self, item: RetrievedCase) -> tuple:

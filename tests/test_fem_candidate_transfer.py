@@ -54,7 +54,7 @@ def _candidate(index: int) -> dict:
             "Yc_MPa": 196.0,
             "S_MPa": 61.1,
         },
-        "design_targets": {"ultimate_pressure_min_MPa": 50.259081},
+        "design_targets": {"primary_objective": "最小壳体质量"},
         "analysis": {"analysis_type": "linear_buckling_plus_first_mode_imperfection_riks"},
         "provenance": {
             "source_sha256": FEM_SOURCE_TABLE_SHA256,
@@ -225,7 +225,7 @@ def test_validated_response_builds_machine_task_without_markdown_parsing(monkeyp
         "geometry": {"length_mm": 600.0, "radius_mm": 150.0},
         "load_conditions": {"type": "external_pressure", "external_pressure_MPa": 50.259081},
         "boundary_conditions": {"type": "FLANGE_CONSTRAINED"},
-        "design_targets": {"ultimate_pressure_min_MPa": 50.259081},
+        "design_targets": {"primary_objective": "最小壳体质量"},
         "structure_form": "两端金属封头、中间复合材料圆柱壳",
     }
     seed = {

@@ -19,8 +19,8 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from core.knowledge_quality import QUALITY_FIELDS, QUALITY_VERSION
-from core.retrieval_evidence import exclusion_reason
+from core.knowledge_quality import QUALITY_FIELDS, QUALITY_VERSION  # noqa: E402
+from core.retrieval_evidence import exclusion_reason  # noqa: E402
 
 PATH_MAPPING = {
     "runtime/rag_chunks.compact.jsonl.gz": "rag/rag_chunks.compact.jsonl.gz",

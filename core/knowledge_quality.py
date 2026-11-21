@@ -1,6 +1,6 @@
-from __future__ import annotations
-
 """标记检索证据的解析完整性与适用范围，不补写公式、单位或试验条件。"""
+
+from __future__ import annotations
 
 import re
 from typing import Any

@@ -227,10 +227,6 @@ def validate_runtime_candidate(candidate):
         raise ValueError("missing or invalid FEM field: layup.balanced")
     if layup.get("symmetric") is not sequence_is_symmetric(angles):
         raise ValueError("missing or invalid FEM field: layup.symmetric")
-    target_pressure = require_float(
-        require_mapping(candidate.get("design_targets"), "design_targets").get("ultimate_pressure_min_MPa"),
-        "design_targets.ultimate_pressure_min_MPa",
-    )
     load_conditions = require_mapping(candidate.get("load_conditions"), "load_conditions")
     if str(load_conditions.get("type") or "") != "external_pressure":
         raise ValueError("missing or invalid FEM field: load_conditions.type")
@@ -238,8 +234,6 @@ def validate_runtime_candidate(candidate):
         load_conditions.get("external_pressure_MPa"),
         "load_conditions.external_pressure_MPa",
     )
-    if target_pressure + 1.0e-9 < service_pressure:
-        raise ValueError("design_targets.ultimate_pressure_min_MPa must not be below service pressure")
     boundary_conditions = require_mapping(candidate.get("boundary_conditions"), "boundary_conditions")
     boundary_type = str(boundary_conditions.get("type") or "")
     if boundary_type not in ("END_CLAMPED", "END_SIMPLY_SUPPORTED", "FLANGE_CONSTRAINED"):
@@ -251,7 +245,6 @@ def validate_runtime_candidate(candidate):
         "radius": radius,
         "thickness": thickness,
         "service_pressure": service_pressure,
-        "target_pressure": target_pressure,
         "boundary_type": boundary_type,
         "angles": angles,
         "ply_thickness": ply_thickness,
@@ -644,7 +637,7 @@ def max_hashin_index_from_frame(frame, material):
 
 
 def riks_first_ply_evidence(step, lpf_pairs, reference_pressure, material, ply_count=None):
-    """从已收敛的单调加载包络提取首层失效和目标压力证据。"""
+    """从已收敛的单调加载包络提取首层失效证据。"""
     pairs = [(float(item[0]), float(item[1])) for item in (lpf_pairs or [])]
     evidence = {
         "first_ply_failure_criterion": "Hashin_2D_1980_plane_stress",
@@ -743,13 +736,6 @@ def service_load_evidence(odb, checked_pressure, material, linear_pressure, ply_
     )
 
 
-def target_load_evidence(odb, checked_pressure, material, linear_pressure, ply_count=None):
-    return prefixed_load_evidence(
-        exact_load_evidence(odb, checked_pressure, material, linear_pressure, ply_count),
-        "target_",
-    )
-
-
 def build_and_run(candidate, result_json, user_subroutine):
     validated = validate_runtime_candidate(candidate)
     geometry = validated["geometry"]
@@ -757,7 +743,6 @@ def build_and_run(candidate, result_json, user_subroutine):
     length = validated["length"]
     radius = validated["radius"]
     service_pressure = validated["service_pressure"]
-    target_pressure = validated["target_pressure"]
     boundary_type = validated["boundary_type"]
     angles = validated["angles"]
 
@@ -1091,74 +1076,10 @@ def build_and_run(candidate, result_json, user_subroutine):
         })
         return result_shell(candidate, result_json, "success", extra=service_extra)
 
-    if abs(target_pressure - service_pressure) <= 1.0e-9:
-        target_run = service_run
-        target_evidence = {
-            "target_" + key[len("service_"):]: value
-            for key, value in service_evidence.items()
-            if key.startswith("service_")
-        }
-    else:
-        target_run = run_exact_pressure_job(
-            "CPH_Target_Model",
-            "_target",
-            target_pressure,
-            "CSDM_cph exact design target pressure nonlinear check",
-        )
-        if not os.path.exists(target_run["odb_path"]):
-            service_extra.update({
-                "target_odb": None,
-                "target_inp": target_run["inp_path"],
-            })
-            return result_shell(
-                candidate,
-                result_json,
-                "failed",
-                "target_load_solver_failed",
-                "设计目标压力精确加载作业未生成 ODB 文件。",
-                service_extra,
-            )
-        target_odb = session.openOdb(name=target_run["odb_path"])
-        target_evidence = target_load_evidence(target_odb, target_pressure, material, linear_pressure, len(angles))
-        target_odb.close()
-
-    service_extra.update({
-        "target_odb": target_run["odb_path"],
-        "target_inp": target_run["inp_path"],
-    })
-    service_extra.update(target_evidence)
-    if target_evidence["target_pressure_check_status"] not in {"passed", "failed"}:
-        return result_shell(
-            candidate,
-            result_json,
-            "failed",
-            "target_load_solver_failed",
-            "设计目标压力精确加载作业未形成可判定的最终收敛帧。",
-            service_extra,
-        )
-    if target_evidence["target_pressure_check_status"] != "passed":
-        service_extra.update({
-            "verdict": "不通过",
-            "failure_mode": (
-                "线性屈曲压力低于设计目标压力"
-                if linear_pressure <= target_pressure
-                else "设计目标压力处 Hashin 首层失效"
-            ),
-            "design_check_status": "failed_at_design_target_pressure",
-            "design_verdict_basis": "精确设计目标压力下的线性屈曲与二维 Hashin 首层失效联合判据",
-            "capacity_assessment_status": "not_run_target_check_failed",
-            "progressive_damage_complete": False,
-            "weight_kg_per_m2": estimate_areal_density(geometry, material),
-        })
-        return result_shell(candidate, result_json, "success", extra=service_extra)
-
     service_extra.update({
         "verdict": "通过",
-        "design_check_status": "passed_at_design_target_pressure",
-        "design_verdict_basis": (
-            "精确设计目标压力下线性屈曲压力高于目标值，且二维 Hashin 首层失效指数小于 1；"
-            "结论不包含金属封头、连接、渐进损伤或试验认证。"
-        ),
+        "design_check_status": "passed_at_service_pressure",
+        "design_verdict_basis": "工作压力下线性屈曲与二维 Hashin 首层失效联合校核通过",
         "progressive_damage_complete": False,
         "weight_kg_per_m2": estimate_areal_density(geometry, material),
     })
@@ -1357,7 +1278,7 @@ def build_and_run(candidate, result_json, user_subroutine):
     )
     verdict = "通过"
     if progressive_damage_complete:
-        verdict = "通过" if ultimate_pressure >= target_pressure else "不通过"
+        verdict = "通过" if ultimate_pressure >= service_pressure else "不通过"
     payload = {
         "candidate_id": candidate_id,
         "design_revision_id": candidate.get("design_revision_id"),
@@ -1399,8 +1320,8 @@ def build_and_run(candidate, result_json, user_subroutine):
         "analysis_type": "linear_buckling_plus_exact_service_load_plus_capacity_riks",
         "user_subroutine_used": use_subroutine,
         "progressive_damage_complete": progressive_damage_complete,
-        "design_check_status": "passed_at_design_target_pressure",
-        "design_verdict_basis": service_extra["design_verdict_basis"],
+        "design_check_status": "passed" if verdict == "通过" and progressive_damage_complete else "failed_capacity_requirement" if progressive_damage_complete else "capacity_unconfirmed",
+        "design_verdict_basis": "工作压力下强度校核与已确认损伤极限压力和工作压力的比较" if progressive_damage_complete else service_extra["design_verdict_basis"],
         "capacity_assessment_status": "geometric_limit_confirmed",
         "verification_scope": "composite_cylindrical_shell_submodel",
         "abaqus_job_status": post_job_status,
@@ -1408,8 +1329,6 @@ def build_and_run(candidate, result_json, user_subroutine):
         "riks_limit_point_observed": riks_classification["limit_point_observed"],
         "riks_limit_point_confirmed": riks_classification["limit_point_confirmed"],
         "riks_post_peak_drop_ratio": round(float(riks_classification["post_peak_drop_ratio"]), 8),
-        "target_odb": target_run["odb_path"],
-        "target_inp": target_run["inp_path"],
         "service_odb": service_run["odb_path"],
         "service_inp": service_run["inp_path"],
         "boundary_condition_type": boundary_type,
@@ -1420,7 +1339,6 @@ def build_and_run(candidate, result_json, user_subroutine):
     payload.update(damage_evidence)
     payload["riks_termination_reason"] = linear_extra["riks_termination_reason"]
     payload.update(service_evidence)
-    payload.update(target_evidence)
     write_json(result_json, payload)
     return payload
 

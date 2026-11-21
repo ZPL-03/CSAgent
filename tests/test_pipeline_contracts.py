@@ -88,6 +88,93 @@ def test_task_quantity_normalization_preserves_valid_boundaries_and_source_zero(
     assert payload["screening_preferences"]["top_k_candidates"] == 30
 
 
+@pytest.mark.parametrize("instruction", [
+    "极限压力40MPa，工作压力30MPa",
+    "工作压力30MPa，极限压力40MPa",
+    "ultimate pressure 40 MPa, working pressure 30 MPa",
+    "service pressure 30 MPa, ultimate pressure 40 MPa",
+])
+def test_parser_rejects_independent_capacity_requirement(instruction):
+    with pytest.raises(ValueError):
+        TaskParser().parse_instruction(instruction)
+
+
+@pytest.mark.parametrize("instruction", [
+    "极限压力40MPa", "ultimate pressure 40 MPa", "工作压力30MPa，外压35MPa", "外压-30MPa",
+])
+def test_parser_rejects_missing_conflicting_or_negative_working_pressure(instruction):
+    with pytest.raises(ValueError):
+        TaskParser().parse_instruction(instruction)
+
+
+@pytest.mark.parametrize("instruction", ["工作压力3e1MPa", "operating pressure 30 MPa", "30MPa外压"])
+def test_parser_preserves_equivalent_working_pressure_inputs(instruction):
+    payload = task_payload_from_request(TaskParser().parse_instruction(instruction))
+    assert payload["load_conditions"]["external_pressure_MPa"] == 30
+    assert payload["design_targets"] == {"primary_objective": "最小壳体质量"}
+
+
+@pytest.mark.parametrize("field", ["unsupported_objective", "safety_factor"])
+def test_task_contract_rejects_unknown_design_requirements(field):
+    with pytest.raises(ValueError):
+        normalize_task_payload({"load_conditions": {"external_pressure_MPa": 30},
+                                "design_targets": {field: 1.5}})
+
+
+@pytest.mark.parametrize("instruction", ["工作压力30MPa，极限压力0MPa", "工作压力30MPa，安全系数1.5", "working pressure 30 MPa, safety factor 1.5"])
+def test_parser_does_not_silently_ignore_unsupported_pressure_requirements(instruction):
+    with pytest.raises(ValueError):
+        TaskParser().parse_instruction(instruction)
+
+
+@pytest.mark.parametrize("load", [
+    {"external_pressure_MPa": "abc"}, {"external_pressure_MPa": True},
+    {"external_pressure_MPa": None}, {"external_pressure_MPa": float("nan")},
+    {"external_pressure_MPa": float("inf")}, {"external_pressure_MPa": -1},
+    {"external_pressure_MPa": 30, "pressure_MPa": 40},
+    {"type": "axial_compression", "external_pressure_MPa": 30},
+    {"type": "", "external_pressure_MPa": 30},
+    {"service_depth_m": -1}, {"seawater_density_kg_per_m3": "invalid"}, {"gravity_m_per_s2": False},
+])
+def test_task_contract_rejects_invalid_explicit_load_conditions(load):
+    with pytest.raises(ValueError):
+        task_payload_from_request({"task": {"load_conditions": load}})
+
+
+@pytest.mark.parametrize("boundary", ["FREE", "", "unknown", False])
+def test_task_contract_rejects_unknown_explicit_boundary_type(boundary):
+    with pytest.raises(ValueError):
+        normalize_task_payload({"boundary_conditions": {"type": boundary}})
+
+
+@pytest.mark.parametrize("value", ["abc", True, None, float("nan"), [300], [300, 500, 800], [300, "abc"]])
+def test_task_contract_rejects_invalid_explicit_geometry(value):
+    with pytest.raises(ValueError):
+        normalize_task_payload({"geometry_envelope": {"length_mm": value}})
+
+
+def test_task_contract_preserves_defaults_aliases_and_range_endpoints():
+    default = normalize_task_payload({})
+    assert default["load_conditions"]["external_pressure_MPa"] == 30
+    assert default["boundary_conditions"]["type"] == "END_CLAMPED"
+    payload = normalize_task_payload({
+        "load_conditions": {"type": "hydrostatic_pressure", "pressure_MPa": "40"},
+        "boundary_conditions": {"type": "SSSS"},
+        "geometry_envelope": {"L": [800, 300], "R": "100", "t": 10},
+    })
+    assert payload["load_conditions"]["external_pressure_MPa"] == 40
+    assert payload["boundary_conditions"]["type"] == "END_SIMPLY_SUPPORTED"
+    assert payload["geometry_envelope"]["length_mm"] == [300, 800]
+    assert payload["geometry_envelope"]["radius_mm"] == [100, 100]
+    assert payload["geometry_envelope"]["thickness_mm"] == [10, 10]
+
+
+@pytest.mark.parametrize("structure", ["球形耐压壳", "椭球壳", "圆锥壳", "spherical pressure hull", "T形加筋壁板"])
+def test_parser_rejects_structures_without_a_supported_solver(structure):
+    with pytest.raises(ValueError):
+        TaskParser().parse_instruction(f"设计{structure}，工作压力30MPa")
+
+
 @pytest.mark.parametrize("quantity_text,field,value", [
     ("生成 1 个方案", "total_candidates", 1),
     ("候选池总数为 60 个", "total_candidates", 60),
@@ -159,14 +246,14 @@ def test_initial_case_task_uses_fixed_analysis_defect_and_working_pressure():
 
     task = default_task("T700_Epoxy", 20.0)
     assert task["geometry_envelope"]["imperfection_ratio"] == [0.008, 0.008]
-    assert task["design_targets"]["ultimate_pressure_min_MPa"] == 20.0
+    assert task["load_conditions"]["external_pressure_MPa"] == 20.0
 
 
 def test_parser_reads_natural_language_pool_counts(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     instruction = (
         "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，长度 500 mm，半径 100 mm，"
-        "厚度 10 mm，极限压力不低于 35 MPa，生成 12 个候选，初筛保留 5 个候选"
+        "厚度 10 mm，生成 12 个候选，初筛保留 5 个候选"
     )
 
     task = TaskParser().parse_instruction(instruction)
@@ -175,7 +262,7 @@ def test_parser_reads_natural_language_pool_counts(monkeypatch):
 
     assert requested_candidate_pool_size(task) == 12
     assert requested_screen_top_k(task) == 5
-    assert payload["design_targets"]["ultimate_pressure_min_MPa"] == 35.0
+    assert payload["load_conditions"]["external_pressure_MPa"] == 30.0
     assert generation["llm_candidates"] is None
     assert generation["case_transfer_candidates"] is None
     assert generation["doe_candidates"] is None
@@ -189,14 +276,14 @@ def test_parser_reads_natural_language_pool_counts(monkeypatch):
     assert payload["geometry_envelope"]["length_mm"] == [500.0, 500.0]
     assert payload["geometry_envelope"]["radius_mm"] == [100.0, 100.0]
     assert payload["geometry_envelope"]["thickness_mm"] == [10.0, 10.0]
-    assert facts["design_targets"]["ultimate_pressure_min_MPa"] == 35.0
+    assert "design_targets" not in facts
 
 
 def test_parser_distinguishes_fixed_geometry_from_reference_geometry(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = TaskParser().parse_instruction(
         "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，固定几何尺寸：长度 500 mm，"
-        "半径 100 mm，厚度 10 mm，极限压力不低于 35 MPa，生成 8 个候选，初筛保留 3 个候选"
+        "半径 100 mm，厚度 10 mm，生成 8 个候选，初筛保留 3 个候选"
     )
     payload = task_payload_from_request(task)
     facts = payload["user_input_facts"]
@@ -214,7 +301,7 @@ def test_parser_keeps_reference_geometry_when_user_marks_it_as_reference(monkeyp
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = TaskParser().parse_instruction(
         "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，参考长度 500 mm，"
-        "半径约 100 mm，厚度大约 10 mm，极限压力不低于 35 MPa，生成 8 个候选，初筛保留 3 个候选"
+        "半径约 100 mm，厚度大约 10 mm，生成 8 个候选，初筛保留 3 个候选"
     )
     payload = task_payload_from_request(task)
     facts = payload["user_input_facts"]
@@ -232,7 +319,7 @@ def test_parser_accepts_field_level_fixed_geometry_phrasing(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = TaskParser().parse_instruction(
         "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，长度固定 500 mm，"
-        "半径必须等于 100 mm，厚度限定 10 mm，极限压力不低于 35 MPa，"
+        "半径必须等于 100 mm，厚度限定 10 mm，"
         "生成 8 个候选，初筛保留 3 个候选"
     )
     payload = task_payload_from_request(task)
@@ -614,7 +701,7 @@ def test_llm_candidates_are_extracted_from_engineering_natural_answer(monkeypatc
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = TaskParser().parse_instruction(
         "请为复合材料外压圆柱耐压壳设计方案，材料 T700/Epoxy，外压 30 MPa，几何参考长度约 500 mm，"
-        "半径约 100 mm，厚度约 10 mm，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
+        "半径约 100 mm，厚度约 10 mm，生成 6 个候选，初筛保留 3 个候选"
     )
     agent = CandidateGenAgent()
 
@@ -663,7 +750,7 @@ def test_llm_candidates_are_extracted_from_engineering_natural_answer(monkeypatc
 def test_llm_candidate_generation_tries_next_backend_after_unparseable_primary(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = TaskParser().parse_instruction(
-        "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 4 个候选，初筛保留 2 个候选"
+        "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，生成 4 个候选，初筛保留 2 个候选"
     )
     agent = CandidateGenAgent()
     agent.llm_config["fallback"]["max_format_retries"] = 1
@@ -717,7 +804,7 @@ def test_llm_candidate_table_without_material_or_imperfection_is_rejected(monkey
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = TaskParser().parse_instruction(
         "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，长度 500 mm，半径 100 mm，"
-        "厚度 10 mm，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
+        "厚度 10 mm，生成 6 个候选，初筛保留 3 个候选"
     )
     agent = CandidateGenAgent()
 
@@ -1230,7 +1317,7 @@ def test_knowledge_agent_does_not_initialize_case_memory_during_construction(mon
 def _report_sample():
     task = TaskParser().parse_instruction(
         "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，长度 500 mm，半径 100 mm，"
-        "厚度 10 mm，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
+        "厚度 10 mm，生成 6 个候选，初筛保留 3 个候选"
     )
     candidate = {
         "candidate_id": "TMP_1",
@@ -1293,7 +1380,6 @@ def test_report_display_rounding_does_not_change_capacity_verdict(monkeypatch, c
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task, results, candidates = _report_sample()
     task["task"]["load_conditions"]["external_pressure_MPa"] = 9.6
-    task["task"]["design_targets"]["ultimate_pressure_min_MPa"] = 9.6
     results[0].update(ultimate_pressure_MPa=capacity, riks_limit_point_confirmed=True)
     snapshot = deepcopy((task, results, candidates))
     text = ReportGenAgent()._render_markdown(task, results, candidates)
@@ -1393,6 +1479,25 @@ def test_final_recommendation_obeys_objective_and_requires_complete_evidence(mon
     assert "当前没有同时具备完整通过证据" in report_text
 
 
+@pytest.mark.parametrize("capacity,accepted", [(29.999999, False), (30.0, True), (30.000001, True)])
+def test_recommendation_compares_confirmed_capacity_with_working_pressure(monkeypatch, capacity, accepted):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, results, candidates = _report_sample()
+    result = results[0]
+    result.update(status="success", ultimate_pressure_MPa=capacity, riks_limit_point_confirmed=True,
+                  progressive_damage_complete=True, damage_state_output_complete=True,
+                  verification_scope="composite_cylindrical_shell_submodel")
+    for stage in ("service",):
+        result[f"{stage}_pressure_check_status"] = "passed"
+        result[f"{stage}_stress_coverage"] = {"status": "complete", "checked_element_positions": 8,
+                                             "expected_section_points": 8, "incomplete_element_positions": 0}
+    agent = ReportGenAgent()
+    comparison = agent._build_structured_summary(task, results, candidates)["recommendation"]
+    assert bool(comparison["selected"]) is accepted
+    result["riks_limit_point_confirmed"] = False
+    assert agent._build_structured_summary(task, results, candidates)["recommendation"]["selected"] is None
+
+
 def test_report_rejection_is_not_reported_as_solver_or_connection_failure(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task, results, candidates = _report_sample()
@@ -1426,9 +1531,6 @@ def test_report_llm_context_preserves_numeric_facts_and_completed_analysis_scope
         service_pressure_checked_MPa=30.0,
         service_hashin_index_max=0.55,
         service_pressure_check_status="passed",
-        target_pressure_checked_MPa=35.0,
-        target_hashin_index_max=0.70,
-        target_pressure_check_status="passed",
         riks_increment_count=221,
         riks_limit_point_confirmed=False,
         progressive_damage_complete=False,
@@ -1440,7 +1542,7 @@ def test_report_llm_context_preserves_numeric_facts_and_completed_analysis_scope
     payload = agent._build_llm_explanation_payload(summary)["context"]
 
     assert "30.0 MPa" in payload["task"]["load_case"]
-    assert payload["task"]["ultimate_pressure_min_MPa"] == 35.0
+    assert payload["task"]["external_pressure_MPa"] == 30.0
     assert payload["screened_candidates"][0]["length_mm"] == 500.0
     assert payload["screened_candidates"][0]["layup"] == candidates[0]["layup"]["layup"]
     assert payload["screened_candidates"][0]["selection_reason"] == candidates[0]["selection_reason"]
@@ -1448,7 +1550,6 @@ def test_report_llm_context_preserves_numeric_facts_and_completed_analysis_scope
     assert payload["screened_candidates"][0]["balanced"] is True
     assert payload["results"][0]["session_candidate_id"] == "TMP_1"
     assert payload["results"][0]["service_hashin_index_max"] == 0.55
-    assert payload["results"][0]["target_hashin_index_max"] == 0.70
     assert payload["results"][0]["riks_increment_count"] == 221
     assert payload["results"][0]["riks_limit_point_confirmed"] is False
     assert payload["results"][0]["ultimate_pressure_MPa"] is None

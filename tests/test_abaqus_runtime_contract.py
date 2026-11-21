@@ -172,7 +172,7 @@ def test_job_lock_prevents_cleanup(tmp_path: Path) -> None:
     assert {path.name for path in workdir.iterdir()} == {"C1.lck", "C1.sta", "build_C1.py"}
 
 
-def test_completed_capacity_payload_keeps_both_exact_load_artifact_pairs() -> None:
+def test_completed_capacity_payload_keeps_service_and_capacity_artifacts() -> None:
     import ast
     import inspect
     from abaqus.runtime_build_pressure_hull import build_and_run
@@ -181,10 +181,11 @@ def test_completed_capacity_payload_keeps_both_exact_load_artifact_pairs() -> No
                 and any(isinstance(target, ast.Name) and target.id == "payload" for target in node.targets)]
     output = payloads[-1]
     fields = {key.value: value for key, value in zip(output.keys, output.values)}
-    for stage in ("service", "target"):
-        for kind in ("odb", "inp"):
-            expression = ast.unparse(fields[stage + "_" + kind])
-            assert expression == f"{stage}_run['{kind}_path']"
+    for kind in ("odb", "inp"):
+        assert ast.unparse(fields["service_" + kind]) == f"service_run['{kind}_path']"
+    assert ast.unparse(fields["linear_buckling_odb"]) == "odb_path"
+    assert ast.unparse(fields["postbuckling_odb"]) == "post_odb_path"
+    assert ast.unparse(fields["abaqus_odb"]) == "post_odb_path"
 
 
 def test_diagnosis_summary_reports_service_pressure_failure_without_target_placeholders() -> None:
@@ -360,13 +361,11 @@ def test_runtime_keeps_service_pressure_separate_from_ultimate_target() -> None:
         },
         "load_conditions": {"type": "external_pressure", "external_pressure_MPa": 50.0},
         "boundary_conditions": {"type": "FLANGE_CONSTRAINED"},
-        "design_targets": {"ultimate_pressure_min_MPa": 75.0},
     }
 
     validated = validate_runtime_candidate(candidate)
 
     assert validated["service_pressure"] == 50.0
-    assert validated["target_pressure"] == 75.0
 
 
 def test_runtime_rejects_false_layup_declarations() -> None:
@@ -405,7 +404,6 @@ def test_runtime_rejects_false_layup_declarations() -> None:
         },
         "load_conditions": {"type": "external_pressure", "external_pressure_MPa": 50.0},
         "boundary_conditions": {"type": "FLANGE_CONSTRAINED"},
-        "design_targets": {"ultimate_pressure_min_MPa": 50.0},
     }
 
     with pytest.raises(ValueError, match="layup.symmetric"):

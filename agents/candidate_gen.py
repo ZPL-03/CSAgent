@@ -174,8 +174,6 @@ class CandidateGenAgent(BaseAgent):
             lines.append(f"材料：{material['name']}")
         design_targets = facts.get("design_targets", {})
         if isinstance(design_targets, dict):
-            if design_targets.get("ultimate_pressure_min_MPa") is not None:
-                lines.append(f"极限压力目标：不低于 {design_targets['ultimate_pressure_min_MPa']} MPa")
             if design_targets.get("primary_objective"):
                 lines.append(f"优化目标：{design_targets['primary_objective']}")
         return lines

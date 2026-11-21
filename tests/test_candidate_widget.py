@@ -39,7 +39,7 @@ def _candidate() -> dict:
         "material_system": {"name": "T700/Epoxy"},
         "load_conditions": {"type": "external_pressure", "external_pressure_MPa": 30.0},
         "boundary_conditions": {"type": "END_CLAMPED", "label": "两端固支"},
-        "design_targets": {"ultimate_pressure_min_MPa": 35.0},
+        "design_targets": {"primary_objective": "最小壳体质量"},
         "rule_check": {"is_valid": True, "errors": [], "suggestions": []},
         "rationale": "结构性能和制造风险均衡。",
         "generation_audit": {

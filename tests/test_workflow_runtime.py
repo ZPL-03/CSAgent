@@ -31,7 +31,7 @@ class FakeOrchestrator:
             "screening_preferences": {"top_k_candidates": 1},
             "load_conditions": {"type": "external_pressure", "external_pressure_MPa": 30.0},
             "boundary_conditions": {"type": "END_CLAMPED"},
-            "design_targets": {"ultimate_pressure_min_MPa": 35.0},
+            "design_targets": {"primary_objective": "最小壳体质量"},
         }
 
     def generate_candidates(self, task):
@@ -188,7 +188,7 @@ def test_quantities_are_requested_at_their_stage_and_resume_without_repeating_no
     assert state["pending_confirmation"] == "fem_evaluation"
     assert len(state["candidates"]) == 2 and len(state["screened_candidates"]) == 1
     assert state["task"]["task_id"] == task_id and state["run_id"] == run_id
-    assert state["task"]["task"]["design_targets"]["ultimate_pressure_min_MPa"] == 12
+    assert state["task"]["task"]["load_conditions"]["external_pressure_MPa"] == 12
     assert state["task"]["task"]["user_input_facts"]["candidate_generation"] == {"total_candidates": 2, "top_k_candidates": 1}
     assert orchestrator.calls == ["parse", "generate", "screen"]
     messages = [event for event in store.list_events(run_id) if event["event_type"] == "quantity_requested"]
@@ -434,7 +434,7 @@ def test_workflow_runtime_records_failed_fem_result_as_failed_job(tmp_path):
             "verdict": None,
             "ultimate_pressure_MPa": None,
             "error_type": "service_load_check_failed",
-            "error_log": "目标压力处首层失效校核未通过",
+            "error_log": "工作压力处首层失效校核未通过",
         }
 
     orchestrator.evaluate_prepared_candidate = failed_result

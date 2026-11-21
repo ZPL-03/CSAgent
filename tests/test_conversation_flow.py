@@ -9,7 +9,7 @@ from workflow.event_store import WorkflowEventStore
 
 REALISTIC_INSTRUCTION = (
     "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，"
-    "极限压力不低于 35 MPa，生成 2 个候选，初筛保留 1 个候选"
+    "生成 2 个候选，初筛保留 1 个候选"
 )
 
 

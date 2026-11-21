@@ -10,7 +10,7 @@ import time
 import traceback
 
 sys.dont_write_bytecode = True
-from runtime_build_pressure_hull import classify_riks_limit_point, riks_status_curve, write_json
+from runtime_build_pressure_hull import classify_riks_limit_point, riks_status_curve, write_json  # noqa: E402
 
 
 def monitor(job_name, command):

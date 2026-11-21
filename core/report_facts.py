@@ -11,16 +11,13 @@ from core.display import format_number, format_parameter
 # 标签和单位由指标定义，模型不能重命名压力目标、承载结果或缺陷条件。
 METRICS = {
     "external_pressure_MPa": ("工作压力", "MPa"),
-    "ultimate_pressure_min_MPa": ("目标极限压力下限", "MPa"),
     "imperfection_ratio": ("分析缺陷比", "1"),
     "solved_imperfection_ratio": ("实际求解缺陷比", "1"),
     "imperfection_amplitude_mm": ("实际缺陷幅值", "mm"),
     "ultimate_pressure_MPa": ("确认极限承载压力", "MPa"),
     "linear_buckling_pressure_MPa": ("线性屈曲压力", "MPa"),
     "surrogate_ultimate_pressure_MPa": ("代理承载压力估计", "MPa"),
-    "target_pressure_checked_MPa": ("目标校核压力", "MPa"),
     "service_pressure_checked_MPa": ("工作校核压力", "MPa"),
-    "target_hashin_index_max": ("目标压力最大 Hashin 指数", "1"),
     "service_hashin_index_max": ("工作压力最大 Hashin 指数", "1"),
     "weight_kg_per_m2": ("面密度", "kg/m^2"),
     "symmetric": ("中面对称", None),
@@ -28,7 +25,6 @@ METRICS = {
     "design_check": ("设计校核状态", None),
     "riks_limit_point_confirmed": ("Riks 极限点确认", None),
     "riks_termination_reason": ("Riks 终止原因", None),
-    "required_capacity_MPa": ("容量比较下限", "MPa"),
     "objective_value": ("优化目标比较值", None),
     "capacity_margin_percent": ("容量相对工作压力的余量", "%"),
     "candidate_count": ("候选总数", "个"),
@@ -57,20 +53,26 @@ def build_report_facts(summary: dict) -> list[dict]:
                       "unit": unit if unit is not None else METRICS[metric][1], "status": status,
                       "label": METRICS[metric][0]})
 
-    for metric in ("external_pressure_MPa", "ultimate_pressure_min_MPa", "imperfection_ratio"):
+    for metric in ("external_pressure_MPa", "imperfection_ratio"):
         add(None, metric, summary.get(metric), "specified")
     result_ids = set()
+    result_bindings = {}
     assessments = {item["candidate_id"]: item["state"] for item in summary.get("result_assessments", [])}
     for row in summary.get("results", []):
         cid = row.get("candidate_id")
         if not cid or cid in result_ids:
             raise ValueError("有限元报告的候选编号缺失或重复")
         result_ids.add(cid)
+        session_id = row.get("session_candidate_id")
+        if session_id:
+            if session_id in result_bindings:
+                raise ValueError("同一会话候选关联了多个有限元结果")
+            result_bindings[session_id] = cid
         state = assessments.get(cid, "unknown")
         add(cid, "design_check", state, state)
         for metric in ("solved_imperfection_ratio", "imperfection_amplitude_mm", "ultimate_pressure_MPa",
-                       "linear_buckling_pressure_MPa", "target_pressure_checked_MPa", "service_pressure_checked_MPa",
-                       "target_hashin_index_max", "service_hashin_index_max", "weight_kg_per_m2",
+                       "linear_buckling_pressure_MPa", "service_pressure_checked_MPa",
+                       "service_hashin_index_max", "weight_kg_per_m2",
                        "riks_limit_point_confirmed", "riks_termination_reason"):
             value = row.get(metric)
             if metric == "ultimate_pressure_MPa" and not row.get("verified_capacity"):
@@ -82,19 +84,19 @@ def build_report_facts(summary: dict) -> list[dict]:
         if not cid or cid in candidate_ids:
             raise ValueError("候选报告的编号缺失或重复")
         candidate_ids.add(cid)
+        # 已求解方案只使用正式身份，提案指标仍以 status 区分于求解事实。
+        fact_id = result_bindings.get(cid, cid)
+        if cid in result_ids and fact_id != cid:
+            raise ValueError("会话候选编号与有限元结果编号关联冲突")
         for metric in ("imperfection_ratio", "symmetric", "balanced", "surrogate_ultimate_pressure_MPa"):
             value = row.get(metric)
             status = "proposal" if metric != "surrogate_ultimate_pressure_MPa" else str(row.get("surrogate_prediction_status") or "unknown")
-            add(cid, metric, value, status if value is not None else "unknown")
-        if cid not in result_ids:
-            # 会话编号与正式求解编号保持不同；结果关联不借用 display_name。
-            linked = next((row for row in summary.get("results", []) if row.get("session_candidate_id") == cid), None)
-            state = assessments.get(linked["candidate_id"], "unknown") if linked else "not_run"
-            add(cid, "design_check", state, state)
+            add(fact_id, metric, value, status if value is not None else "unknown")
+        if fact_id not in result_ids:
+            add(fact_id, "design_check", "not_run", "not_run")
     recommendation = summary.get("recommendation") or {}
     ranked = recommendation.get("ranked") or []
     best = recommendation.get("selected")
-    add(None, "required_capacity_MPa", recommendation.get("required_capacity_MPa"), "task_input")
     add(None, "candidate_count", len(summary.get("all_candidates", [])), "recorded")
     add(None, "result_count", len(summary.get("results", [])), "recorded")
     add(None, "comparable_count", len(ranked), "derived")
@@ -107,7 +109,7 @@ def build_report_facts(summary: dict) -> list[dict]:
         pressure = summary.get("external_pressure_MPa")
         if pressure and pressure > 0:
             add(cid, "capacity_margin_percent", (row["capacity_MPa"] / pressure - 1) * 100, "derived")
-    # 求解重试可能改变厚度，解释实际结果时只读取 solved_design，而不借用提案尺寸。
+    # 求解尺寸取自 solved_design，与候选提案分别建账。
     for row in summary.get("results", []):
         geometry = row.get("solved_geometry") or {}
         for metric, value in geometry.items():

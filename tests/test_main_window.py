@@ -507,7 +507,7 @@ def test_primary_workflow_buttons_click_through_to_pipeline(monkeypatch, tmp_pat
 
     try:
         window._run_action = fake_run_action
-        instruction = "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
+        instruction = "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，生成 6 个候选，初筛保留 3 个候选"
         window.input_line.setText(instruction)
         window.generate_button.click()
         assert calls[-1][0] == "conversation_start"
@@ -972,7 +972,7 @@ def test_main_window_restores_workflow_snapshot(monkeypatch, tmp_path) -> None:
     app = _app()
     store = WorkflowEventStore(tmp_path / "workflow.sqlite3")
     task = TaskParser().parse_instruction(
-        "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 6 个候选，初筛保留 3 个候选"
+        "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，生成 6 个候选，初筛保留 3 个候选"
     )
     candidate = _candidate("TMP_1")
     snapshot = {
@@ -1990,23 +1990,27 @@ def test_workbench_agent_rail_content_width_tracks_viewport(monkeypatch) -> None
     app = _app()
     window = MainWindow()
     try:
-        window.resize(1440, 900)
         window.show()
         app.processEvents()
-
-        rail_scroll = next(
-            scroll
-            for scroll in window.findChildren(QScrollArea)
-            if scroll.objectName() == "railScroll" and scroll.isVisible()
+        window.knowledge_status_label.setText(
+            "知识库：ready；案例 1；运行 123\n文档 1931 · 块 155599 · 关系 234200"
         )
-        content = rail_scroll.widget()
-        assert content is not None
-        assert content.width() == rail_scroll.viewport().width()
+        rail_scroll = window.workbench_left_scroll
+        for width in (1700, 1280, 1440, 1700):
+            window.resize(width, 900)
+            app.processEvents()
+            rail_scroll.sync_content_geometry()
+            app.processEvents()
+            content = rail_scroll.widget()
+            assert content is not None
+            assert content.width() == rail_scroll.viewport().width()
+            for label in (window.queue_label, window.knowledge_status_label, window.run_audit_label):
+                assert label.height() >= label.heightForWidth(label.width())
 
-        report_card = window.agent_cards["REPORT_GEN"]
-        viewport_right = rail_scroll.viewport().mapTo(window, rail_scroll.viewport().rect().topRight()).x()
-        report_right = report_card.mapTo(window, report_card.rect().topRight()).x()
-        assert report_right <= viewport_right
+            report_card = window.agent_cards["REPORT_GEN"]
+            viewport_right = rail_scroll.viewport().mapTo(window, rail_scroll.viewport().rect().topRight()).x()
+            report_right = report_card.mapTo(window, report_card.rect().topRight()).x()
+            assert report_right <= viewport_right
     finally:
         window.close()
         app.processEvents()

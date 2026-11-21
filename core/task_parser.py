@@ -67,17 +67,25 @@ class TaskParser:
         return material, False
 
     def _external_pressure_value(self, text: str) -> float | None:
+        number = r"([+-]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)"
+        connector = r"\s*(?:为|是|=|:|：|is|of|at)?\s*"
         patterns = [
-            r"(?:外压|外部压力|静水压力|压力|p)\s*(?:为|是|=|:|：)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:MPa|兆帕)",
-            r"([0-9]+(?:\.[0-9]+)?)\s*(?:MPa|兆帕)\s*(?:外压|外部压力|静水压力|压力)",
-            r"(?:external\s+pressure|hydrostatic\s+pressure|pressure)\s*(?:=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*MPa",
-            r"([0-9]+(?:\.[0-9]+)?)\s*MPa\s*(?:external\s+pressure|hydrostatic\s+pressure)",
+            r"(?:外压|外部压力|工作压力|静水压力|压力|\bp\b)" + connector + number + r"\s*(?:MPa|兆帕)",
+            number + r"\s*(?:MPa|兆帕)\s*(?:外压|外部压力|工作压力|静水压力|压力)",
+            r"(?:external\s+pressure|hydrostatic\s+pressure|working\s+pressure|operating\s+pressure|service\s+pressure|pressure)"
+            + connector + number + r"\s*MPa",
+            number + r"\s*MPa\s*(?:external\s+pressure|hydrostatic\s+pressure|working\s+pressure|operating\s+pressure|service\s+pressure)",
         ]
+        values = set()
         for pattern in patterns:
-            value = self._extract_float(pattern, text)
-            if value is not None:
-                return value
-        return None
+            for match in re.finditer(pattern, text, flags=re.IGNORECASE):
+                # 极限容量属于目标约束，不能把其后缀“压力”当成工作载荷。
+                if re.search(r"(?:极限|失效|ultimate|failure|collapse)\s*$", text[:match.start()], re.IGNORECASE):
+                    continue
+                values.add(float(match.group(1)))
+        if len(values) > 1:
+            raise ValueError("工作压力存在冲突，请指定同一工况下的一个压力值。")
+        return next(iter(values), None)
 
     def _service_depth_value(self, text: str) -> float | None:
         patterns = [
@@ -107,9 +115,11 @@ class TaskParser:
             r"筋条(?:壁板|板|壳|结构)?",
             r"stiffened\s+(?:panel|shell|structure)",
             r"stiffener",
+            r"(?:球(?:形|型)?|椭球(?:形|型)?|圆锥(?:形|型)?|锥(?:形|型)?)\s*(?:复合材料)?(?:耐压|压力)?(?:壳|舱)",
+            r"(?:spherical|ellipsoidal|conical|toroidal)\s+(?:(?:composite|pressure)\s+)*(?:hull|shell)",
         )
         if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in unsupported_patterns):
-            raise ValueError("当前项目仅支持复合材料外压圆柱耐压壳，不支持 T 形加筋壁板或其他未建模结构类型。")
+            raise ValueError("当前求解模型支持复合材料外压圆柱耐压壳；输入包含不支持的结构类型。")
         return "CYLINDRICAL"
 
     def _extract_load_conditions(self, text: str) -> Dict[str, Any]:
@@ -306,20 +316,6 @@ class TaskParser:
         geometry["imperfection_ratio"] = [defect, defect]
         return normalize_geometry_envelope(geometry)
 
-    def _ultimate_pressure_target_value(self, text: str) -> float | None:
-        patterns = [
-            r"(?:极限压力|极限强度|失效压力|承压|耐压|P_?ult)[^，。；,;\n]{0,24}?(?:不低于|不少于|不小于|至少|>=|≥|为|是|=|:|：)\s*([0-9]+(?:\.[0-9]+)?)\s*(?:MPa|兆帕)?",
-            r"(?:极限压力|极限强度|失效压力|承压|耐压|P_?ult)\s*(?:不低于|不少于|不小于|至少|>=|≥|为|是|=|:|：)?\s*([0-9]+(?:\.[0-9]+)?)\s*(?:MPa|兆帕)?",
-            r"([0-9]+(?:\.[0-9]+)?)\s*(?:MPa|兆帕)\s*(?:以上|承压|耐压|极限压力|极限强度)",
-            r"(?:ultimate\s+pressure|failure\s+pressure|collapse\s+pressure|P_?ult)[^\n\r,;]{0,40}?(?:not\s+less\s+than|no\s+less\s+than|at\s+least|not\s+below|>=|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*MPa",
-            r"(?:ultimate\s+pressure|failure\s+pressure|collapse\s+pressure|P_?ult)\s*(?:>=|=|:)?\s*([0-9]+(?:\.[0-9]+)?)\s*MPa",
-        ]
-        for pattern in patterns:
-            value = self._extract_float(pattern, text)
-            if value is not None:
-                return value
-        return None
-
     def _objective_from_text(self, text: str) -> tuple[str, bool]:
         objective = "最小壳体质量"
         if "最小厚度" in text:
@@ -330,13 +326,9 @@ class TaskParser:
             return "最大极限压力", True
         return objective, False
 
-    def _extract_design_targets(self, text: str, service_pressure_MPa: float) -> Dict[str, Any]:
-        pressure_value = self._ultimate_pressure_target_value(text)
+    def _extract_design_targets(self, text: str) -> Dict[str, Any]:
         objective, _objective_specified = self._objective_from_text(text)
-        return {
-            "ultimate_pressure_min_MPa": pressure_value or service_pressure_MPa,
-            "primary_objective": objective,
-        }
+        return {"primary_objective": objective}
 
     def _extract_top_k_candidates(self, text: str) -> int | None:
         patterns = [
@@ -463,9 +455,6 @@ class TaskParser:
             }
 
         design_targets: Dict[str, Any] = {}
-        pressure_target = self._ultimate_pressure_target_value(text)
-        if pressure_target is not None:
-            design_targets["ultimate_pressure_min_MPa"] = pressure_target
         objective, objective_specified = self._objective_from_text(text)
         if objective_specified:
             design_targets["primary_objective"] = objective
@@ -474,6 +463,11 @@ class TaskParser:
         return facts
 
     def _rule_hints(self, text: str) -> Dict[str, Any]:
+        # 不支持的额外压力约束必须告知用户，不能静默忽略后继续求解。
+        if re.search(r"(?:安全系数|(?:factor\s+of\s+)?safety\s+factor)\s*(?:为|是|=|:|：|is)?\s*[0-9]", text, re.IGNORECASE):
+            raise ValueError("当前任务使用工作压力校核，未支持安全系数输入。请直接给出工作压力。")
+        if re.search(r"(?:极限压力|极限强度|失效压力|ultimate\s+pressure|failure\s+pressure|collapse\s+pressure|P_?ult)\s*(?:不低于|不少于|不小于|至少|>=|≥|为|是|=|:|：|not\s+less\s+than|at\s+least)?\s*[0-9]", text, re.IGNORECASE):
+            raise ValueError("极限压力由有限元求解确定。请仅给出所需工作压力。")
         material, is_user_specified = self._extract_material(text)
         load_conditions = self._extract_load_conditions(text)
         hints = {
@@ -501,10 +495,7 @@ class TaskParser:
                 "is_user_specified": is_user_specified,
             },
             "layup_constraints": dict(DEFAULT_LAYUP_CONSTRAINTS),
-            "design_targets": self._extract_design_targets(
-                text,
-                float(load_conditions["external_pressure_MPa"]),
-            ),
+            "design_targets": self._extract_design_targets(text),
         }
         hints["user_input_facts"] = self._extract_user_input_facts(text, hints)
         hints["analysis_condition_sources"] = {

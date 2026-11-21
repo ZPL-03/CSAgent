@@ -28,7 +28,7 @@ def _task() -> dict:
             },
             "material_system": {"name": "T700/Epoxy"},
             "hull_type": "CYLINDRICAL",
-            "design_targets": {"ultimate_pressure_min_MPa": 35.0, "primary_objective": "最小壳体质量"},
+            "design_targets": {"primary_objective": "最小壳体质量"},
         }
     }
 

@@ -36,10 +36,9 @@ def complete_payload(tmp_path, candidate_id="C10", run_id="RUN_A"):
         "verdict": "通过", "ultimate_pressure_MPa": 40.0,
         "riks_limit_point_confirmed": True, "riks_increment_count": 10,
         "progressive_damage_complete": True, "damage_state_output_complete": True,
-        "service_pressure_check_status": "passed", "target_pressure_check_status": "passed",
-        "service_stress_coverage": coverage, "target_stress_coverage": dict(coverage),
+        "service_pressure_check_status": "passed", "service_stress_coverage": coverage,
     }
-    for field in ("postbuckling_inp", "postbuckling_odb", "service_inp", "service_odb", "target_inp", "target_odb",
+    for field in ("postbuckling_inp", "postbuckling_odb", "service_inp", "service_odb",
                   "user_subroutine_path", "material_strength_include"):
         path = tmp_path / f"{candidate_id}_{field}"
         path.write_text("单元测试工件", encoding="utf-8")
@@ -74,12 +73,12 @@ def test_case_ids_follow_storage_order_not_solver_ids(case_store, monkeypatch, t
 def test_incomplete_results_do_not_consume_case_numbers(case_store, monkeypatch, tmp_path):
     agent = isolated_agent(monkeypatch)
     payload = complete_payload(tmp_path)
-    payload["abaqus_results"]["target_stress_coverage"]["incomplete_element_positions"] = 1
+    payload["abaqus_results"]["service_stress_coverage"]["incomplete_element_positions"] = 1
     skipped = agent.run(payload)
     assert skipped["status"] == "not_stored_incomplete"
     assert skipped["case_id"] is None
     assert not list(case_store[0].glob("*.json"))
-    payload["abaqus_results"]["target_stress_coverage"]["incomplete_element_positions"] = 0
+    payload["abaqus_results"]["service_stress_coverage"]["incomplete_element_positions"] = 0
     assert agent.run(payload)["case_id"] == "CASE_1"
 
 
@@ -106,7 +105,7 @@ def test_case_rejects_conflicting_run_identity(case_store, monkeypatch, tmp_path
 def test_missing_artifacts_prevent_storage(case_store, monkeypatch, tmp_path):
     agent = isolated_agent(monkeypatch)
     payload = complete_payload(tmp_path)
-    (tmp_path / "C10_target_odb").unlink()
+    (tmp_path / "C10_service_odb").unlink()
     assert agent.run(payload)["status"] == "not_stored_incomplete"
     assert not list(case_store[0].glob("*.json"))
 

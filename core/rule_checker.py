@@ -84,7 +84,7 @@ class RuleChecker:
                 "hull_type": (candidate.get("hull_type"), constraints["hull_type"]),
                 "load_conditions": (normalize_load_conditions(candidate.get("load_conditions")), constraints["load_conditions"]),
                 "boundary_conditions": (normalize_boundary_conditions(candidate.get("boundary_conditions"))["type"], constraints["boundary_conditions"]["type"]),
-                "design_targets": ((candidate.get("design_targets") or {}).get("ultimate_pressure_min_MPa"), constraints["design_targets"]["ultimate_pressure_min_MPa"]),
+                "design_targets": (candidate.get("design_targets"), constraints["design_targets"]),
             }
             for key, (actual, expected) in comparisons.items():
                 if key in candidate and actual != expected:

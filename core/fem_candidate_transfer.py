@@ -40,8 +40,8 @@ def _validate_screening_classification(candidate: Dict[str, Any], index: int) ->
     """复核历史筛选角色，禁止把来源参考值写成当前 Abaqus 结论。"""
     screening = candidate.get("screening")
     provenance = candidate.get("provenance")
-    targets = candidate.get("design_targets")
-    if not isinstance(screening, dict) or not isinstance(provenance, dict) or not isinstance(targets, dict):
+    load = candidate.get("load_conditions")
+    if not isinstance(screening, dict) or not isinstance(provenance, dict) or not isinstance(load, dict):
         raise FEMCandidateTransferError(f"FEM-ready 候选 {index} 缺少筛选分类。")
     if screening.get("current_abaqus_status") != "not_run" or screening.get("current_design_verdict") != "pending":
         raise FEMCandidateTransferError(f"FEM-ready 候选 {index} 冒充当前有限元结果。")
@@ -49,7 +49,7 @@ def _validate_screening_classification(candidate: Dict[str, Any], index: int) ->
     if not isinstance(historical, dict) or historical.get("status") != "screening_reference_only_not_current_run":
         raise FEMCandidateTransferError(f"FEM-ready 候选 {index} 历史结果边界无效。")
     try:
-        source_meets = float(historical["ultimate_pressure_MPa"]) >= float(targets["ultimate_pressure_min_MPa"])
+        source_meets = float(historical["ultimate_pressure_MPa"]) >= float(load["external_pressure_MPa"])
     except (KeyError, TypeError, ValueError) as exc:
         raise FEMCandidateTransferError(f"FEM-ready 候选 {index} 历史筛选数值无效。") from exc
     geometry_match = provenance.get("geometry_match")

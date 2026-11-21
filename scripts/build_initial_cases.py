@@ -14,16 +14,16 @@ ROOT = Path(__file__).resolve().parent.parent
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from agents.fem_agent import FEMAgent
-from agents.knowledge_agent import KnowledgeAgent
-from core.config_loader import default_imperfection_ratio, load_app_config, load_material_db
-from core.doe_sampler import DOESampler
-from core.id_utils import format_temp_candidate_id, next_task_id, reserve_candidate_ids, task_file_name
-from core.io_utils import write_json
-from core.paths import ABAQUS_RUNS_DIR, CASES_DIR, CASE_LIBRARY_DIR, CHROMA_DIR, IO_DIR, MODELS_DIR, RESULTS_DIR, RUNTIME_DIR, TASKS_DIR
-from core.schema_validator import validate_or_raise
-from core.surrogate_model import SurrogateModelManager
-from core.task_contract import (
+from agents.fem_agent import FEMAgent  # noqa: E402
+from agents.knowledge_agent import KnowledgeAgent  # noqa: E402
+from core.config_loader import default_imperfection_ratio, load_app_config, load_material_db  # noqa: E402
+from core.doe_sampler import DOESampler  # noqa: E402
+from core.id_utils import format_temp_candidate_id, next_task_id, reserve_candidate_ids, task_file_name  # noqa: E402
+from core.io_utils import write_json  # noqa: E402
+from core.paths import ABAQUS_RUNS_DIR, CASES_DIR, CASE_LIBRARY_DIR, CHROMA_DIR, IO_DIR, MODELS_DIR, RESULTS_DIR, RUNTIME_DIR, TASKS_DIR  # noqa: E402
+from core.schema_validator import validate_or_raise  # noqa: E402
+from core.surrogate_model import SurrogateModelManager  # noqa: E402
+from core.task_contract import (  # noqa: E402
     boundary_condition_payload,
     build_task_request_record,
     load_condition_payload,
@@ -40,11 +40,9 @@ MODEL_FILES = [
 def default_task(
     material_key: str,
     pressure_MPa: float,
-    target_pressure_MPa: float | None = None,
     task_id: str | None = None,
 ) -> Dict:
     material = load_material_db()[material_key]
-    target_pressure = float(target_pressure_MPa if target_pressure_MPa is not None else pressure_MPa)
     defect = default_imperfection_ratio()
     task_payload = normalize_task_payload(
         {
@@ -81,7 +79,7 @@ def default_task(
                 "min_ratio_per_angle": 0.05,
             },
             "hull_type": "CYLINDRICAL",
-            "design_targets": {"ultimate_pressure_min_MPa": target_pressure, "primary_objective": "最小壳体质量"},
+            "design_targets": {"primary_objective": "最小壳体质量"},
         }
     )
     validate_or_raise("task.schema.json", task_payload)
@@ -236,7 +234,6 @@ def main() -> int:
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--full-range", action="store_true")
     parser.add_argument("--pressures", type=str, default="")
-    parser.add_argument("--target-pressure", type=float, default=None)
     parser.add_argument("--reset", action="store_true")
     parser.add_argument("--record-task", action="store_true", help="为批量建库写入 TASK_N 追溯记录")
     args = parser.parse_args()
@@ -255,7 +252,6 @@ def main() -> int:
         task = default_task(
             material_key=material_key,
             pressure_MPa=pressure,
-            target_pressure_MPa=args.target_pressure,
             task_id=task_id,
         )
         if task_id:

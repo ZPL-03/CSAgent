@@ -65,11 +65,11 @@ def test_case_retrieval_requires_complete_submodel_stress_coverage():
     record = {"design": {"candidate_id": "C1"}, "abaqus_results": {
         "status": "success", "verdict": "通过",
         "verification_scope": "composite_cylindrical_shell_submodel",
-        "target_stress_coverage": {"status": "incomplete"},
+        "service_stress_coverage": {"status": "incomplete"},
     }}
     retriever = CaseRetriever(use_vector_index=False)
     assert not retriever._is_transferable(record)
-    record["abaqus_results"]["target_stress_coverage"]["status"] = "complete"
+    record["abaqus_results"]["service_stress_coverage"]["status"] = "complete"
     assert retriever._is_transferable(record)
 
 
@@ -93,7 +93,7 @@ def test_linear_buckling_pressure_is_not_capacity_training_target():
 ])
 def test_case_retrieval_keeps_unknown_capacity_after_comparable_verified_cases(monkeypatch, results):
     retriever = CaseRetriever(use_vector_index=False)
-    task = {"design_targets": {"ultimate_pressure_min_MPa": 30.0}}
+    task = {"load_conditions": {"external_pressure_MPa": 30.0}}
     design = {"hull_type": "CYLINDRICAL", "geometry": {"length_mm": 500.0}}
     records = [
         {"case_id": "unknown", "design": design, "abaqus_results": results},
@@ -130,13 +130,25 @@ def test_case_retrieval_compares_equal_radius_references():
     assert scores == [0.0, 0.0, 0.0]
 
 
-def test_case_retrieval_does_not_invent_unknown_dimensions_or_pressure_targets():
+def test_case_retrieval_does_not_invent_unknown_dimensions_or_working_pressure():
     retriever = CaseRetriever(use_vector_index=False)
     record = {"design": {"geometry": {"imperfection_ratio": 0.008}},
               "abaqus_results": {"status": "success", "ultimate_pressure_MPa": 100.0}}
     assert retriever._geometry_center({}) == {"imperfection_ratio": 0.008}
     assert retriever._score({}, record) == 0
     assert retriever._score({"geometry_envelope": {"length_mm": [600, 600]}}, record) == float("inf")
+
+
+def test_case_retrieval_uses_only_supplied_pressures_for_distance():
+    retriever = CaseRetriever(use_vector_index=False)
+    record = {"design": {"geometry": {"imperfection_ratio": 0.008},
+                         "load_conditions": {"external_pressure_MPa": 40.0}},
+              "abaqus_results": {"status": "success", "ultimate_pressure_MPa": 60.0}}
+    assert retriever._score({}, record) == 0.0
+    assert retriever._score({"load_conditions": {"pressure_MPa": 30.0}}, record) == 70.0
+    for pressure in (-1, 0, float("nan"), True):
+        with pytest.raises(ValueError):
+            retriever._score({"load_conditions": {"external_pressure_MPa": pressure}}, record)
 
 
 def test_case_retrieval_uses_fixed_task_defect():
@@ -151,7 +163,7 @@ def test_shell_pass_and_capacity_require_full_ply_and_damage_evidence():
               "verification_scope": "composite_cylindrical_shell_submodel"}
     assert not is_passed_design_check(result)
     assert verified_capacity_pressure(result) is None
-    result["target_stress_coverage"] = {"status": "complete"}
+    result["service_stress_coverage"] = {"status": "complete"}
     assert is_passed_design_check(result)
     assert verified_capacity_pressure(result) is None
     result.update(progressive_damage_complete=True, damage_state_output_complete=True, riks_limit_point_confirmed=True)

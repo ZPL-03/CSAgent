@@ -771,7 +771,7 @@ class DomainKnowledgeBase:
                 f"壳体：{task_payload.get('hull_type', 'CYLINDRICAL')}",
                 f"材料：{material.get('name', '')}",
                 f"几何：L={envelope.get('length_mm')}, R={envelope.get('radius_mm')}, t={envelope.get('thickness_mm')}, Ir={envelope.get('imperfection_ratio')}",
-                f"目标：P_ult >= {target.get('ultimate_pressure_min_MPa', 30.0)} MPa，{target.get('primary_objective', '最小壳体质量')}",
+                f"目标：P_ult >= {task_payload['load_conditions']['external_pressure_MPa']} MPa，{target.get('primary_objective', '最小壳体质量')}",
             ]
         )
 

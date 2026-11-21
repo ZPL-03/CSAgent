@@ -16,24 +16,22 @@ def _result(index, thickness):
         "status": "success", "verdict": "通过", "ultimate_pressure_MPa": 30,
         "riks_limit_point_confirmed": True, "progressive_damage_complete": True,
         "damage_state_output_complete": True, "weight_kg_per_m2": 15.5,
-        "service_pressure_check_status": "passed", "target_pressure_check_status": "passed",
-        "service_stress_coverage": coverage, "target_stress_coverage": dict(coverage),
+        "service_pressure_check_status": "passed", "service_stress_coverage": coverage,
         "solved_design": {"geometry": {"thickness_mm": thickness}},
     }
 
 
-def test_recommendation_uses_solved_thickness_and_explicit_capacity_constraint(monkeypatch):
+def test_recommendation_uses_solved_thickness_and_working_pressure(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = normalize_task_payload({"load_conditions": {"external_pressure_MPa": 20},
-                                   "design_targets": {"ultimate_pressure_min_MPa": 20,
-                                                      "primary_objective": "最小厚度"}})
+                                   "design_targets": {"primary_objective": "最小厚度"}})
     candidates = [{"candidate_id": "TMP_1", "geometry": {"thickness_mm": 10}},
                   {"candidate_id": "TMP_2", "geometry": {"thickness_mm": 10.4}}]
     results = [_result(1, 10.8), _result(2, 10.4)]
     agent = ReportGenAgent()
     text = agent._render_markdown(task, results, candidates)
     assert "- 推荐：TMP_2 / C2" in text
-    task["design_targets"]["ultimate_pressure_min_MPa"] = 35
+    task["load_conditions"]["external_pressure_MPa"] = 35
     text = agent._render_markdown(task, results, candidates)
     assert "当前没有同时具备完整通过证据" in text
 
@@ -41,8 +39,7 @@ def test_recommendation_uses_solved_thickness_and_explicit_capacity_constraint(m
 def test_report_and_model_share_three_state_counts_and_recommendation(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = normalize_task_payload({"load_conditions": {"external_pressure_MPa": 20},
-                                   "design_targets": {"ultimate_pressure_min_MPa": 20,
-                                                      "primary_objective": "最小厚度"}})
+                                   "design_targets": {"primary_objective": "最小厚度"}})
     results = [_result(1, 10.8), {**_result(2, 10.4), "verdict": "不通过"},
                {"candidate_id": "C3", "status": "failed", "verdict": None}]
     agent = ReportGenAgent()
@@ -89,8 +86,7 @@ def test_mass_comparison_uses_same_shell_area_for_equivalent_radius_references(m
     import math
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = normalize_task_payload({"load_conditions": {"external_pressure_MPa": 20},
-                                   "design_targets": {"ultimate_pressure_min_MPa": 20,
-                                                      "primary_objective": "最小壳体质量"}})
+                                   "design_targets": {"primary_objective": "最小壳体质量"}})
     result = _result(1, 10)
     result["solved_design"]["geometry"].update(length_mm=500, radius_mm=radius, radius_reference=reference)
     agent = ReportGenAgent()

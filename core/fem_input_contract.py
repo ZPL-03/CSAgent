@@ -200,9 +200,8 @@ def validate_fem_input(candidate: Dict[str, Any], material_db: Dict[str, Any] | 
     load = candidate.get("load_conditions")
     if not isinstance(load, dict) or load.get("type") != "external_pressure":
         issues.append("load_conditions.type")
-        service_pressure = None
     else:
-        service_pressure = _finite_positive(
+        _finite_positive(
             load.get("external_pressure_MPa"),
             "load_conditions.external_pressure_MPa",
             issues,
@@ -215,18 +214,6 @@ def validate_fem_input(candidate: Dict[str, Any], material_db: Dict[str, Any] | 
         "FLANGE_CONSTRAINED",
     }:
         issues.append("boundary_conditions.type")
-
-    targets = candidate.get("design_targets")
-    if not isinstance(targets, dict):
-        issues.append("design_targets")
-    else:
-        target_pressure = _finite_positive(
-            targets.get("ultimate_pressure_min_MPa"),
-            "design_targets.ultimate_pressure_min_MPa",
-            issues,
-        )
-        if service_pressure is not None and target_pressure is not None and target_pressure < service_pressure:
-            issues.append("design_targets.ultimate_pressure_min_MPa")
 
     revision = str(candidate.get("design_revision_id") or "").strip()
     if revision != compute_design_revision_id(candidate):

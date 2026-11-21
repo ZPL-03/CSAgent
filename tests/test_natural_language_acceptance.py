@@ -96,10 +96,9 @@ def test_acceptance_runner_can_limit_default_case_count() -> None:
     ("instruction", "expected"),
     [
         (
-            "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 12 个候选，初筛保留 5 个候选",
+            "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，生成 12 个候选，初筛保留 5 个候选",
             {
                 "pressure": 30.0,
-                "target": 35.0,
                 "total": 12,
                 "top_k": 5,
                 "boundary_type": "END_CLAMPED",
@@ -108,10 +107,9 @@ def test_acceptance_runner_can_limit_default_case_count() -> None:
             },
         ),
         (
-            "请为深海潜器复合材料外压圆柱耐压壳设计方案，外压 28 MPa，极限压力目标不低于 36 MPa，生成 8 个候选，初筛保留 3 个候选，两端简支",
+            "请为深海潜器复合材料外压圆柱耐压壳设计方案，外压 28 MPa，生成 8 个候选，初筛保留 3 个候选，两端简支",
             {
                 "pressure": 28.0,
-                "target": 36.0,
                 "total": 8,
                 "top_k": 3,
                 "boundary_type": "END_SIMPLY_SUPPORTED",
@@ -120,10 +118,9 @@ def test_acceptance_runner_can_limit_default_case_count() -> None:
             },
         ),
         (
-            "复合材料外压圆柱耐压壳，目标工况外压 35 MPa，极限压力不少于 45 MPa，要求两端固支，生成 8 个候选，初筛保留 3 个候选",
+            "复合材料外压圆柱耐压壳，目标工况外压 35 MPa，要求两端固支，生成 8 个候选，初筛保留 3 个候选",
             {
                 "pressure": 35.0,
-                "target": 45.0,
                 "total": 8,
                 "top_k": 3,
                 "boundary_type": "END_CLAMPED",
@@ -132,10 +129,9 @@ def test_acceptance_runner_can_limit_default_case_count() -> None:
             },
         ),
         (
-            "Design a composite external-pressure cylindrical pressure hull, external pressure 25 MPa, ultimate pressure at least 40 MPa, generate 8 candidates, keep 3 after screening, simply supported ends",
+            "Design a composite external-pressure cylindrical pressure hull, external pressure 25 MPa, generate 8 candidates, keep 3 after screening, simply supported ends",
             {
                 "pressure": 25.0,
-                "target": 40.0,
                 "total": 8,
                 "top_k": 3,
                 "boundary_type": "END_SIMPLY_SUPPORTED",
@@ -144,10 +140,9 @@ def test_acceptance_runner_can_limit_default_case_count() -> None:
             },
         ),
         (
-            "Design a composite external-pressure cylindrical pressure hull for 25 MPa hydrostatic pressure, ultimate pressure at least 40 MPa, simply supported ends, generate 8 candidates and retain 3 screened candidates.",
+            "Design a composite external-pressure cylindrical pressure hull for 25 MPa hydrostatic pressure, simply supported ends, generate 8 candidates and retain 3 screened candidates.",
             {
                 "pressure": 25.0,
-                "target": 40.0,
                 "total": 8,
                 "top_k": 3,
                 "boundary_type": "END_SIMPLY_SUPPORTED",
@@ -156,10 +151,9 @@ def test_acceptance_runner_can_limit_default_case_count() -> None:
             },
         ),
         (
-            "Composite pressure hull preliminary design: external pressure 40 MPa, required ultimate pressure no less than 52 MPa, generate 8 candidate designs and retain 3 screened candidates.",
+            "Composite pressure hull preliminary design: external pressure 40 MPa, generate 8 candidate designs and retain 3 screened candidates.",
             {
                 "pressure": 40.0,
-                "target": 52.0,
                 "total": 8,
                 "top_k": 3,
                 "boundary_type": "END_CLAMPED",
@@ -171,7 +165,6 @@ def test_acceptance_runner_can_limit_default_case_count() -> None:
             "设计一个外压圆柱耐压壳，外压 24 MPa，半径约 120 mm，长度约 600 mm，生成 8 个候选，预筛 4 个进入校核",
             {
                 "pressure": 24.0,
-                "target": 24.0,
                 "total": 8,
                 "top_k": 4,
                 "boundary_type": "END_CLAMPED",
@@ -180,10 +173,9 @@ def test_acceptance_runner_can_limit_default_case_count() -> None:
             },
         ),
         (
-            "面向深海外压工况给出复合材料耐压壳方案，外压 18 MPa，极限压力至少 28 MPa，生成 6 个候选，初筛 3 个",
+            "面向深海外压工况给出复合材料耐压壳方案，外压 18 MPa，生成 6 个候选，初筛 3 个",
             {
                 "pressure": 18.0,
-                "target": 28.0,
                 "total": 6,
                 "top_k": 3,
                 "boundary_type": "END_CLAMPED",
@@ -192,10 +184,9 @@ def test_acceptance_runner_can_limit_default_case_count() -> None:
             },
         ),
         (
-            "外压 32 MPa，长度 520 mm，半径 105 mm，厚度 11 mm，极限压力不低于 42 MPa，候选池 8 个，初筛 Top-3",
+            "外压 32 MPa，长度 520 mm，半径 105 mm，厚度 11 mm，候选池 8 个，初筛 Top-3",
             {
                 "pressure": 32.0,
-                "target": 42.0,
                 "total": 8,
                 "top_k": 3,
                 "boundary_type": "END_CLAMPED",
@@ -215,7 +206,6 @@ def test_multi_natural_language_inputs_run_candidate_and_screening_pipeline(monk
     assert requested_candidate_pool_size(task) == expected["total"]
     assert requested_screen_top_k(task) == expected["top_k"]
     assert payload["load_conditions"]["external_pressure_MPa"] == expected["pressure"]
-    assert payload["design_targets"]["ultimate_pressure_min_MPa"] == expected["target"]
     assert payload["boundary_conditions"]["type"] == expected["boundary_type"]
 
     facts = payload["user_input_facts"]
@@ -248,8 +238,8 @@ def test_multi_natural_language_inputs_run_candidate_and_screening_pipeline(monk
 @pytest.mark.parametrize(
     "instruction",
     [
-        "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，极限压力不低于 35 MPa，生成 4 个候选，初筛保留 2 个候选",
-        "Design a composite external-pressure cylindrical pressure hull, external pressure 26 MPa, ultimate pressure at least 38 MPa, generate 4 candidates, keep 2 after screening",
+        "请为复合材料外压圆柱耐压壳设计方案，外压 30 MPa，生成 4 个候选，初筛保留 2 个候选",
+        "Design a composite external-pressure cylindrical pressure hull, external pressure 26 MPa, generate 4 candidates, keep 2 after screening",
     ],
 )
 def test_natural_language_inputs_complete_workflow_with_fem_contract(monkeypatch, tmp_path, instruction):

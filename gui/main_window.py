@@ -460,12 +460,16 @@ class RailScrollArea(QScrollArea):
                     continue
                 child.setMinimumHeight(0)
                 child.setMaximumHeight(self.MAX_WIDGET_HEIGHT)
+                margins = layout.contentsMargins()
+                child.resize(max(1, width - margins.left() - margins.right()), child.height())
                 child_layout = child.layout()
                 if child_layout is not None:
                     child_layout.activate()
-                    child_height = max(child_layout.totalSizeHint().height(), child_layout.totalMinimumSize().height())
+                    # 换行文本的高度取决于实际宽度，不能沿用宽窗口的 sizeHint。
+                    wrapped_height = child_layout.totalHeightForWidth(child.width())
+                    child_height = max(wrapped_height, child_layout.totalSizeHint().height(), child_layout.totalMinimumSize().height())
                 else:
-                    child_height = max(child.sizeHint().height(), child.minimumSizeHint().height())
+                    child_height = max(child.heightForWidth(child.width()), child.sizeHint().height(), child.minimumSizeHint().height())
                 child.setFixedHeight(child_height)
             layout.activate()
             height = max(layout.totalSizeHint().height(), layout.totalMinimumSize().height())
@@ -3766,7 +3770,7 @@ class MainWindow(QMainWindow):
             f"<p><b>候选池：</b>{generated_count} / 目标 {candidate_pool_target}</p>"
             f"<p><b>初筛目标：</b>Top-{requested_top_k}（当前最多 {effective_top_k}）</p>"
             f"<p><b>材料：</b>{material.get('name')} | E1={material.get('E1_GPa')} GPa | 密度={material.get('density_kg_per_m3')} kg/m^3</p>"
-            f"<p><b>目标：</b>P_ult >= {format_number(task_payload.get('design_targets', {}).get('ultimate_pressure_min_MPa'))} MPa，{task_payload.get('design_targets', {}).get('primary_objective')}</p>"
+            f"<p><b>目标：</b>P_ult >= {format_number(task_payload['load_conditions']['external_pressure_MPa'])} MPa，{task_payload['design_targets']['primary_objective']}</p>"
             f"<p><b>阶段：</b>{self.session.stage}</p>"
         )
 

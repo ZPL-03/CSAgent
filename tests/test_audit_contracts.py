@@ -91,13 +91,13 @@ def test_task_mutation_is_blocked_before_fem_id_reservation_and_before_solver(mo
 
 def report_summary():
     return {
-        "external_pressure_MPa": 30, "ultimate_pressure_min_MPa": 30, "imperfection_ratio": 0.006,
+        "external_pressure_MPa": 30, "imperfection_ratio": 0.006,
         "all_candidates": [{"candidate_id": "C3", "surrogate_ultimate_pressure_MPa": -2.5,
                             "surrogate_prediction_status": "nonpositive", "imperfection_ratio": 0.006}],
         "results": [
             {"candidate_id": "C1", "ultimate_pressure_MPa": 122.81234, "verified_capacity": True,
              "solved_imperfection_ratio": 0.006, "imperfection_amplitude_mm": 0.6,
-             "target_hashin_index_max": 0.05712345,
+             "service_hashin_index_max": 0.05712345,
              "riks_termination_reason": "post_peak_drop_20_percent"},
             {"candidate_id": "C2", "ultimate_pressure_MPa": 55.0, "verified_capacity": True},
         ],
@@ -117,11 +117,38 @@ def test_report_facts_keep_prediction_ratio_amplitude_and_state():
         assert format_fact_value(fact) == str(fact["value"])
     assert by_key["C3", "surrogate_ultimate_pressure_MPa"]["value"] == -2.5
     assert by_key["C1", "ultimate_pressure_MPa"]["value"] == 122.81234
-    assert by_key["C1", "target_hashin_index_max"]["value"] == 0.05712345
+    assert by_key["C1", "service_hashin_index_max"]["value"] == 0.05712345
     assert format_fact_value(by_key["C1", "riks_termination_reason"]) == "峰后载荷下降达到 20% 阈值，受控终止"
     assert by_key["C1", "riks_termination_reason"]["value"] == "post_peak_drop_20_percent"
     assert by_key["C3", "design_check"]["value"] == "not_run"
     assert facts == original
+
+
+def test_report_facts_bind_proposal_and_solver_to_one_design():
+    summary = report_summary()
+    summary["results"][0]["session_candidate_id"] = "TMP_2"
+    summary["all_candidates"].append({
+        "candidate_id": "TMP_2", "imperfection_ratio": 0.006,
+        "surrogate_ultimate_pressure_MPa": 79.967, "surrogate_prediction_status": "positive",
+    })
+    before = deepcopy(summary)
+    facts = build_report_facts(summary)
+    checks = {row["candidate_id"]: row["value"] for row in facts if row["metric"] == "design_check"}
+    assert checks == {"C1": "passed", "C2": "failed", "C3": "not_run"}
+    assert all(row["candidate_id"] != "TMP_2" for row in facts)
+    prediction = next(row for row in facts if (row["candidate_id"], row["metric"]) == ("C1", "surrogate_ultimate_pressure_MPa"))
+    capacity = next(row for row in facts if (row["candidate_id"], row["metric"]) == ("C1", "ultimate_pressure_MPa"))
+    assert prediction["value"] == 79.967 and prediction["status"] == "positive"
+    assert capacity["value"] == 122.81234 and capacity["status"] == "passed"
+    assert summary == before
+
+
+def test_report_rejects_multiple_results_for_one_session_candidate():
+    summary = report_summary()
+    for result in summary["results"]:
+        result["session_candidate_id"] = "TMP_2"
+    with pytest.raises(ValueError, match="关联了多个"):
+        build_report_facts(summary)
 
 
 def test_unconfirmed_capacity_cannot_be_rendered_as_a_verified_limit(monkeypatch):
@@ -143,7 +170,6 @@ def test_report_model_review_and_rejection_are_separate_from_export(monkeypatch)
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     agent = ReportGenAgent()
     current = task()
-    current["design_targets"]["ultimate_pressure_min_MPa"] = 30
     current["design_targets"]["primary_objective"] = "最小厚度"
     current["load_conditions"]["external_pressure_MPa"] = 30
     summary = agent._build_structured_summary(current, [_result(1, 10)], [])

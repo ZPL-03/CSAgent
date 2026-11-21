@@ -221,12 +221,11 @@
     },
     "design_targets": {
       "type": "object",
-      "required": ["ultimate_pressure_min_MPa", "primary_objective"],
+      "required": ["primary_objective"],
       "properties": {
-        "ultimate_pressure_min_MPa": {"type": "number", "minimum": 0},
         "primary_objective": {"type": "string"}
       },
-      "additionalProperties": true
+      "additionalProperties": false
     }
   },
   "additionalProperties": true

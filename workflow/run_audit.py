@@ -125,7 +125,7 @@ def build_run_audit_markdown(
     ]
 
     lines = [
-        f"# CSAgent 运行审计报告",
+        "# CSAgent 运行审计报告",
         "",
         "## 运行摘要",
         "",

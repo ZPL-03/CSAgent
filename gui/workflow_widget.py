@@ -318,12 +318,9 @@ class WorkflowWidget(QWidget):
         application = task.get("application") or "复合材料外压圆柱耐压壳"
         load = task.get("load_conditions") or {}
         pressure = load.get("external_pressure_MPa")
-        target = (task.get("design_targets") or {}).get("ultimate_pressure_min_MPa")
         parts = [str(application)]
         if pressure is not None:
             parts.append(f"外压 {format_number(pressure)} MPa")
-        if target is not None:
-            parts.append(f"极限压力目标 {format_number(target)} MPa")
         return " | ".join(parts)
 
     def _snapshot_summary_html(

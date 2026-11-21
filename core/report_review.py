@@ -81,16 +81,19 @@ def prepare_review_payload(facts, recommendation, format_value, *, context, evid
     if len(required) != len(required_metrics):
         raise ValueError("工程评议缺少决策所需事实")
     comparison_count = len(recommendation["ranked"]) if "ranked" in recommendation else None
+    bindings = [
+        {key: row[key] for key in ("candidate_id", "session_candidate_id") if row.get(key)}
+        for row in context.get("results", [])
+    ]
+    candidate_ids = {fact["candidate_id"] for fact in bound if fact["candidate_id"]}
+    candidate_ids.update(cid for row in bindings for cid in row.values())
     return {
         "contract_version": "engineering-review-v1",
         "facts": bound, "unavailable_facts": unavailable, "recommendation": recommendation,
         "required_assessment_refs": required,
         "comparison_count": comparison_count,
-        "candidate_bindings": [
-            {key: row[key] for key in ("candidate_id", "session_candidate_id") if row.get(key)}
-            for row in context.get("results", [])
-        ],
-        "candidate_ids": sorted({fact["candidate_id"] for fact in bound if fact["candidate_id"]}),
+        "candidate_bindings": bindings,
+        "candidate_ids": sorted(candidate_ids),
         "evidence": [{**row, "ref": f"E{position}"} for position, row in enumerate(evidence, 1)],
         "context": context,
         "response_schema": {

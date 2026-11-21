@@ -117,7 +117,6 @@ class ReportGenAgent(BaseAgent):
     def _build_structured_summary(self, task: Dict, results: List[Dict], candidates: List[Dict]) -> Dict:
         task_payload = task_payload_from_request(task)
         design_targets = dict(task_payload.get("design_targets", {}))
-        target_pressure = float(design_targets.get("ultimate_pressure_min_MPa") or 0.0)
         assessments = []
         for result in results:
             # 总体设计判定需要完整求解证据，阶段 verdict 不代表全流程通过。
@@ -153,7 +152,6 @@ class ReportGenAgent(BaseAgent):
             "boundary_conditions": describe_boundary_conditions(task_payload["boundary_conditions"]),
             "imperfection_ratio": task_imperfection_ratio(task_payload),
             "imperfection_source": describe_imperfection_source(task_payload),
-            "ultimate_pressure_min_MPa": target_pressure,
             "primary_objective": design_targets.get("primary_objective"),
             "result_count": len(results),
             "passed_count": sum(item["state"] == "passed" for item in assessments),
@@ -192,9 +190,6 @@ class ReportGenAgent(BaseAgent):
                     "weight_kg_per_m2": result.get("weight_kg_per_m2"),
                     "verdict": result.get("verdict"),
                     "failure_mode": result.get("failure_mode"),
-                    "target_pressure_checked_MPa": result.get("target_pressure_checked_MPa"),
-                    "target_hashin_index_max": result.get("target_hashin_index_max"),
-                    "target_pressure_check_status": result.get("target_pressure_check_status"),
                     "service_pressure_checked_MPa": result.get("service_pressure_checked_MPa"),
                     "service_hashin_index_max": result.get("service_hashin_index_max"),
                     "service_pressure_check_status": result.get("service_pressure_check_status"),
@@ -205,7 +200,6 @@ class ReportGenAgent(BaseAgent):
                     "progressive_damage_model": result.get("progressive_damage_model"),
                     "damage_state_maxima": result.get("damage_state_maxima"),
                     "damage_observed": result.get("damage_observed"),
-                    "target_stress_coverage": result.get("target_stress_coverage"),
                     "service_stress_coverage": result.get("service_stress_coverage"),
                     "riks_termination_reason": result.get("riks_termination_reason"),
                     "verification_scope": result.get("verification_scope"),
@@ -220,8 +214,7 @@ class ReportGenAgent(BaseAgent):
 
     def _recommendation_facts(self, task_payload: Dict, results: List[Dict], candidates: List[Dict]) -> Dict:
         """按完整求解证据和任务目标排序，供报告正文与模型解释共同使用。"""
-        required_capacity = max(float(task_payload["load_conditions"]["external_pressure_MPa"]),
-                                float(task_payload["design_targets"]["ultimate_pressure_min_MPa"]))
+        working_pressure = float(task_payload["load_conditions"]["external_pressure_MPa"])
         objective = str(task_payload["design_targets"]["primary_objective"])
         defect = task_imperfection_ratio(task_payload)
         ranked, excluded = [], []
@@ -230,8 +223,8 @@ class ReportGenAgent(BaseAgent):
             if not is_passed_design_check(result):
                 reasons.append("设计校核没有通过")
             capacity = verified_capacity_pressure(result)
-            if capacity is None or capacity < required_capacity:
-                reasons.append("确认容量未达到任务要求")
+            if capacity is None or capacity < working_pressure:
+                reasons.append("确认极限压力未达到工作压力")
             candidate = next((item for item in candidates if str(item.get("candidate_id")) in {
                 str(result.get("session_candidate_id")), str(result.get("candidate_id")),
             }), {})
@@ -268,7 +261,7 @@ class ReportGenAgent(BaseAgent):
         ranked.sort(key=lambda item: item["sort_value"])
         for item in ranked:
             item.pop("sort_value")
-        return {"objective": objective, "required_capacity_MPa": required_capacity,
+        return {"objective": objective,
                 "selected": ranked[0] if ranked else None, "ranked": ranked, "excluded": excluded}
 
 
@@ -279,15 +272,6 @@ class ReportGenAgent(BaseAgent):
         if not text or text.lower() == "none":
             return default
         return text
-
-    def _failure_mode_text(self, value: Any) -> str:
-        text = self._field_text(value)
-        mapping = {
-            "acceptance_adapter": "快速验收校核",
-            "deterministic_acceptance_adapter": "快速验收校核",
-        }
-        return mapping.get(text, text)
-
 
     def _build_llm_explanation_payload(self, summary: Dict[str, Any]) -> Dict[str, Any]:
         passed_count = int(summary.get("passed_count") or 0)
@@ -311,7 +295,6 @@ class ReportGenAgent(BaseAgent):
                 "load_case": summary.get("load_conditions"),
                 "external_pressure_MPa": summary.get("external_pressure_MPa"),
                 "boundary_conditions": summary.get("boundary_conditions"),
-                "ultimate_pressure_min_MPa": summary.get("ultimate_pressure_min_MPa"),
                 "primary_objective": summary.get("primary_objective"),
             },
             "screened_candidates": [dict(candidate) for candidate in summary.get("screened_candidates", [])],
@@ -334,7 +317,7 @@ class ReportGenAgent(BaseAgent):
                 "result_assessments": "passed 为设计校核通过，failed 为设计校核不通过，unknown 为求解失败、未判定或结果语义不一致。",
                 "recommendation": "selected 为按任务目标选出的推荐对象，ranked 为具备完整证据且可比较的方案，excluded 记录未入选原因。",
                 "layup": "symmetric 和 balanced 是逐层核查结果；false 表示属性不满足，null 表示没有记录。",
-                "pressure_checks": "工作压力和目标压力对应弹性起始失效检查；极限承载力取自已确认极限点的含损伤 Riks 分析。",
+                "pressure_checks": "工作压力下检查应力与首层失效；极限压力由含损伤 Riks 分析的已确认极限点确定，并与工作压力比较。",
                 "progressive_damage_complete": "容量分析是否包含场变量损伤退化。",
                 "damage_state_maxima": "局部损伤触发标志的最大值，不表示整体损伤程度。",
                 "riks_lpf_max": "Riks 路径的最大载荷比例系数。",
@@ -345,7 +328,7 @@ class ReportGenAgent(BaseAgent):
         }
         best = (summary.get("recommendation") or {}).get("selected")
         required = ([(best["candidate_id"], "ultimate_pressure_MPa"), (best["candidate_id"], "objective_value"),
-                     (None, "required_capacity_MPa")] if best else [(None, "recommendation_status")])
+                     (None, "external_pressure_MPa")] if best else [(None, "recommendation_status")])
         return prepare_review_payload(build_report_facts(summary), summary["recommendation"], format_fact_value,
                                       context=context, required_metrics=required)
 
@@ -417,14 +400,12 @@ class ReportGenAgent(BaseAgent):
             f"- 运行编号：`{task.get('run_id') or '-'}`",
             f"- 设计对象：{task_payload['application']}",
             f"- 工作压力：{format_number(working_pressure)} MPa",
-            *([f"- 用户额外指定的极限承载力下限：{format_number(task_payload['design_targets']['ultimate_pressure_min_MPa'])} MPa"]
-              if float(task_payload['design_targets']['ultimate_pressure_min_MPa']) != working_pressure else []),
             f"- 边界条件：{describe_boundary_conditions(task_payload['boundary_conditions'])}",
             f"- 任务初始几何缺陷比：{summary['imperfection_ratio']}（比例，{summary['imperfection_source']}）",
             f"- 用户指定几何：{self._field_text(task_payload.get('user_input_facts', {}).get('fixed_geometry'))}",
             f"- 优化目标：{task_payload['design_targets']['primary_objective']}",
             "- 计算模型：逐层复合材料圆柱壳、初始几何缺陷、外压载荷及任务指定的端部边界条件。",
-            "- 分析内容：线性屈曲、工作与目标压力下的首层失效检查、含场变量损伤退化的 Riks 容量分析。",
+            "- 分析内容：线性屈曲、工作压力下的首层失效检查、含场变量损伤退化的 Riks 容量分析。",
             "- 未建模项：金属封头、法兰连接、层间分层与制造过程。",
             "- 结果类型：代理预筛估计与有限元数值校核；工艺验收及试验认证结果未提供。",
             "", "## 全部候选方案与生成依据", "",

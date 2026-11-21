@@ -46,7 +46,7 @@ def _generated_candidate() -> dict:
         },
         "load_conditions": {"type": "external_pressure", "external_pressure_MPa": 50.259081},
         "boundary_conditions": {"type": "FLANGE_CONSTRAINED"},
-        "design_targets": {"ultimate_pressure_min_MPa": 50.259081},
+        "design_targets": {"primary_objective": "最小壳体质量"},
         "analysis": {"analysis_type": "linear_buckling_plus_first_mode_imperfection_riks"},
     })
 
@@ -186,15 +186,13 @@ def test_orchestrator_expands_compact_layup_at_the_single_fem_boundary() -> None
     assert promoted["parent_design_revision_id"] == candidate["design_revision_id"]
 
 
-def test_ultimate_pressure_target_cannot_be_below_service_pressure() -> None:
+def test_working_pressure_must_be_positive() -> None:
     candidate = _generated_candidate()
-    candidate["design_targets"]["ultimate_pressure_min_MPa"] = (
-        candidate["load_conditions"]["external_pressure_MPa"] - 1.0
-    )
+    candidate["load_conditions"]["external_pressure_MPa"] = -1.0
     candidate = attach_design_revision(candidate)
 
-    assert validate_fem_input(candidate) == ["design_targets.ultimate_pressure_min_MPa"]
-    with pytest.raises(FEMInputValidationError, match="ultimate_pressure_min_MPa"):
+    assert validate_fem_input(candidate) == ["load_conditions.external_pressure_MPa"]
+    with pytest.raises(FEMInputValidationError, match="external_pressure_MPa"):
         validate_fem_input_or_raise(candidate)
 
 
@@ -236,4 +234,4 @@ def test_task_parser_converts_depth_and_uses_service_pressure_as_default_target(
     assert payload["load_conditions"]["service_depth_m"] == 5000
     assert payload["load_conditions"]["external_pressure_MPa"] == pytest.approx(50.259081)
     assert payload["load_conditions"]["pressure_basis"] == "rho_g_h_gauge_differential"
-    assert payload["design_targets"]["ultimate_pressure_min_MPa"] == pytest.approx(50.259081)
+    assert payload["design_targets"] == {"primary_objective": "最小壳体质量"}

@@ -41,6 +41,15 @@ def test_natural_review_preserves_original_facts_and_resolves_inline_values():
     assert len(validate_engineering_review(json.dumps(original), context)["verification"]) == 3
 
 
+def test_review_accepts_recorded_session_alias_without_creating_another_result():
+    context, response = payload(), answer()
+    response["assessment"] = "TMP_7 对应 C1，其容量为{{C1.capacity}}。"
+    assert set(context["candidate_ids"]) == {"C1", "TMP_7"}
+    assert {fact["candidate_id"] for fact in context["facts"] if fact["candidate_id"]} == {"C1"}
+    accepted = validate_engineering_review(json.dumps(response), context)
+    assert accepted["paragraph_refs"][0] == ["C1.capacity"]
+
+
 @pytest.mark.parametrize("mutation", [
     "unknown_fact", "unknown_source", "unbound_number", "unknown_candidate", "missing_reference",
     "wrong_recommendation", "extra_field", "empty_verification", "bad_tradeoff_type",

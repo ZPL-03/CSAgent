@@ -18,10 +18,8 @@ FEM_ARTIFACT_FIELDS = (
     "postbuckling_odb",
     "abaqus_odb",
     "service_odb",
-    "target_odb",
     "postbuckling_inp",
     "service_inp",
-    "target_inp",
     "visualization_json",
     "user_subroutine_path",
     "material_strength_include",
@@ -37,7 +35,7 @@ def is_passed_design_check(results: Dict[str, Any]) -> bool:
     """返回当前验证范围内的设计目标校核是否通过。"""
     passed = is_successful_result(results) and str(results.get("verdict") or "").strip() == "通过"
     if results.get("verification_scope") == "composite_cylindrical_shell_submodel":
-        return passed and (results.get("target_stress_coverage") or {}).get("status") == "complete"
+        return passed and (results.get("service_stress_coverage") or {}).get("status") == "complete"
     return passed
 
 
@@ -88,7 +86,7 @@ def verified_capacity_pressure(results: Dict[str, Any]) -> float | None:
     if results.get("verification_scope") == "composite_cylindrical_shell_submodel" and not (
         results.get("progressive_damage_complete") and results.get("damage_state_output_complete")
         and results.get("riks_limit_point_confirmed")
-        and (results.get("target_stress_coverage") or {}).get("status") == "complete"
+        and (results.get("service_stress_coverage") or {}).get("status") == "complete"
     ):
         return None
     for field in CAPACITY_PRESSURE_FIELDS:
@@ -116,8 +114,6 @@ def required_fem_artifact_fields(results: Dict[str, Any]) -> Tuple[str, ...]:
         required.update({"abaqus_inp", "linear_buckling_odb", "abaqus_odb", "visualization_json"})
     if results.get("service_pressure_check_status") in {"passed", "failed"}:
         required.update({"service_inp", "service_odb"})
-    if results.get("target_pressure_check_status") in {"passed", "failed"}:
-        required.update({"target_inp", "target_odb"})
     if any(results.get(field) is not None for field in ("riks_lpf_max", "riks_lpf_last", "riks_increment_count")):
         required.update({"postbuckling_inp", "postbuckling_odb"})
     if results.get("progressive_damage_complete"):
@@ -131,15 +127,14 @@ def complete_case_result_errors(results: Dict[str, Any]) -> Tuple[str, ...]:
     errors = list(result_semantic_errors(results))
     if not is_successful_result(results):
         errors.append("求解链路未成功完成")
-    for stage in ("service", "target"):
-        coverage = results.get(f"{stage}_stress_coverage") or {}
-        if (coverage.get("status") != "complete"
-                or not coverage.get("checked_element_positions")
-                or not coverage.get("expected_section_points")
-                or coverage.get("incomplete_element_positions") != 0):
-            errors.append(f"{stage} 压力缺少全部铺层应力覆盖证据")
-        if results.get(f"{stage}_pressure_check_status") not in {"passed", "failed"}:
-            errors.append(f"{stage} 压力校核未完成")
+    coverage = results.get("service_stress_coverage") or {}
+    if (coverage.get("status") != "complete"
+            or not coverage.get("checked_element_positions")
+            or not coverage.get("expected_section_points")
+            or coverage.get("incomplete_element_positions") != 0):
+        errors.append("工作压力缺少全部铺层应力覆盖证据")
+    if results.get("service_pressure_check_status") not in {"passed", "failed"}:
+        errors.append("工作压力校核未完成")
     if results.get("riks_limit_point_confirmed") is not True or verified_capacity_pressure(results) is None:
         errors.append("损伤后屈曲路径未确认极限点")
     if results.get("progressive_damage_complete") is not True or results.get("damage_state_output_complete") is not True:

@@ -44,7 +44,7 @@ def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
                 "task_id": "TASK_1",
                 "application": "复合材料外压圆柱耐压壳",
                 "load_conditions": {"external_pressure_MPa": 30.0},
-                "design_targets": {"ultimate_pressure_min_MPa": 35.0},
+                "design_targets": {"primary_objective": "最小壳体质量"},
             },
             "candidates": [
                 {"candidate_id": "TMP_1", "source": "DOE"},

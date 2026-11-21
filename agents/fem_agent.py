@@ -32,11 +32,9 @@ class FEMAgent(BaseAgent):
         "linear_buckling_odb",
         "postbuckling_odb",
         "service_odb",
-        "target_odb",
         "abaqus_inp",
         "postbuckling_inp",
         "service_inp",
-        "target_inp",
         "visualization_json",
         "artifact_dir",
         "user_subroutine_path",
@@ -114,24 +112,6 @@ class FEMAgent(BaseAgent):
                     f"控制模式为 {failure_mode}，设计判定为“{verdict}”，"
                     "容量分析因服务压力校核未通过而未运行。"
                 )
-            if design_check_status == "failed_at_design_target_pressure":
-                target_pressure = result.get("target_pressure_checked_MPa")
-                target_index = result.get("target_hashin_index_max")
-                return (
-                    f"目标压力校核已完成，目标压力 {format_number(target_pressure)} MPa，"
-                    f"线性屈曲压力 {linear_pressure} MPa，最大 Hashin 指数 {target_index}；"
-                    f"控制模式为 {result.get('target_hashin_failure_mode') or result.get('failure_mode')}，"
-                    f"设计判定为“{verdict}”，容量分析因目标压力校核未通过而未运行。"
-                )
-            if design_check_status == "passed_at_design_target_pressure":
-                target_pressure = result.get("target_pressure_checked_MPa")
-                target_index = result.get("target_hashin_index_max")
-                capacity_status = result.get("capacity_assessment_status")
-                return (
-                    f"目标压力校核已完成，目标压力 {format_number(target_pressure)} MPa，"
-                    f"线性屈曲压力 {linear_pressure} MPa，最大 Hashin 指数 {target_index}；"
-                    f"设计判定为“{verdict}”，容量分析状态为 {capacity_status}。"
-                )
             basis = result.get("ultimate_pressure_basis") or "有限元校核"
             reference_pressure = result.get("postbuckling_reference_pressure_MPa")
             lpf = result.get("riks_lpf_max")
@@ -155,7 +135,6 @@ class FEMAgent(BaseAgent):
             "limit_point_not_confirmed": "Riks 作业未在成功状态下形成明确后峰下降，观测最大 LPF 不能作为极限压力。",
             "progressive_damage_not_configured": "当前运行未启用可执行的渐进损伤模型，不能给出材料极限强度结论。",
             "service_load_solver_failed": "服务压力精确加载作业未完成，不能给出服务工况结论。",
-            "target_load_solver_failed": "设计目标压力精确加载作业未完成，不能给出目标工况结论。",
             "process_crash": "ABAQUS 进程异常退出，请查看结果中的 error_log 并检查运行环境。",
             "abaqus_unavailable": "未找到 ABAQUS 命令，无法执行真实有限元求解。",
             "subroutine_compilation_failed": "用户子程序编译或链接失败，请检查结果中的 error_log 和材料强度文件。",

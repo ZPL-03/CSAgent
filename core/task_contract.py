@@ -20,7 +20,6 @@ DEFAULT_GEOMETRY_ENVELOPE = {
     "beta_deg": [10.0, 80.0],
 }
 DEFAULT_DESIGN_TARGETS = {
-    "ultimate_pressure_min_MPa": 30.0,
     "primary_objective": "最小壳体质量",
 }
 DEFAULT_SCREENING_PREFERENCES = {
@@ -75,11 +74,17 @@ BOUNDARY_CONDITION_LIBRARY = {
 }
 
 
-def _safe_float(value: Any, default: float = 0.0) -> float:
+def _finite_float(value: Any, field: str) -> float:
+    """解析显式工程数值；非法输入由调用方处理。"""
+    if isinstance(value, bool):
+        raise ValueError(f"{field} 必须是有限数值。")
     try:
-        return float(value)
-    except (TypeError, ValueError):
-        return default
+        number = float(value)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ValueError(f"{field} 必须是有限数值。") from exc
+    if not math.isfinite(number):
+        raise ValueError(f"{field} 必须是有限数值。")
+    return number
 
 
 def validate_quantity(value: Any, field: str, available: int | None = None) -> int:
@@ -103,21 +108,19 @@ def validate_quantity(value: Any, field: str, available: int | None = None) -> i
     return number
 
 
-def _normalize_range(value: Any, fallback: list[float]) -> list[float]:
+def _normalize_range(value: Any, field: str) -> list[float]:
     if isinstance(value, Iterable) and not isinstance(value, (str, bytes, dict)):
         values = list(value)
-        if len(values) >= 2:
-            low = _safe_float(values[0], fallback[0])
-            high = _safe_float(values[1], fallback[1])
-            return [min(low, high), max(low, high)]
-    if isinstance(value, (int, float, str)):
-        number = _safe_float(value, (fallback[0] + fallback[1]) / 2.0)
-        return [number, number]
-    return list(fallback)
+        if len(values) != 2:
+            raise ValueError(f"{field} 需要一个数值或两个范围端点。")
+        endpoints = [_finite_float(item, field) for item in values]
+        return [min(endpoints), max(endpoints)]
+    number = _finite_float(value, field)
+    return [number, number]
 
 
 def boundary_condition_payload(boundary_type: str) -> Dict[str, Any]:
-    boundary_key = str(boundary_type or DEFAULT_BOUNDARY_TYPE).strip().upper()
+    boundary_key = str(DEFAULT_BOUNDARY_TYPE if boundary_type is None else boundary_type).strip().upper()
     alias_map = {
         "CLAMPED": "END_CLAMPED",
         "CCCC": "END_CLAMPED",
@@ -132,7 +135,7 @@ def boundary_condition_payload(boundary_type: str) -> Dict[str, Any]:
     }
     boundary_key = alias_map.get(boundary_key, boundary_key)
     if boundary_key not in BOUNDARY_CONDITION_LIBRARY:
-        boundary_key = DEFAULT_BOUNDARY_TYPE
+        raise ValueError(f"不支持的边界类型：{boundary_type}。")
     return deepcopy(BOUNDARY_CONDITION_LIBRARY[boundary_key])
 
 
@@ -159,10 +162,12 @@ def describe_boundary_conditions(boundary_conditions: Any) -> str:
 
 
 def load_condition_payload(load_type: str, external_pressure_MPa: float = DEFAULT_EXTERNAL_PRESSURE_MPA) -> Dict[str, Any]:
-    normalized_type = str(load_type or DEFAULT_LOAD_TYPE).strip()
+    normalized_type = str(DEFAULT_LOAD_TYPE if load_type is None else load_type).strip()
     if normalized_type not in LOAD_CASE_LABELS:
-        normalized_type = DEFAULT_LOAD_TYPE
-    pressure = max(_safe_float(external_pressure_MPa, DEFAULT_EXTERNAL_PRESSURE_MPA), 0.0)
+        raise ValueError(f"不支持的载荷类型：{load_type}。")
+    pressure = _finite_float(external_pressure_MPa, "external_pressure_MPa")
+    if pressure < 0:
+        raise ValueError("external_pressure_MPa 必须为非负数值。")
     return {
         "type": normalized_type,
         "label": LOAD_CASE_LABELS[normalized_type],
@@ -181,37 +186,28 @@ def normalize_load_conditions(load_conditions: Any) -> Dict[str, Any]:
             "hydrostatic_pressure": "external_pressure",
         }
         normalized_type = type_mapping.get(raw_type, type_mapping.get(raw_type.lower(), raw_type))
-        pressure = (
-            load_conditions.get("external_pressure_MPa")
-            if load_conditions.get("external_pressure_MPa") is not None
-            else load_conditions.get("pressure_MPa")
-        )
-        normalized = load_condition_payload(
-            normalized_type,
-            _safe_float(pressure, DEFAULT_EXTERNAL_PRESSURE_MPA),
-        )
-        if load_conditions.get("service_depth_m") is not None:
-            normalized["service_depth_m"] = round(
-                max(_safe_float(load_conditions.get("service_depth_m"), 0.0), 0.0),
-                6,
-            )
-        if load_conditions.get("seawater_density_kg_per_m3") is not None:
-            normalized["seawater_density_kg_per_m3"] = round(
-                max(_safe_float(load_conditions.get("seawater_density_kg_per_m3"), 0.0), 0.0),
-                6,
-            )
-        if load_conditions.get("gravity_m_per_s2") is not None:
-            normalized["gravity_m_per_s2"] = round(
-                max(_safe_float(load_conditions.get("gravity_m_per_s2"), 0.0), 0.0),
-                8,
-            )
+        pressures = [
+            _finite_float(load_conditions[key], key)
+            for key in ("external_pressure_MPa", "pressure_MPa") if key in load_conditions
+        ]
+        if len(set(pressures)) > 1:
+            raise ValueError("工作压力字段与 pressure_MPa 别名取值冲突。")
+        normalized = load_condition_payload(normalized_type, pressures[0] if pressures else DEFAULT_EXTERNAL_PRESSURE_MPA)
+        for field, digits in (("service_depth_m", 6), ("seawater_density_kg_per_m3", 6), ("gravity_m_per_s2", 8)):
+            if field in load_conditions:
+                value = _finite_float(load_conditions[field], field)
+                if value < 0:
+                    raise ValueError(f"{field} 必须为非负数值。")
+                normalized[field] = round(value, digits)
         if load_conditions.get("pressure_basis"):
             normalized["pressure_basis"] = str(load_conditions["pressure_basis"])
         return normalized
 
     text = str(load_conditions or "").strip()
-    match = re.search(r"([0-9]+(?:\.[0-9]+)?)\s*(?:MPa|兆帕)", text, flags=re.IGNORECASE)
-    pressure = _safe_float(match.group(1), DEFAULT_EXTERNAL_PRESSURE_MPA) if match else DEFAULT_EXTERNAL_PRESSURE_MPA
+    match = re.search(r"([+-]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)\s*(?:MPa|兆帕)", text, flags=re.IGNORECASE)
+    if text and not match:
+        raise ValueError("载荷需要提供以 MPa 为单位的工作压力。")
+    pressure = _finite_float(match.group(1), "external_pressure_MPa") if match else DEFAULT_EXTERNAL_PRESSURE_MPA
     return load_condition_payload(DEFAULT_LOAD_TYPE, pressure)
 
 
@@ -230,19 +226,9 @@ def equivalent_in_plane_load(load_conditions: Any) -> float:
     return round(float(normalized.get("external_pressure_MPa", 0.0)), 3)
 
 
-def boundary_stiffness_factor(boundary_conditions: Any) -> float:
-    normalized = normalize_boundary_conditions(boundary_conditions)
-    mapping = {
-        "END_SIMPLY_SUPPORTED": 0.94,
-        "END_CLAMPED": 1.00,
-        "FLANGE_CONSTRAINED": 1.06,
-    }
-    return mapping.get(normalized["type"], 1.00)
-
-
 def load_case_code(load_conditions: Any) -> float:
-    normalized = normalize_load_conditions(load_conditions)
-    return 0.0 if normalized["type"] == "external_pressure" else 0.0
+    normalize_load_conditions(load_conditions)
+    return 0.0
 
 
 def boundary_condition_code(boundary_conditions: Any) -> float:
@@ -292,7 +278,7 @@ def normalize_geometry_envelope(envelope: Dict[str, Any] | None) -> Dict[str, An
             data[key] = values
             continue
         if key in data:
-            data[key] = _normalize_range(value, data[key])
+            data[key] = _normalize_range(value, f"geometry_envelope.{key}")
     return data
 
 
@@ -350,7 +336,7 @@ def normalize_task_payload(
             continue
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError(f"固定几何 {key} 必须是有限数值。")
-        if key in envelope and _normalize_range(envelope[key], [value, value]) != [value, value]:
+        if key in envelope and _normalize_range(envelope[key], f"geometry_envelope.{key}") != [value, value]:
             raise ValueError(f"任务 {key} 与用户固定条件冲突。")
         envelope[key] = [value, value]
     if "imperfection_ratio" in fixed_facts:
@@ -395,10 +381,13 @@ def normalize_task_payload(
     ratio = constraints["min_ratio_per_angle"]
     if isinstance(ratio, bool) or not isinstance(ratio, (int, float)) or not math.isfinite(ratio) or not 0 <= ratio <= 1:
         raise ValueError("min_ratio_per_angle 必须在 0 到 1 之间。")
+    targets = dict(normalized.get("design_targets", {}))
+    unknown_targets = set(targets).difference(DEFAULT_DESIGN_TARGETS)
+    if unknown_targets:
+        raise ValueError("不支持的设计目标字段：" + "、".join(sorted(unknown_targets)))
     normalized["design_targets"] = {
         **deepcopy(DEFAULT_DESIGN_TARGETS),
-        "ultimate_pressure_min_MPa": normalized["load_conditions"]["external_pressure_MPa"],
-        **dict(normalized.get("design_targets", {})),
+        **targets,
     }
 
     from core.pressure_hull_profile import resolve_hull_type
@@ -488,7 +477,7 @@ def summarize_task(task: Dict[str, Any]) -> Dict[str, str]:
         "candidate_pool": f"候选池目标 {normalized_task['candidate_generation_preferences']['total_candidates'] or '待确认'}",
         "top_k": f"初筛保留 {normalized_task['screening_preferences']['top_k_candidates'] or '待确认'}",
         "objective": (
-            f"P_ult >= {normalized_task['design_targets']['ultimate_pressure_min_MPa']} MPa，"
+            f"P_ult >= {normalized_task['load_conditions']['external_pressure_MPa']} MPa，"
             f"{normalized_task['design_targets']['primary_objective']}"
         ),
     }
