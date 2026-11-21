@@ -15,6 +15,8 @@ from core.id_utils import reserve_candidate_ids, task_file_name
 from core.fem_input_contract import attach_design_revision, validate_fem_input_or_raise
 from core.io_utils import write_json
 from core.paths import IO_DIR, TASKS_DIR
+from core.rule_checker import RuleChecker
+from core.layup_parameters import active_geometry, active_layup
 from core.task_contract import (
     describe_boundary_conditions,
     describe_load_conditions,
@@ -24,6 +26,7 @@ from core.task_contract import (
     summarize_task,
     task_payload_from_request,
     task_imperfection_ratio,
+    candidate_constraints,
 )
 from core.task_parser import TaskParser
 from core.pressure_hull_profile import expand_layup_for_fem
@@ -65,6 +68,7 @@ class OrchestratorAgent(BaseAgent):
         enriched["load_conditions"] = dict(candidate.get("load_conditions") or task_payload["load_conditions"])
         enriched["boundary_conditions"] = dict(candidate.get("boundary_conditions") or task_payload["boundary_conditions"])
         enriched["material_system"] = dict(candidate.get("material_system") or task_payload["material_system"])
+        enriched["task_constraints"] = candidate_constraints(task)
         return enriched
 
     def _promote_candidate_for_fem(self, task: Dict, candidate: Dict, formal_candidate_id: str | None = None) -> Dict:
@@ -74,7 +78,8 @@ class OrchestratorAgent(BaseAgent):
         session_candidate_id = enriched_candidate.get("candidate_id")
         promoted = dict(enriched_candidate)
         source_layup = deepcopy(enriched_candidate.get("layup"))
-        promoted["layup"] = expand_layup_for_fem(source_layup, promoted.get("geometry"))
+        promoted["layup"] = active_layup(expand_layup_for_fem(source_layup, promoted.get("geometry")))
+        promoted["geometry"] = active_geometry(promoted)
         provenance = dict(promoted.get("provenance") or {})
         if source_layup is not None:
             provenance.setdefault("source_layup", source_layup)
@@ -105,6 +110,9 @@ class OrchestratorAgent(BaseAgent):
         expected = task_imperfection_ratio(task)
         if (candidate.get("geometry") or {}).get("imperfection_ratio") != expected:
             raise ValueError(f"候选初始几何缺陷比与任务不一致，应为 {expected:g}。")
+        check = RuleChecker().run(candidate, task=task)
+        if not check["is_valid"]:
+            raise ValueError("候选与任务不一致：" + "；".join(check["errors"]))
 
     def prepare_candidates_for_fem(self, task: Dict, candidates: List[Dict]) -> List[Dict]:
         """为同一批有限元样本生成互不重复的正式编号。"""
@@ -241,6 +249,7 @@ class OrchestratorAgent(BaseAgent):
     def evaluate_prepared_candidate(self, task: Dict, fem_candidate: Dict) -> Dict:
         """执行已经晋级为正式编号的有限元候选。"""
 
+        self._validate_analysis_conditions(task, fem_candidate)
         self.emit_event(
             "fem_started",
             f"开始校核 {fem_candidate.get('session_candidate_id', fem_candidate.get('display_name', '候选样本'))} "

@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import os
+import ipaddress
 import re
 import time
-from dataclasses import dataclass
+from copy import deepcopy
+from dataclasses import dataclass, field
 from typing import Any, Dict, List
 from urllib.parse import urlparse
 
@@ -56,6 +58,8 @@ class BackendRuntime:
     max_tokens: int
     timeout_seconds: int
     json_output_tokens: int
+    proxy_policy: str = "bypass_loopback"
+    extra_body: Dict[str, Any] = field(default_factory=dict)
     client: Any = None
 
 
@@ -66,6 +70,12 @@ def _runtime_from_config(backend: Dict[str, Any]) -> BackendRuntime | None:
     model = resolve_config_value(backend.get("model_env"), backend.get("model", ""))
     if not base_url or not api_key or not model:
         return None
+    proxy_policy = str(backend.get("proxy_policy", "bypass_loopback"))
+    if proxy_policy not in {"bypass_loopback", "direct", "environment"}:
+        raise ValueError("proxy_policy 必须为 bypass_loopback、direct 或 environment")
+    extra_body = backend.get("extra_body", {})
+    if not isinstance(extra_body, dict) or set(extra_body).intersection({"model", "messages", "max_tokens", "temperature", "response_format", "stream"}):
+        raise ValueError("extra_body 必须是对象，且不能覆盖模型、消息、输出预算或响应格式")
     return BackendRuntime(
         name=str(backend.get("name") or "openai_compatible"),
         base_url=base_url,
@@ -75,7 +85,24 @@ def _runtime_from_config(backend: Dict[str, Any]) -> BackendRuntime | None:
         max_tokens=int(backend.get("max_tokens", 1800)),
         timeout_seconds=int(backend.get("timeout_seconds", 180)),
         json_output_tokens=int(backend.get("json_output_tokens", max(int(backend.get("max_tokens", 1800)), 4096))),
+        proxy_policy=proxy_policy,
+        extra_body=deepcopy(extra_body),
     )
+
+
+def backend_trust_env(base_url: str, proxy_policy: str) -> bool:
+    """回环服务直连，外部 API 按配置继承环境代理；不修改进程代理变量。"""
+    if proxy_policy == "direct":
+        return False
+    if proxy_policy == "environment":
+        return True
+    host = (urlparse(base_url).hostname or "").lower().rstrip(".")
+    if host == "localhost":
+        return False
+    try:
+        return not ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return True
 
 
 def auto_llm_enabled() -> bool:
@@ -151,11 +178,14 @@ class LLMBackend:
 
     def _client_for(self, runtime: BackendRuntime):
         if runtime.client is None:
+            import httpx
+
             runtime.client = self._openai_cls(
                 base_url=runtime.base_url,
                 api_key=runtime.api_key,
                 timeout=runtime.timeout_seconds,
                 default_headers={"User-Agent": llm_user_agent()},
+                http_client=httpx.Client(trust_env=backend_trust_env(runtime.base_url, runtime.proxy_policy)),
             )
         return runtime.client
 
@@ -184,6 +214,9 @@ class LLMBackend:
             }
             if json_mode:
                 request_payload["response_format"] = {"type": "json_object"}
+            if runtime.extra_body:
+                # 扩展参数属于单个后端，不根据模型名称猜测供应商协议。
+                request_payload["extra_body"] = deepcopy(runtime.extra_body)
             attempt = {
                 "backend": runtime.name,
                 "model": runtime.model,
@@ -191,6 +224,8 @@ class LLMBackend:
                 "max_tokens": int(max_tokens_override or runtime.max_tokens),
                 "status": "started",
             }
+            if "thinking" in runtime.extra_body:
+                attempt["thinking"] = deepcopy(runtime.extra_body["thinking"])
             started_at = time.perf_counter()
             try:
                 client = self._client_for(runtime)

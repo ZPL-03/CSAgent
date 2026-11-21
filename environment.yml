@@ -47,7 +47,8 @@ dependencies:
       - "mineru[pipeline]==3.1.11"
       - reportlab==4.4.10
       - markdown-it-py>=3,<5
-      - pylatexenc==2.10
+      - mdit-py-plugins>=0.6,<0.8
+      - beautifulsoup4>=4.12,<5
       - joblib==1.5.3
       - pytest==8.4.2
       - fastapi

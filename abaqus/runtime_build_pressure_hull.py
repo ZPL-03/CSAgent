@@ -212,8 +212,10 @@ def validate_runtime_candidate(candidate):
     length = require_float(geometry.get("length_mm"), "geometry.length_mm")
     radius = shell_radii(geometry)["middle_surface"]
     thickness = require_float(geometry.get("thickness_mm"), "geometry.thickness_mm")
-    require_float(geometry.get("alpha_deg"), "geometry.alpha_deg")
-    require_float(geometry.get("beta_deg"), "geometry.beta_deg")
+    # 显式任务层序不使用模板角度；参数化模板仍要求原始 alpha/beta。
+    if (candidate.get("layup") or {}).get("template_name") != "TASK_ANGLES":
+        require_float(geometry.get("alpha_deg"), "geometry.alpha_deg")
+        require_float(geometry.get("beta_deg"), "geometry.beta_deg")
     require_float(geometry.get("imperfection_ratio"), "geometry.imperfection_ratio")
     material = material_payload(candidate)
     angles = layup_angles(candidate)

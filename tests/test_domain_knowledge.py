@@ -3,10 +3,14 @@ import gzip
 from pathlib import Path
 
 from core.domain_knowledge import DomainKnowledgeBase
+from core.knowledge_quality import assess_content
 
 
 def _write_jsonl(path: Path, rows: list[dict]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    for row in rows:
+        if "chunk_id" in row:
+            row.update(assess_content(row.get("content_markdown") or row["content_plain"]))
     path.write_text("\n".join(json.dumps(row, ensure_ascii=False) for row in rows) + "\n", encoding="utf-8")
 
 
@@ -83,21 +87,14 @@ def test_domain_knowledge_retrieves_knowledge_base_and_graph(tmp_path: Path) -> 
                 "target": "Buckling",
                 "relation": "EXPERIENCES",
                 "record_id": "SRC_1",
+                "evidence_chunk_id": chunk_id,
+                "evidence_chunk_fingerprint": fingerprint,
                 "evidence_document_title": "Composite pressure hull external pressure buckling",
                 "evidence_doi": "10.1000/hull.1",
                 "evidence_source_url": "https://example.com/hull",
-            },
-            {
-                "source_type": "Structure",
-                "source": "Pressure Hull",
-                "target_type": "FailureMode",
-                "target": "Buckling",
-                "relation": "EXPERIENCES",
-                "record_id": "SRC_1",
-                "evidence_document_title": "Composite pressure hull external pressure buckling",
-                "evidence_doi": "10.1000/hull.1",
-                "evidence_source_url": "https://example.com/hull",
-            },
+            }
+            for chunk_id, fingerprint in [("CHUNK_1", "fp1"), ("CHUNK_2", "fp2")]
+            for _ in range(2)
         ],
     )
     manifest_path.write_text(
@@ -122,7 +119,7 @@ def test_domain_knowledge_retrieves_knowledge_base_and_graph(tmp_path: Path) -> 
                 "manifest_path": str(manifest_path),
                 "top_k": 2,
                 "kg_top_k": 2,
-                "max_snippet_chars": 200,
+                "max_context_chars": 12000,
             }
         }
     )
@@ -135,11 +132,12 @@ def test_domain_knowledge_retrieves_knowledge_base_and_graph(tmp_path: Path) -> 
     assert len(result["chunks"]) == 1
     assert all(chunk["source_url"] == "https://example.com/hull" for chunk in result["chunks"])
     assert result["relations"][0]["relation"] == "EXPERIENCES"
-    assert "pressure hull guidance" in snippet_text.lower()
-    assert "来源 S1" in snippet_text
-    assert snippet_text.count("DOI: 10.1000/hull.1") == 1
-    assert snippet_text.count("https://example.com/hull") == 1
-    assert snippet_text.count("Pressure Hull(Structure) -[EXPERIENCES]-> Buckling(FailureMode)") == 1
+    packet = json.loads(snippet_text)
+    assert packet["text"] == result["chunks"][0]["content_markdown"]
+    assert packet["doi"] == "10.1000/hull.1"
+    assert packet["source_url"] == "https://example.com/hull"
+    assert len(packet["relations"]) == 1
+    assert packet["relations"][0]["evidence_chunk_fingerprint"] == packet["chunk_fingerprint"]
     assert status["rag_chunk_count"] == 2
     assert status["structured_block_count"] == 10
 
@@ -155,6 +153,7 @@ def test_domain_knowledge_merges_builtin_and_runtime_rag_kg(tmp_path: Path) -> N
 
     runtime_chunk = {
         "chunk_id": "RUN_CHUNK_1",
+        "chunk_fingerprint": "run_fp",
         "record_id": "RUN_DOC_1",
         "source_id": "RUN_DOC_1",
         "retrieval_scope": "main",
@@ -166,6 +165,7 @@ def test_domain_knowledge_merges_builtin_and_runtime_rag_kg(tmp_path: Path) -> N
     }
     builtin_chunk = {
         "chunk_id": "BASE_CHUNK_1",
+        "chunk_fingerprint": "base_fp",
         "record_id": "BASE_DOC_1",
         "source_id": "BASE_DOC_1",
         "retrieval_scope": "main",
@@ -188,6 +188,8 @@ def test_domain_knowledge_merges_builtin_and_runtime_rag_kg(tmp_path: Path) -> N
                 "target": "Buckling",
                 "relation": "CONSTRAINS",
                 "record_id": "RUN_DOC_1",
+                "evidence_chunk_id": "RUN_CHUNK_1",
+                "evidence_chunk_fingerprint": "run_fp",
                 "evidence_document_title": "Uploaded pressure hull manufacturing note",
             }
         ],
@@ -208,6 +210,7 @@ def test_domain_knowledge_merges_builtin_and_runtime_rag_kg(tmp_path: Path) -> N
     )
 
     builtin_rag_path.parent.mkdir(parents=True, exist_ok=True)
+    builtin_chunk.update(assess_content(builtin_chunk["content_markdown"]))
     with gzip.open(builtin_rag_path, "wt", encoding="utf-8") as handle:
         handle.write(json.dumps(builtin_chunk, ensure_ascii=False) + "\n")
     _write_jsonl(builtin_kg_dir / "entities.jsonl", [{"type": "DesignFormula", "name": "ASME RD-1172"}])
@@ -221,6 +224,8 @@ def test_domain_knowledge_merges_builtin_and_runtime_rag_kg(tmp_path: Path) -> N
                     "target": "Buckling",
                     "relation": "PREDICTED_BY",
                     "record_id": "BASE_DOC_1",
+                    "evidence_chunk_id": "BASE_CHUNK_1",
+                    "evidence_chunk_fingerprint": "base_fp",
                     "evidence_document_title": "Built pressure hull buckling reference",
                 },
                 ensure_ascii=False,
@@ -250,7 +255,7 @@ def test_domain_knowledge_merges_builtin_and_runtime_rag_kg(tmp_path: Path) -> N
                 "manifest_path": str(manifest_path),
                 "top_k": 4,
                 "kg_top_k": 4,
-                "max_snippet_chars": 200,
+                "max_context_chars": 12000,
             }
         }
     )

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from functools import lru_cache
 import math
+import os
+import re
 from pathlib import Path
 from typing import Any, Dict
 
@@ -24,12 +26,28 @@ def _load_yaml(path: Path) -> Dict[str, Any]:
 
 @lru_cache(maxsize=None)
 def load_app_config() -> Dict[str, Any]:
-    return _load_yaml(CONFIG_DIR / "app_config.yaml")
+    config = _load_yaml(CONFIG_DIR / "app_config.yaml")
+    from core.paths import RUN_ROOT
+
+    if RUN_ROOT is not None:
+        # 隔离验收只改运行数据路径，内置资料、嵌入模型及代理公式资料仍只读。
+        knowledge = config["project_knowledge"]
+        for key in ("base_dir", "upload_dir", "rag_chunks_path", "kg_dir", "manifest_path", "structured_dir", "vector_chroma_dir"):
+            knowledge[key] = str(RUN_ROOT / knowledge[key])
+    return config
 
 
 @lru_cache(maxsize=None)
 def load_llm_config() -> Dict[str, Any]:
     return _load_yaml(CONFIG_DIR / "llm_config.yaml")
+
+
+def embedding_device() -> str:
+    """显式选择嵌入设备；CPU 路径不探测 CUDA 驱动。"""
+    device = os.getenv("CSDM_CPH_EMBEDDING_DEVICE", "").strip() or str(load_app_config()["rag"].get("embedding_device", "cpu"))
+    if not re.fullmatch(r"cpu|cuda(?::[0-9]+)?", device):
+        raise ValueError("嵌入设备必须为 cpu、cuda 或 cuda:N，不支持自动探测。")
+    return device
 
 
 @lru_cache(maxsize=None)

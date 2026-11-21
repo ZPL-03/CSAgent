@@ -9,6 +9,7 @@ from core.config_loader import load_app_config
 from core.display import format_number
 from core.pressure_hull_profile import estimate_areal_density_kg_per_m2
 from core.surrogate_model import SurrogateModelManager
+from core.rule_checker import RuleChecker
 from core.task_contract import effective_screen_top_k
 
 
@@ -44,6 +45,9 @@ class ScreenerAgent(BaseAgent):
 
         enriched: List[Dict] = []
         for candidate in candidates:
+            check = RuleChecker().run(candidate, task=task)
+            if not check["is_valid"]:
+                raise ValueError("预筛候选与任务不一致：" + "；".join(check["errors"]))
             updated = dict(candidate)
             prediction = self.model_manager.predict_candidate_payload(candidate)
             ultimate_pressure = float(prediction["ultimate_pressure_MPa"])

@@ -12,6 +12,7 @@ from contextlib import closing
 from pathlib import Path
 from typing import Any
 
+from core.retrieval_evidence import exclusion_reason
 
 ENCODING_CONTRACT = "unique_token_weighted_mean_normalized_cls"
 
@@ -36,15 +37,14 @@ _MODEL_LOCK = threading.Lock()
 
 
 @lru_cache(maxsize=1)
-def _encoder(model_path: str):
+def _encoder(model_path: str, device: str):
     import torch
     from transformers import AutoModel, AutoTokenizer
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
     tokenizer = AutoTokenizer.from_pretrained(model_path, local_files_only=True, use_fast=True)
     model = AutoModel.from_pretrained(
         model_path, local_files_only=True, use_safetensors=False,
-        dtype=torch.float16 if device == "cuda" else torch.float32,
+        dtype=torch.float16 if device.startswith("cuda") else torch.float32,
     ).to(device).eval()
     return tokenizer, model
 
@@ -58,7 +58,7 @@ def encode_query(query: str, engine, metadata: dict[str, str]):
     if engine.embedding_model_name != metadata["dense_model"]:
         raise RuntimeError("配置的嵌入模型与内置向量索引不一致")
     with _MODEL_LOCK, torch.inference_mode():
-        tokenizer, model = _encoder(engine._resolve_embedding_model_reference())
+        tokenizer, model = _encoder(engine._resolve_embedding_model_reference(), engine.embedding_device)
         encoded = tokenizer(
             [query], padding=True, truncation=True,
             max_length=int(metadata["dense_max_length"]), stride=int(metadata["dense_window_overlap"]),
@@ -166,7 +166,7 @@ class BuiltinKnowledgeIndex:
         seen_sources = set()
         for rowid in sorted(scores, key=lambda key: (-scores[key], key)):
             chunk = payloads[rowid]
-            if chunk.get("retrieval_scope", "main") not in {"main", "mixed"}:
+            if exclusion_reason(chunk) is not None:
                 continue
             source_key = str(chunk.get("source_id") or chunk.get("record_id") or chunk["chunk_id"])
             if source_key in seen_sources:

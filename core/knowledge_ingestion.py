@@ -18,13 +18,13 @@ from typing import Any, Callable
 
 from core.config_loader import load_app_config
 from core.domain_knowledge import _builtin_record_counts, trim_text
+from core.knowledge_quality import assess_content, project_table_columns, scope_passages
+from core.retrieval_evidence import binds_to_chunk, exclusion_reason
+from core.table_structure import TableStructureError, html_tables_to_markdown
 from core.paths import (
     CHROMA_DIR,
-    KNOWLEDGE_UPLOADS_DIR,
+    ROOT_DIR,
     RUNTIME_KNOWLEDGE_DIR,
-    RUNTIME_KNOWLEDGE_KG_DIR,
-    RUNTIME_KNOWLEDGE_RAG_DIR,
-    RUNTIME_KNOWLEDGE_STRUCTURED_DIR,
 )
 
 
@@ -353,48 +353,6 @@ def _token_count(text: str) -> int:
     return max(1, chinese_chars + round(other_chars / 4))
 
 
-def _split_text_by_tokens(text: str, max_tokens: int) -> list[str]:
-    """把单个超长文本块按句子和 token 预算切开。"""
-    if _token_count(text) <= max_tokens:
-        return [text]
-    separators = r"(?<=[。！？；;.!?])\s+|(?<=\.)\s+(?=[A-Z])|\n+"
-    sentences = [part.strip() for part in re.split(separators, text) if part.strip()]
-    if len(sentences) <= 1:
-        sentences = [part.strip() for part in re.split(r"(?<=，)|(?<=,)\s*", text) if part.strip()]
-    parts: list[str] = []
-    current: list[str] = []
-    for sentence in sentences:
-        probe = "\n".join([*current, sentence]).strip()
-        if current and _token_count(probe) > max_tokens:
-            parts.append("\n".join(current).strip())
-            current = [sentence]
-        elif _token_count(sentence) > max_tokens:
-            if current:
-                parts.append("\n".join(current).strip())
-                current = []
-            parts.extend(_split_long_string(sentence, max_tokens))
-        else:
-            current.append(sentence)
-    if current:
-        parts.append("\n".join(current).strip())
-    return [part for part in parts if part.strip()]
-
-
-def _split_long_string(text: str, max_tokens: int) -> list[str]:
-    parts: list[str] = []
-    current: list[str] = []
-    for char in text:
-        probe = "".join([*current, char])
-        if current and _token_count(probe) > max_tokens:
-            parts.append("".join(current).strip())
-            current = [char]
-        else:
-            current.append(char)
-    if current:
-        parts.append("".join(current).strip())
-    return [part for part in parts if part]
-
-
 class KnowledgeIngestionService:
     """把用户上传资料转为本项目可检索的 RAG/KG 运行时数据。"""
 
@@ -425,9 +383,9 @@ class KnowledgeIngestionService:
         self.entities_path = self.kg_dir / "entities.jsonl"
         self.relations_path = self.kg_dir / "relations.jsonl"
         self.stats_path = self.kg_dir / "kg_stats.json"
-        configured_builtin_dir = Path(str(knowledge_config.get("builtin_dir", RUNTIME_KNOWLEDGE_DIR.parent / "csllm")))
+        configured_builtin_dir = Path(str(knowledge_config.get("builtin_dir", ROOT_DIR / "knowledge/csllm")))
         if not configured_builtin_dir.is_absolute():
-            configured_builtin_dir = RUNTIME_KNOWLEDGE_DIR.parent.parent / configured_builtin_dir
+            configured_builtin_dir = ROOT_DIR / configured_builtin_dir
         self.builtin_dir = configured_builtin_dir
         self.builtin_rag_chunks_path = self._configured_path(
             knowledge_config,
@@ -458,7 +416,7 @@ class KnowledgeIngestionService:
     def _configured_path(self, knowledge_config: dict[str, Any], key: str, default: Path) -> Path:
         value = knowledge_config.get(key)
         path = Path(str(value)) if value else default
-        return path if path.is_absolute() else RUNTIME_KNOWLEDGE_DIR.parent.parent / path
+        return path if path.is_absolute() else ROOT_DIR / path
 
     def _notify_progress(self, steps: list[PipelineStep]) -> None:
         if self.progress_callback is not None:
@@ -472,10 +430,6 @@ class KnowledgeIngestionService:
             self.markdown_dir,
             self.rag_dir,
             self.kg_dir,
-            KNOWLEDGE_UPLOADS_DIR,
-            RUNTIME_KNOWLEDGE_STRUCTURED_DIR,
-            RUNTIME_KNOWLEDGE_RAG_DIR,
-            RUNTIME_KNOWLEDGE_KG_DIR,
         ]:
             path.mkdir(parents=True, exist_ok=True)
 
@@ -679,14 +633,34 @@ class KnowledgeIngestionService:
         }
 
     def rebuild_indexes(self) -> dict[str, Any]:
-        """基于当前已解析文本块重建向量索引、KG 关系、统计清单和检索验证状态。"""
+        """从保存的解析原文重建证据字段、向量索引和 KG，不改上传原文件。"""
 
         self.ensure_dirs()
         documents = _read_jsonl(self.documents_path)
-        chunks, duplicate_chunk_count = self._dedupe_chunks(_read_jsonl(self.chunks_path))
+        old_chunks = _read_jsonl(self.chunks_path)
+        document_ids = {row["document_id"] for row in documents}
+        if any(row.get("source_id") not in document_ids for row in old_chunks):
+            raise ValueError("用户文本块缺少对应资料记录，无法按原文重建")
+        blocks = []
+        rebuilt_chunks = []
+        for document in documents:
+            markdown_path = Path(document["markdown_path"])
+            markdown = markdown_path.read_text(encoding="utf-8")
+            document_blocks = self._build_blocks(
+                document["document_id"], document["title"], Path(document["stored_path"]),
+                markdown, document["parser_backend"],
+            )
+            blocks.extend(document_blocks)
+            rebuilt_chunks.extend(self._build_chunks(
+                document["document_id"], document["title"], Path(document["stored_path"]), document_blocks,
+            ))
+        chunks, duplicate_chunk_count = self._dedupe_chunks(rebuilt_chunks)
         retained_chunk_ids = {str(row.get("chunk_id") or "") for row in chunks}
-        if len(chunks) != len(_read_jsonl(self.chunks_path)):
-            _write_jsonl(self.chunks_path, chunks)
+        for document in documents:
+            document["chunk_count"] = sum(row.get("source_id") == document["document_id"] for row in chunks)
+        _write_jsonl(self.documents_path, documents)
+        _write_jsonl(self.blocks_path, blocks)
+        _write_jsonl(self.chunks_path, chunks)
 
         entities: list[dict[str, Any]] = []
         relations: list[dict[str, Any]] = []
@@ -748,7 +722,7 @@ class KnowledgeIngestionService:
         )
         steps = [
             PipelineStep(STEP_PARSE, "success" if documents else "warning", f"复用 {len(documents)} 份已解析资料"),
-            PipelineStep(STEP_CHUNK, "success" if chunks else "warning", f"复用 {len(chunks)} 个去重文本块", f"去重 {duplicate_chunk_count} 个重复文本块"),
+            PipelineStep(STEP_CHUNK, "success" if chunks else "warning", f"按解析原文生成 {len(chunks)} 个证据块", f"去重 {duplicate_chunk_count} 个重复文本块"),
             PipelineStep(
                 STEP_VECTOR,
                 str(vector_stats.get("status") or "warning"),
@@ -829,6 +803,8 @@ class KnowledgeIngestionService:
         ids: list[str] = []
         metadatas: list[dict[str, Any]] = []
         for chunk in chunks:
+            if exclusion_reason(chunk) is not None:
+                continue
             chunk_id = str(chunk.get("chunk_id") or "").strip()
             content = str(chunk.get("content_plain") or chunk.get("content_markdown") or chunk.get("text") or "").strip()
             if not chunk_id or not content:
@@ -839,6 +815,7 @@ class KnowledgeIngestionService:
                 {
                     "source": "PROJECT_KNOWLEDGE",
                     "chunk_id": chunk_id,
+                    "chunk_fingerprint": str(chunk.get("chunk_fingerprint") or ""),
                     "record_id": chunk.get("record_id"),
                     "source_id": chunk.get("source_id"),
                     "document_title": chunk.get("document_title") or chunk.get("title"),
@@ -1146,7 +1123,7 @@ class KnowledgeIngestionService:
         if not rows:
             return ""
         width = max(len(row) for row in rows)
-        padded = [row + [""] * (width - len(row)) for row in rows[:200]]
+        padded = [row + [""] * (width - len(row)) for row in rows]
         header = padded[0]
         body = padded[1:] or [[""] * width]
         lines = [f"# {title}", "", "| " + " | ".join(header) + " |", "| " + " | ".join(["---"] * width) + " |"]
@@ -1162,18 +1139,43 @@ class KnowledgeIngestionService:
         return text.strip()
 
     def _build_blocks(self, document_id: str, title: str, stored_path: Path, markdown: str, parser_backend: str) -> list[dict[str, Any]]:
+        from markdown_it import MarkdownIt
+        from mdit_py_plugins.dollarmath import dollarmath_plugin
+        from mdit_py_plugins.texmath import texmath_plugin
+
+        parser = MarkdownIt("commonmark").enable("table").use(dollarmath_plugin).use(texmath_plugin, delimiters="brackets")
         blocks: list[dict[str, Any]] = []
-        order = 0
-        current_heading = ""
-        paragraphs = [part.strip() for part in re.split(r"\n\s*\n", markdown) if part.strip()]
-        for paragraph in paragraphs:
-            order += 1
-            heading_match = re.match(r"^(#{1,6})\s+(.+)$", paragraph)
-            block_type = "heading" if heading_match else "text"
-            if heading_match:
-                current_heading = heading_match.group(2).strip()
-            if paragraph.lstrip().startswith("|"):
+        headings = []
+        lines = markdown.splitlines()
+        tokens = parser.parse(markdown)
+        for index, token in enumerate(tokens):
+            if token.map is None or token.level != 0 or token.nesting == -1:
+                continue
+            paragraph = "\n".join(lines[token.map[0]:token.map[1]]).strip()
+            order = len(blocks) + 1
+            block_type = "text"
+            structure_issues = []
+            structure_error = None
+            if token.type == "heading_open":
+                level = int(token.tag[1:])
+                headings = [item for item in headings if item[0] < level]
+                headings.append((level, tokens[index + 1].content))
+                block_type = "heading"
+            elif token.type == "table_open":
                 block_type = "table"
+            elif token.type.startswith("math_block"):
+                block_type = "formula"
+            elif token.type == "html_block":
+                try:
+                    normalized = html_tables_to_markdown(paragraph)
+                    if normalized is not None:
+                        paragraph = normalized
+                        block_type = "table"
+                except TableStructureError as exc:
+                    block_type = "table"
+                    structure_issues = ["table_structure_invalid"]
+                    structure_error = str(exc)
+            section_path = [item[1] for item in headings]
             block_id = f"{document_id}_B{order:04d}"
             blocks.append(
                 {
@@ -1184,16 +1186,28 @@ class KnowledgeIngestionService:
                     "file_name": stored_path.name,
                     "title": title,
                     "document_title": title,
-                    "section_title": current_heading,
-                    "section_path": [current_heading] if current_heading else [],
+                    "section_title": section_path[-1] if section_path else "",
+                    "section_path": section_path,
                     "block_type": block_type,
                     "parser_backend": parser_backend,
                     "order": order,
                     "text": paragraph,
                     "char_count": len(paragraph),
                     "parse_quality_score": self._quality_score(markdown),
+                    "content_quality_issues": structure_issues,
+                    "table_structure_error": structure_error,
                 }
             )
+        # 条件按章节及其祖先继承，完整段落不受分块 token 目标影响。
+        contexts: dict[tuple[str, ...], list[str]] = {}
+        for block in blocks:
+            if block["block_type"] == "text":
+                contexts.setdefault(tuple(block["section_path"]), []).extend(scope_passages(block["text"]))
+        for block in blocks:
+            path = block["section_path"]
+            block["applicability_context"] = list(dict.fromkeys(
+                passage for depth in range(len(path) + 1) for passage in contexts.get(tuple(path[:depth]), [])
+            ))
         return blocks
 
     def _quality_score(self, markdown: str) -> float:
@@ -1212,22 +1226,7 @@ class KnowledgeIngestionService:
         return round(min(score, 96.0), 2)
 
     def _build_chunks(self, document_id: str, title: str, stored_path: Path, blocks: list[dict[str, Any]]) -> list[dict[str, Any]]:
-        expanded_blocks: list[dict[str, Any]] = []
-        for block in blocks:
-            text = str(block.get("text") or "")
-            parts = _split_text_by_tokens(text, self.chunk_token_size)
-            if len(parts) == 1:
-                expanded_blocks.append(block)
-                continue
-            for index, part in enumerate(parts, start=1):
-                item = dict(block)
-                item["text"] = part
-                item["block_id"] = f"{block.get('block_id')}_P{index:03d}"
-                item["char_count"] = len(part)
-                expanded_blocks.append(item)
-
         chunks: list[dict[str, Any]] = []
-        seen_hashes: set[str] = set()
         buffer: list[dict[str, Any]] = []
         buffer_tokens = 0
 
@@ -1242,11 +1241,6 @@ class KnowledgeIngestionService:
                 return
             index = len(chunks) + 1
             fingerprint = hashlib.sha256(content.encode("utf-8")).hexdigest()
-            if fingerprint in seen_hashes:
-                buffer = self._overlap_buffer(buffer)
-                buffer_tokens = sum(_token_count(str(item.get("text") or "")) for item in buffer)
-                return
-            seen_hashes.add(fingerprint)
             section_path = buffer[-1].get("section_path") or []
             token_estimate = _token_count(content)
             chunks.append(
@@ -1258,6 +1252,7 @@ class KnowledgeIngestionService:
                     "source_id": document_id,
                     "chunk_type": "fulltext",
                     "retrieval_scope": "main",
+                    "applicability_context": list(dict.fromkeys(passage for item in buffer for passage in item["applicability_context"])),
                     "document_title": title,
                     "title": title,
                     "section_title": (section_path[-1] if section_path else ""),
@@ -1265,6 +1260,7 @@ class KnowledgeIngestionService:
                     "title_path": [title, *section_path] if section_path else [title],
                     "block_types": sorted({str(item.get("block_type") or "text") for item in buffer}),
                     "block_ids": [str(item.get("block_id")) for item in buffer],
+                    "content_quality_issues": sorted({issue for item in buffer for issue in item["content_quality_issues"]}),
                     "page_start": 0,
                     "page_end": 0,
                     "source_url": "",
@@ -1280,15 +1276,19 @@ class KnowledgeIngestionService:
                     "chunk_token_size": self.chunk_token_size,
                     "chunk_overlap_tokens": self.chunk_overlap_tokens,
                     "design_platform_scope": "pressure_hull_design",
-                    "load_case_tag": "external_pressure",
+                    "load_case_tag": "unspecified",
                 }
             )
             buffer = self._overlap_buffer(buffer)
             buffer_tokens = sum(_token_count(str(item.get("text") or "")) for item in buffer)
 
-        for block in expanded_blocks:
+        for block in blocks:
             text = str(block.get("text") or "")
             token_len = _token_count(text)
+            if buffer and block["section_path"] != buffer[-1]["section_path"]:
+                flush()
+                buffer = []
+                buffer_tokens = 0
             if buffer and buffer_tokens + token_len > self.chunk_token_size:
                 flush()
             if buffer and buffer_tokens + token_len > self.chunk_token_size:
@@ -1297,7 +1297,33 @@ class KnowledgeIngestionService:
             buffer.append(block)
             buffer_tokens += token_len
         flush()
-        return self._merge_small_chunks(chunks)
+        return self._finalize_evidence(self._merge_small_chunks(chunks))
+
+    def _finalize_evidence(self, chunks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """质量、条件和列投影由生产入口写入，指纹覆盖实际证据及其适用范围。"""
+        for chunk in chunks:
+            content = chunk["content_markdown"]
+            context = chunk["applicability_context"]
+            assessment = content + "\n\n" + "\n\n".join(passage for passage in context if passage not in content)
+            quality = assess_content(assessment, inherited_issues=chunk["content_quality_issues"])
+            projection = project_table_columns(content, quality)
+            if projection is not None:
+                projected, columns = projection
+                columns.update(source_chunk_id=chunk["chunk_id"], source_chunk_fingerprint=chunk["chunk_fingerprint"])
+                content = projected
+                quality = assess_content(content + "\n\n" + "\n\n".join(context))
+                for table in quality["table_evidence"]:
+                    table["column_projection"] = columns
+            chunk.update(quality)
+            chunk["content_markdown"] = content
+            chunk["content_plain"] = _markdown_plain_text(content)
+            chunk["text"] = trim_text(content, 1200)
+            chunk["char_count"] = len(content)
+            chunk["token_estimate"] = _token_count(content)
+            fingerprint_payload = {key: chunk[key] for key in ("content_markdown", "applicability_context", "evidence_kind", "evidence_usage", "table_evidence")}
+            fingerprint = hashlib.sha256(json.dumps(fingerprint_payload, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+            chunk["chunk_fingerprint"] = chunk["content_hash"] = fingerprint
+        return self._reindex_chunks(chunks)
 
     def _overlap_buffer(self, buffer: list[dict[str, Any]]) -> list[dict[str, Any]]:
         if self.chunk_overlap_tokens <= 0:
@@ -1324,6 +1350,7 @@ class KnowledgeIngestionService:
             token_count = int(chunk.get("token_estimate", 0) or _token_count(str(chunk.get("content_markdown") or "")))
             if (
                 merged
+                and merged[-1].get("section_path") == chunk.get("section_path")
                 and token_count < self.min_chunk_tokens
                 and int(merged[-1].get("token_estimate", 0) or 0) + token_count <= self.chunk_token_size
             ):
@@ -1349,6 +1376,8 @@ class KnowledgeIngestionService:
         combined["token_estimate"] = _token_count(content)
         combined["block_ids"] = [*list(left.get("block_ids") or []), *list(right.get("block_ids") or [])]
         combined["block_types"] = sorted({*list(left.get("block_types") or []), *list(right.get("block_types") or [])})
+        combined["content_quality_issues"] = sorted(set(left["content_quality_issues"]) | set(right["content_quality_issues"]))
+        combined["applicability_context"] = list(dict.fromkeys([*left["applicability_context"], *right["applicability_context"]]))
         combined["section_path"] = right.get("section_path") or left.get("section_path") or []
         section_path = combined.get("section_path") or []
         combined["section_title"] = section_path[-1] if section_path else ""
@@ -1374,7 +1403,14 @@ class KnowledgeIngestionService:
         relations: list[dict[str, Any]] = []
         seen_relations: set[tuple[str, str, str, str]] = set()
         for chunk in chunks:
-            text = f"{chunk.get('document_title')}\n{chunk.get('content_plain') or chunk.get('content_markdown')}"
+            if exclusion_reason(chunk) is not None:
+                continue
+            evidence = {key: chunk[key] for key in ("content_quality_version", "evidence_kind", "evidence_usage", "applicability_context", "table_evidence")}
+            text = "\n".join([
+                str(chunk.get("document_title") or ""), str(chunk.get("section_title") or ""),
+                str(chunk.get("content_plain") or chunk.get("content_markdown") or ""),
+                *chunk["applicability_context"],
+            ])
             chunk_entities: list[tuple[str, str]] = []
             for entity_type, terms in DOMAIN_ENTITY_TERMS.items():
                 for keyword, normalized in terms.items():
@@ -1394,6 +1430,7 @@ class KnowledgeIngestionService:
                     seen_relations.add(rel_key)
                     relations.append(
                         {
+                            **evidence,
                             "source_type": entity_type,
                             "source": name,
                             "target_type": "Literature",
@@ -1421,6 +1458,7 @@ class KnowledgeIngestionService:
                     seen_relations.add(rel_key)
                     relations.append(
                         {
+                            **evidence,
                             "source_type": left[0],
                             "source": left[1],
                             "target_type": right[0],
@@ -1549,19 +1587,20 @@ class KnowledgeIngestionService:
     ) -> dict[str, Any]:
         document_chunks = [row for row in chunks if row.get("source_id") == document_id]
         document_relations = [row for row in relations if row.get("record_id") == document_id]
-        chunk_ids = {str(row.get("chunk_id") or "") for row in chunks}
+        chunk_index = {str(row.get("chunk_id") or ""): row for row in chunks}
         invalid_relations = [
             str(row.get("evidence_chunk_id") or "")
             for row in document_relations
-            if str(row.get("evidence_chunk_id") or "") not in chunk_ids
+            if row.get("evidence_chunk_id") not in chunk_index or not binds_to_chunk(row, chunk_index[row["evidence_chunk_id"]])
         ]
         query_terms = self._verification_query_terms(title, document_chunks, document_relations)
-        scored_chunks = self._score_chunks_for_verification(query_terms, chunks)
+        scored_chunks = self._score_chunks_for_verification(query_terms, [row for row in chunks if exclusion_reason(row) is None])
         top_hits = scored_chunks[:5]
         own_hits = [row for row in top_hits if row.get("source_id") == document_id]
         evidence_chunks = [
             {
                 "chunk_id": row.get("chunk_id"),
+                "chunk_fingerprint": row.get("chunk_fingerprint"),
                 "source_id": row.get("source_id"),
                 "document_title": row.get("document_title") or row.get("title"),
                 "score": row.get("verification_score"),
@@ -1575,6 +1614,7 @@ class KnowledgeIngestionService:
                 "relation": row.get("relation"),
                 "target": row.get("target"),
                 "evidence_chunk_id": row.get("evidence_chunk_id"),
+                "evidence_chunk_fingerprint": row.get("evidence_chunk_fingerprint"),
             }
             for row in document_relations[:3]
         ]

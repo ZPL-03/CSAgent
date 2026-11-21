@@ -239,13 +239,10 @@ def build_fem_ready_task_record(payload: Dict[str, Any]) -> Dict[str, Any]:
     )
     if condition_source not in {"user", "default"}:
         raise FEMCandidateTransferError("导入缺陷比来源应为 user 或 default。")
-    angles = sorted(
-        {
-            abs(float(angle))
-            for candidate in candidates
-            for angle in (candidate.get("layup") or {}).get("angles_deg", [])
-        }
-    )
+    # 约束来自请求，不从候选反推；非对称历史候选不能把 symmetric=true 改为 false。
+    layup_constraints = deepcopy(request.get("layup_constraints") or {})
+    if "allowed_angles_deg" in layup_constraints:
+        layup_constraints["allowed_angles"] = layup_constraints.pop("allowed_angles_deg")
     task_payload = {
         "application": str(request.get("structure_form") or "复合材料外压圆柱耐压壳"),
         "hull_type": "CYLINDRICAL",
@@ -264,11 +261,7 @@ def build_fem_ready_task_record(payload: Dict[str, Any]) -> Dict[str, Any]:
         "screening_preferences": {
             "top_k_candidates": min(len(candidates), 30),
         },
-        "layup_constraints": {
-            "allowed_angles_deg": angles,
-            "symmetric": all(bool((candidate.get("layup") or {}).get("symmetric")) for candidate in candidates),
-            "balanced": all(bool((candidate.get("layup") or {}).get("balanced")) for candidate in candidates),
-        },
+        "layup_constraints": layup_constraints,
         "design_targets": deepcopy(request.get("design_targets") or {}),
         "user_input_facts": {
             "fixed_geometry": {"length_mm": length, "radius_mm": radius},

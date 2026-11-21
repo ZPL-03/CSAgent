@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from copy import deepcopy
 from datetime import datetime, timezone
+import math
 import re
 from typing import Any, Dict, Iterable
 
@@ -343,6 +344,15 @@ def normalize_task_payload(
     normalized["boundary_conditions"] = normalize_boundary_conditions(normalized.get("boundary_conditions"))
     envelope = dict(normalized.get("geometry_envelope") or {})
     fixed_facts = (normalized.get("user_input_facts") or {}).get("fixed_geometry") or {}
+    # 固定几何是任务约束，不把它当作采样中心或截断到全局范围。
+    for key, value in fixed_facts.items():
+        if key not in DEFAULT_GEOMETRY_ENVELOPE:
+            continue
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
+            raise ValueError(f"固定几何 {key} 必须是有限数值。")
+        if key in envelope and _normalize_range(envelope[key], [value, value]) != [value, value]:
+            raise ValueError(f"任务 {key} 与用户固定条件冲突。")
+        envelope[key] = [value, value]
     if "imperfection_ratio" in fixed_facts:
         fact_defect = validate_imperfection_ratio(fixed_facts["imperfection_ratio"])
         supplied_keys = {"imperfection_ratio", "Ir", "imperfection"}.intersection(envelope)
@@ -372,6 +382,19 @@ def normalize_task_payload(
         **deepcopy(DEFAULT_LAYUP_CONSTRAINTS),
         **dict(normalized.get("layup_constraints", {})),
     }
+    constraints = normalized["layup_constraints"]
+    for key in ("symmetric", "balanced"):
+        if not isinstance(constraints[key], bool):
+            raise ValueError(f"layup_constraints.{key} 必须是布尔值。")
+    angles = constraints["allowed_angles"]
+    if not isinstance(angles, list) or any(
+        isinstance(angle, bool) or not isinstance(angle, (int, float))
+        or not math.isfinite(angle) or abs(angle) > 90 for angle in angles
+    ):
+        raise ValueError("allowed_angles 必须是 ±90 度范围内的有限角度数组。")
+    ratio = constraints["min_ratio_per_angle"]
+    if isinstance(ratio, bool) or not isinstance(ratio, (int, float)) or not math.isfinite(ratio) or not 0 <= ratio <= 1:
+        raise ValueError("min_ratio_per_angle 必须在 0 到 1 之间。")
     normalized["design_targets"] = {
         **deepcopy(DEFAULT_DESIGN_TARGETS),
         "ultimate_pressure_min_MPa": normalized["load_conditions"]["external_pressure_MPa"],
@@ -402,6 +425,32 @@ def task_payload_from_request(task_record: Dict[str, Any] | None) -> Dict[str, A
 def task_imperfection_ratio(task: Dict[str, Any] | None) -> float:
     """所有候选路径使用任务的固定缺陷比；缺省值由任务归一化提供。"""
     return task_payload_from_request(task)["geometry_envelope"]["imperfection_ratio"][0]
+
+
+def candidate_constraints(task: Dict[str, Any]) -> Dict[str, Any]:
+    """提取候选生成、预筛与求解共同使用的任务约束快照。"""
+    payload = task_payload_from_request(task)
+    return deepcopy({key: payload[key] for key in (
+        "hull_type", "geometry_envelope", "radius_reference", "layup_constraints",
+        "load_conditions", "boundary_conditions", "design_targets", "material_system",
+    )})
+
+
+def task_geometry_bounds(task: Dict[str, Any], hull_type: str | None = None) -> Dict[str, Dict[str, float]]:
+    """返回任务与当前模型支持域的交集；域外固定参数终止任务，不替换数值。"""
+    from core.pressure_hull_profile import load_param_ranges_for_type
+
+    payload = task_payload_from_request(task)
+    bounds = {}
+    for key, domain in load_param_ranges_for_type(hull_type or payload["hull_type"]).items():
+        low, high = payload["geometry_envelope"][key]
+        if not all(math.isfinite(value) for value in (low, high)):
+            raise ValueError(f"任务的 {key} 必须为有限数值。")
+        low, high = max(low, domain["min"]), min(high, domain["max"])
+        if low > high:
+            raise ValueError(f"任务的 {key} 与模型适用范围无交集，不能预筛或求解。")
+        bounds[key] = {"min": low, "max": high}
+    return bounds
 
 
 def describe_imperfection_source(task: Dict[str, Any] | None) -> str:

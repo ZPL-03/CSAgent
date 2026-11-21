@@ -226,6 +226,8 @@ def _validate_completed_state(
             for source in sorted({str(candidate.get("source")) for candidate in state.candidates})
         },
         "generation_audit": generation_audit,
+        "llm_explanation_used": bool(state.report.get("llm_explanation_used")),
+        "llm_explanation_audit": state.report.get("llm_explanation_audit"),
     }
     _validate_expected_contract(summary, expected)
     if expected:
@@ -371,7 +373,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    exit_code = main()
-    sys.stdout.flush()
-    sys.stderr.flush()
-    os._exit(exit_code)
+    raise SystemExit(main())

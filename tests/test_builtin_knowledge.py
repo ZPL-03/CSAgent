@@ -9,6 +9,7 @@ import pytest
 
 from core import builtin_knowledge
 from core.builtin_knowledge import BuiltinKnowledgeIndex, retrieval_tokens
+from core.knowledge_quality import assess_content
 
 
 def make_index(root: Path, *, shape=(3, 2), aggregation=builtin_knowledge.ENCODING_CONTRACT):
@@ -19,6 +20,9 @@ def make_index(root: Path, *, shape=(3, 2), aggregation=builtin_knowledge.ENCODI
         {"chunk_id":"B1", "source_id":"DOC_B", "record_id":"REC_B", "document_title":"Filament winding", "content_plain":"filament winding manufacturing"},
         {"chunk_id":"A2", "source_id":"DOC_A", "record_id":"REC_A", "document_title":"Pressure hull buckling", "content_plain":"pressure hull collapse"},
     ]
+    for chunk in chunks:
+        chunk["chunk_fingerprint"] = "fp_" + chunk["chunk_id"]
+        chunk.update(assess_content(chunk["content_plain"]))
     metadata = {"schema_version":"2", "chunk_count":"3", "dense_enabled":"1", "dense_dimension":"2", "dense_file":"retrieval_embeddings.npy", "dense_model":"BAAI/bge-m3", "dense_max_length":"1024", "dense_window_overlap":"128", "dense_window_aggregation":aggregation}
     with sqlite3.connect(path) as connection:
         connection.executescript("CREATE TABLE metadata(key TEXT PRIMARY KEY,value TEXT); CREATE TABLE chunks(rowid INTEGER PRIMARY KEY,payload TEXT); CREATE VIRTUAL TABLE chunks_fts USING fts5(title_tokens,section_tokens,content_tokens);")
@@ -119,9 +123,22 @@ def test_domain_merges_prebuilt_index_with_runtime_chunks(tmp_path):
     builtin = tmp_path / "builtin"
     path = make_index(builtin / "rag")
     runtime = tmp_path / "runtime.jsonl"
-    runtime.write_text(json.dumps({"chunk_id": "R1", "source_id": "DOC_R", "record_id": "DOC_R", "document_title": "Runtime pressure hull", "content_plain": "pressure hull buckling test"}) + "\n", encoding="utf-8")
+    runtime.write_text(json.dumps({"chunk_id": "R1", "chunk_fingerprint": "fp_R1", "source_id": "DOC_R", "record_id": "DOC_R", "document_title": "Runtime pressure hull", "content_plain": "pressure hull buckling test", **assess_content("pressure hull buckling test")}) + "\n", encoding="utf-8")
     knowledge = DomainKnowledgeBase({"project_knowledge": {"builtin_dir": str(builtin), "builtin_retrieval_index_path": str(path), "builtin_dense_enabled": False, "vector_enabled": False, "rag_chunks_path": str(runtime), "kg_dir": str(tmp_path / "kg"), "manifest_path": str(tmp_path / "manifest.json")}})
     result = knowledge.retrieve_by_query("pressure hull buckling", top_k=4)
     assert {chunk["source_id"] for chunk in result["chunks"]} == {"DOC_A", "DOC_R"}
     assert knowledge.rag.builtin_chunks_paths == []
     assert not knowledge.status()["builtin_vector_ready"]
+
+
+def test_builtin_excludes_ineligible_dense_and_lexical_hits(monkeypatch, tmp_path):
+    path = make_index(tmp_path)
+    with sqlite3.connect(path) as connection:
+        payload = json.loads(connection.execute("SELECT payload FROM chunks WHERE rowid=1").fetchone()[0])
+        payload["retrieval_eligible"] = False
+        connection.execute("UPDATE chunks SET payload=? WHERE rowid=1", (json.dumps(payload),))
+    engine = SimpleNamespace(use_hash_embedding_only=False)
+    monkeypatch.setattr(builtin_knowledge, "encode_query", lambda *args: np.array([1.0, 0.0], dtype="float32"))
+    result = BuiltinKnowledgeIndex(path, engine=engine).search("pressure hull", top_k=3)
+    assert "A1" not in {row["chunk_id"] for row in result}
+    assert "A2" in {row["chunk_id"] for row in result}

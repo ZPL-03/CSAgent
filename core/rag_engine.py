@@ -101,6 +101,9 @@ class RAGEngine:
         self.collection = self.client.get_or_create_collection(name=self.collection_name)
 
         self.embedding_model_name = embedding_model or str(rag_config.get("embedding_model", "BAAI/bge-m3"))
+        from core.config_loader import embedding_device
+
+        self.embedding_device = embedding_device()
         cache_path = Path(str(rag_config.get("embedding_cache_dir", "models/embedding_cache"))).expanduser()
         self.embedding_cache_dir = cache_path if cache_path.is_absolute() else ROOT_DIR / cache_path
         self.embedding_cache_dir.mkdir(parents=True, exist_ok=True)
@@ -114,7 +117,7 @@ class RAGEngine:
         self._embedder_failed = False
 
     def _sentence_transformer_kwargs(self, sentence_transformer_cls) -> Dict[str, Any]:
-        kwargs: Dict[str, Any] = {"cache_folder": str(self.embedding_cache_dir)}
+        kwargs: Dict[str, Any] = {"cache_folder": str(self.embedding_cache_dir), "device": self.embedding_device}
         try:
             parameters = inspect.signature(sentence_transformer_cls.__init__).parameters
         except (TypeError, ValueError):

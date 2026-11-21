@@ -724,7 +724,7 @@ def test_knowledge_widget_runs_real_ingestion_pipeline(monkeypatch, tmp_path) ->
             "kg_dir": str(base_dir / "kg"),
             "top_k": 5,
             "kg_top_k": 8,
-            "max_snippet_chars": 1200,
+            "max_context_chars": 12000,
             "chunk_token_size": 48,
             "chunk_overlap_tokens": 8,
             "min_chunk_tokens": 20,

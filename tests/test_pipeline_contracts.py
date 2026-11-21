@@ -345,7 +345,7 @@ def test_llm_backend_uses_fallback_backend_after_primary_unusable_response(monke
             self.completions = FakeCompletions(owner)
 
     class FakeOpenAI:
-        def __init__(self, base_url, api_key, timeout, default_headers):
+        def __init__(self, base_url, api_key, timeout, default_headers, http_client):
             self.base_url = base_url
             self.chat = FakeChat(self)
 
@@ -584,7 +584,7 @@ def test_candidate_generation_deduplicates_equivalent_designs(monkeypatch):
             "beta_deg": 65.0,
             "imperfection_ratio": 0.005,
         },
-        "layup": {"layup": "[90_4/(±35/±65)_8/90_4]"},
+        "layup": {"layup": "[90_4/(90/±45/0)_4]s"},
         "material_system": {"name": "T700/Epoxy", "material_key": "T700_Epoxy"},
         "rationale": "重复候选",
     }
@@ -629,8 +629,8 @@ def test_llm_candidates_are_extracted_from_engineering_natural_answer(monkeypatc
                 "## 候选方案\n"
                 "| 编号 | 材料 | 长度(mm) | 半径(mm) | 厚度(mm) | alpha(deg) | beta(deg) | 缺陷比 | 铺层形式 | 推荐理由 |\n"
                 "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
-                "| S01 | T700/Epoxy | 520 | 108 | 11 | 35 | 65 | 0.005 | [90_4/(±35/±65)_8/90_4] | 屈曲稳定性和制造性折中 |\n"
-                "| S02 | T700/Epoxy | 485 | 96 | 9.5 | 45 | 70 | 0.006 | [90_4/(±45/±70)_8/90_4] | 环向刚度较高 |\n"
+                "| S01 | T700/Epoxy | 520 | 108 | 11 | 35 | 65 | 0.005 | [90_4/(90/±45/0)_4]s | 屈曲稳定性和制造性需校核 |\n"
+                "| S02 | T700/Epoxy | 485 | 96 | 9.5 | 45 | 70 | 0.006 | [90_4/(90/±45/0)_4]s | 环向刚度需校核 |\n"
                 + ("完整回答追踪" * 360)
                 + "END_MARKER"
             )
@@ -648,8 +648,9 @@ def test_llm_candidates_are_extracted_from_engineering_natural_answer(monkeypatc
     assert candidates[0]["provenance"]["proposed_imperfection_ratio"] == 0.005
     assert candidates[1]["geometry"]["imperfection_ratio"] == 0.008
     assert candidates[1]["provenance"]["proposed_imperfection_ratio"] == 0.006
-    assert candidates[0]["geometry"]["alpha_deg"] == 35.0
-    assert candidates[0]["geometry"]["beta_deg"] == 65.0
+    assert candidates[0]["layup"]["template_name"] == "TASK_ANGLES"
+    assert not {"alpha_deg", "beta_deg"}.intersection(candidates[0]["geometry"])
+    assert not {"alpha_deg", "beta_deg"}.intersection(candidates[0]["layup"])
     assert "S01" in candidates[0]["origin_summary"]
     assert "候选方案" in candidates[0]["llm_output_excerpt"]
     assert "END_MARKER" in candidates[0]["llm_output_excerpt"]
@@ -697,7 +698,7 @@ def test_llm_candidate_generation_tries_next_backend_after_unparseable_primary(m
             return (
                 "| 编号 | 材料 | 长度(mm) | 半径(mm) | 厚度(mm) | alpha(deg) | beta(deg) | 缺陷比 | 铺层形式 | 推荐理由 |\n"
                 "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |\n"
-                "| S01 | T700/Epoxy | 520 | 110 | 12 | 35 | 65 | 0.005 | [90_4/(±35/±65)_8/90_4] | 屈曲稳定性和缠绕角控制折中 |\n"
+                "| S01 | T700/Epoxy | 520 | 110 | 12 | 35 | 65 | 0.005 | [90_4/(90/±45/0)_4]s | 屈曲稳定性和缠绕角控制需校核 |\n"
             )
 
     backend = ControlledBackend()
@@ -1057,22 +1058,23 @@ def test_knowledge_design_keeps_external_fem_provenance() -> None:
 
 def test_rag_engine_matches_installed_sentence_transformer_signature(tmp_path):
     class LegacySentenceTransformer:
-        def __init__(self, model_name_or_path=None, cache_folder=None):
+        def __init__(self, model_name_or_path=None, cache_folder=None, device=None):
             pass
 
     class ModernSentenceTransformer:
-        def __init__(self, model_name_or_path=None, cache_folder=None, local_files_only=False):
+        def __init__(self, model_name_or_path=None, cache_folder=None, local_files_only=False, device=None):
             pass
 
     engine = RAGEngine.__new__(RAGEngine)
     engine.embedding_cache_dir = tmp_path
+    engine.embedding_device = "cpu"
     engine.local_files_only = True
 
     legacy_kwargs = engine._sentence_transformer_kwargs(LegacySentenceTransformer)
     modern_kwargs = engine._sentence_transformer_kwargs(ModernSentenceTransformer)
 
-    assert legacy_kwargs == {"cache_folder": str(tmp_path)}
-    assert modern_kwargs == {"cache_folder": str(tmp_path), "local_files_only": True}
+    assert legacy_kwargs == {"cache_folder": str(tmp_path), "device": "cpu"}
+    assert modern_kwargs == {"cache_folder": str(tmp_path), "local_files_only": True, "device": "cpu"}
 
 
 def test_rag_engine_resolves_local_snapshot_without_network(tmp_path, monkeypatch):
@@ -1142,7 +1144,7 @@ def test_rag_engine_uses_explicit_local_model_directory(tmp_path):
 
 def test_rag_engine_retries_without_local_files_only_when_adapter_rejects_it(tmp_path, monkeypatch):
     class MisreportedSentenceTransformer:
-        def __init__(self, model_name_or_path=None, cache_folder=None, local_files_only=False):
+        def __init__(self, model_name_or_path=None, cache_folder=None, local_files_only=False, device=None):
             calls.append(
                 {
                     "model": model_name_or_path,
@@ -1161,6 +1163,7 @@ def test_rag_engine_retries_without_local_files_only_when_adapter_rejects_it(tmp
     engine = RAGEngine.__new__(RAGEngine)
     engine.embedding_model_name = "local-bge"
     engine.embedding_cache_dir = tmp_path
+    engine.embedding_device = "cpu"
     engine.local_files_only = True
 
     model = engine._build_sentence_transformer(MisreportedSentenceTransformer)
@@ -1392,80 +1395,6 @@ def test_final_recommendation_obeys_objective_and_requires_complete_evidence(mon
     assert "当前没有同时具备完整通过证据" in report_text
 
 
-def test_report_uses_llm_only_for_grounded_engineering_explanation(monkeypatch):
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    task, results, candidates = _report_sample()
-    agent = ReportGenAgent()
-
-    class ControlledBackend:
-        max_tokens = 1800
-
-        def chat(self, system_prompt, user_prompt, max_tokens_override=None, json_mode=False, **_kwargs):
-            assert "field_semantics" in system_prompt
-            assert "制造工艺适配性" in user_prompt
-            assert "结构化事实 JSON" in user_prompt
-            assert json_mode is False
-            return (
-                "### 制造工艺适配性\n"
-                "- 先围绕候选铺层组织缠绕和铺放可制造性评审。\n\n"
-                "### 缺陷与质量控制\n"
-                "- 重点比较圆度、铺层角偏差和分层风险。\n\n"
-                "### 有限元结果解读\n"
-                "- 结果解释沿用结构化校核结论。"
-            )
-
-    agent.llm_backend = ControlledBackend()
-
-    markdown = agent._render_markdown(task, results, candidates)
-
-    assert "缠绕和铺放可制造性评审" in markdown
-    assert "PBIPF 公式初筛通过" in markdown
-    assert agent._last_llm_explanation_used is True
-
-
-def test_report_accepts_convertible_math_without_llm_retry(monkeypatch):
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    task, results, candidates = _report_sample()
-    agent = ReportGenAgent()
-
-    class MathBackend:
-        max_tokens = 1800
-        calls = 0
-
-        def chat(self, *args, **kwargs):
-            self.calls += 1
-            return r"- 复核 $T700/Epoxy$ 的铺层与 \(P_{ult}\) 路径，保留 **ODB** 证据。"
-
-    agent.llm_backend = MathBackend()
-    summary = agent._build_structured_summary(task, results, candidates)
-    text = agent._render_engineering_explanation(summary)
-    assert "T700/Epoxy" in text and "P_ult" in text
-    assert "**ODB**" in text
-    assert "$" not in text and r"\(" not in text
-    assert agent.llm_backend.calls == 1
-    assert agent._last_llm_explanation_used is True
-
-
-def test_math_conversion_preserves_markdown_and_factual_validation(monkeypatch):
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    agent = ReportGenAgent()
-    text = "### 说明\n- 20% 文本保留。" + r"$$P_{ult}=15\,\mathrm{MPa}$$" + "\n" + r"\[\alpha=45^\circ\]"
-    converted = agent._normalize_llm_math(text)
-    assert converted.startswith("### 说明\n- 20% 文本保留。")
-    assert "15 MPa" in converted and "45" in converted
-    assert "$" not in converted and r"\[" not in converted
-    invalid = agent._normalize_llm_math(r"- 要求 $9999\,\mathrm{MPa}$。")
-    with pytest.raises(ValueError, match="之外的数值"):
-        agent._validate_llm_engineering_text(invalid, {"target_pressure_MPa": 15})
-    invalid_material = agent._normalize_llm_math(r"- 使用 $T999/Epoxy$。")
-    with pytest.raises(ValueError, match="之外的材料"):
-        agent._validate_llm_engineering_text(invalid_material, {"material": "T700/Epoxy"})
-    with pytest.raises(ValueError, match="未闭合"):
-        agent._normalize_llm_math("- 未闭合 $P_ult")
-    with pytest.raises(ValueError, match="不支持转换"):
-        agent._normalize_llm_math(r"- $\unsupportedcommand{P}$")
-
-
 def test_report_rejection_is_not_reported_as_solver_or_connection_failure(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task, results, candidates = _report_sample()
@@ -1485,48 +1414,8 @@ def test_report_rejection_is_not_reported_as_solver_or_connection_failure(monkey
     rejection = [event[2] for event in events if event[2]["event_type"] == "report_explanation_rejected"]
     assert len(rejection) == 1
     assert rejection[0]["payload"]["report_kind"] == "overall"
-    assert "之外的数值" in rejection[0]["payload"]["reason"]
+    assert agent._last_llm_explanation_audit["status"] == "rejected"
     assert "生成失败" not in rejection[0]["message"]
-
-
-def test_report_rejects_observed_unsupported_engineering_claims(monkeypatch):
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    agent = ReportGenAgent()
-    payload = {"screened_candidates": [{"symmetric": False}, {"symmetric": False}]}
-    for claim in (
-        "部分候选采用对称铺层。",
-        "当前铺层为对称形式，有利于减小弯曲耦合。",
-        "该层合板具有对称性。",
-        "候选是对称结构。",
-        "较轻候选质量效率更优。",
-        "当前已考虑缺陷敏感性。",
-        "损伤状态变量最大值表明损伤已完全发展。",
-        "Riks 最大增量为当前记录值。",
-    ):
-        with pytest.raises(ValueError):
-            agent._validate_llm_engineering_text(claim, payload)
-    agent._validate_llm_engineering_text("候选采用非对称铺层，应开展缺陷敏感性分析。", payload)
-    agent._validate_llm_engineering_text("当前铺层为非对称形式，不具有对称性。", payload)
-
-
-def test_report_does_not_treat_surface_density_unit_as_material_code(monkeypatch):
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    agent = ReportGenAgent()
-    payload = {"screened_candidates": [{"material": "T800G/5228", "weight_kg_per_m2": 26.86}]}
-    agent._validate_llm_engineering_text("T800G/5228 的面密度为 26.86 kg/m2。", payload)
-    agent._validate_llm_engineering_text("T800G/5228 的面密度为 26.86 kg / m2。", payload)
-    with pytest.raises(ValueError, match="材料牌号"):
-        agent._validate_llm_engineering_text("M40J 材料需要复核。", payload)
-
-
-def test_report_respects_controlled_termination(monkeypatch):
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    agent = ReportGenAgent()
-    payload = {"results": [{"riks_termination_reason": "post_peak_drop_20_percent"}]}
-    for claim in ("两组候选均未报告校核终止。", "作业均正常完成。"):
-        with pytest.raises(ValueError, match="受控终止"):
-            agent._validate_llm_engineering_text(claim, payload)
-    agent._validate_llm_engineering_text("峰后受控终止，不是异常中断。", payload)
 
 
 def test_report_llm_context_preserves_numeric_facts_and_completed_analysis_scope(monkeypatch):
@@ -1565,52 +1454,6 @@ def test_report_llm_context_preserves_numeric_facts_and_completed_analysis_scope
     assert payload["results"][0]["riks_limit_point_confirmed"] is False
     assert payload["results"][0]["ultimate_pressure_MPa"] is None
     assert payload["field_semantics"]["riks_lpf_max"] == "Riks 路径的最大载荷比例系数。"
-
-
-def test_report_postprocess_preserves_content_and_normalizes_headings(monkeypatch):
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    agent = ReportGenAgent()
-    cleaned = agent._postprocess_engineering_explanation(
-        "### 工程解释与制造建议\n"
-        "## 有限元结果解读\n"
-        "- 压力为 ３０ MPa，verdict 为通过。"
-    )
-
-    assert "工程解释与制造建议" not in cleaned
-    assert cleaned == "### 有限元结果解读\n- 压力为 30 MPa,verdict 为通过。"
-
-
-def test_report_strips_reasoning_block_before_validation(monkeypatch):
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    task, results, candidates = _report_sample()
-    agent = ReportGenAgent()
-
-    class ControlledBackend:
-        max_tokens = 1800
-
-        def __init__(self):
-            self.calls = 0
-
-        def chat(self, system_prompt, user_prompt, max_tokens_override=None, json_mode=False, **_kwargs):
-            self.calls += 1
-            return (
-                "<think>内部推理不应进入报告。</think>\n"
-                "### 制造工艺适配性\n"
-                "- 围绕当前候选的铺层组织、圆柱壳成型和质量一致性开展工程复核。\n\n"
-                "### 有限元结果解读\n"
-                "- 解释应以结构化校核结果为依据，不新增额外阈值或替代材料。"
-            )
-
-    backend = ControlledBackend()
-    agent.llm_backend = backend
-
-    markdown = agent._render_markdown(task, results, candidates)
-
-    assert "<think" not in markdown.lower()
-    assert "内部推理" not in markdown
-    assert "制造工艺适配性" in markdown
-    assert backend.calls == 1
-    assert agent._last_llm_explanation_used is True
 
 
 def test_report_emits_llm_trace_when_engineering_explanation_fails(monkeypatch):
@@ -1692,17 +1535,6 @@ def test_report_rejects_unsupported_explanation_without_rewrite(monkeypatch):
     assert "T800" not in markdown
     assert backend.calls == 1
     assert agent._last_llm_explanation_used is False
-
-
-def test_report_numeric_validation_accepts_rounding_at_display_precision(monkeypatch):
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    agent = ReportGenAgent()
-    payload = {"ultimate_pressure_MPa": 77.845959, "other_pressure_MPa": 42.313629}
-    agent._validate_llm_engineering_text("压力为 77.846 MPa 和 42.314 MPa。", payload)
-    agent._validate_llm_engineering_text("压力为 77.845959 MPa。", payload)
-    for text in ("压力为 77.847 MPa。", "压力为 42.315 MPa。", "压力为 77.84600 MPa。"):
-        with pytest.raises(ValueError, match="之外的数值"):
-            agent._validate_llm_engineering_text(text, payload)
 
 
 def test_report_fallback_uses_explicit_layup_not_unused_angle_parameters(monkeypatch):

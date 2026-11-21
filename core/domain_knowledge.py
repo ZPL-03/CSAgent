@@ -12,6 +12,7 @@ from typing import Any, Dict, Iterable, List
 
 from core.config_loader import load_app_config
 from core.paths import CHROMA_DIR, ROOT_DIR
+from core.retrieval_evidence import binds_to_chunk, exclusion_reason, full_text, render_evidence
 from core.task_contract import describe_boundary_conditions, describe_load_conditions, task_payload_from_request
 
 
@@ -161,6 +162,12 @@ def _count_rows(path: Path) -> int:
     return sum(1 for _row in _jsonl_rows(path))
 
 
+def _file_signature(paths: Iterable[Path]) -> tuple:
+    """上传或重建改变文件时，检索对象必须重新装载当前证据。"""
+    return tuple((str(path), stat.st_mtime_ns, stat.st_size) for path in paths
+                 if path.exists() for stat in [path.stat()])
+
+
 def _builtin_record_counts(manifest_path: Path, kg_stats_path: Path, rag_path: Path, relations_path: Path, entities_path: Path) -> dict[str, int]:
     manifest = _load_json(manifest_path)
     record_counts = manifest.get("record_counts") if isinstance(manifest.get("record_counts"), dict) else {}
@@ -192,7 +199,7 @@ def expand_query_terms(query: str) -> list[str]:
 
 
 def trim_text(text: Any, limit: int) -> str:
-    """按字符数裁剪检索片段。"""
+    """生成日志和界面预览，不能用于模型提示词证据。"""
     cleaned = " ".join(str(text or "").split())
     if len(cleaned) <= limit:
         return cleaned
@@ -222,35 +229,22 @@ def _normalize_source_key(*values: Any) -> str:
     return ""
 
 
-def _source_line(label: str, source: dict[str, Any]) -> str:
-    title = str(source.get("title") or source.get("record_id") or label).strip()
-    parts = [f"[{label}] {title}"]
-    pub = " ".join(str(value).strip() for value in [source.get("year"), source.get("venue")] if str(value or "").strip())
-    if pub:
-        parts.append(pub)
-    if source.get("doi"):
-        parts.append(f"DOI: {source.get('doi')}")
-    if source.get("source_url"):
-        parts.append(str(source.get("source_url")))
-    return "；".join(parts)
-
-
 class RagChunkRetriever:
     """基于知识库 JSONL 的轻量关键词检索器。"""
 
     def __init__(
         self,
         chunks_path: Path,
-        max_snippet_chars: int = 1200,
         *,
         builtin_chunks_paths: list[Path] | None = None,
     ) -> None:
         self.chunks_path = chunks_path
         self.builtin_chunks_paths = list(builtin_chunks_paths or [])
-        self.max_snippet_chars = max_snippet_chars
+        self.chunks_by_id: dict[str, dict[str, Any]] = {}
         self.rows: list[dict[str, Any]] = []
         self.idf: dict[str, float] = {}
         self._loaded = False
+        self._source_signature: tuple = ()
 
     @property
     def is_ready(self) -> bool:
@@ -268,8 +262,13 @@ class RagChunkRetriever:
         return paths
 
     def _ensure_loaded(self) -> None:
-        if self._loaded:
+        signature = _file_signature(self._chunk_paths())
+        if self._loaded and signature == self._source_signature:
             return
+        self.chunks_by_id.clear()
+        self.rows.clear()
+        self.idf.clear()
+        self._source_signature = signature
         self._loaded = True
 
         doc_freq: Counter[str] = Counter()
@@ -278,8 +277,9 @@ class RagChunkRetriever:
                 continue
             source_label = "PROJECT_KNOWLEDGE" if path == self.chunks_path else "BUILTIN_KNOWLEDGE"
             for chunk in _jsonl_rows(path):
-                if str(chunk.get("retrieval_scope") or "main") not in {"main", "mixed"}:
+                if exclusion_reason(chunk) is not None:
                     continue
+                self.chunks_by_id[chunk["chunk_id"]] = chunk
                 text = str(
                     chunk.get("content_search")
                     or chunk.get("content_plain")
@@ -320,6 +320,7 @@ class RagChunkRetriever:
                 self.rows.append(
                     {
                         "metadata": {
+                            **chunk,
                             "chunk_id": chunk.get("chunk_id"),
                             "chunk_fingerprint": chunk.get("chunk_fingerprint"),
                             "record_id": chunk.get("record_id"),
@@ -345,7 +346,7 @@ class RagChunkRetriever:
                             "source": source_label,
                             "retrieval_sources": [source_label],
                         },
-                        "content_preview": trim_text(chunk.get("content_markdown") or chunk.get("content_plain") or chunk.get("text") or text, self.max_snippet_chars),
+                        "content": full_text(chunk),
                         "categories": task_categories,
                         "primary_category": str(chunk.get("primary_category") or ""),
                         "search_text": combined,
@@ -396,7 +397,7 @@ class RagChunkRetriever:
             score += self._category_bonus(row)
             item = dict(row["metadata"])
             item["score"] = round(score, 4)
-            item["text"] = row["content_preview"]
+            item["text"] = row["content"]
             results.append(item)
 
         results.sort(key=lambda item: float(item.get("score") or 0.0), reverse=True)
@@ -429,10 +430,8 @@ class VectorChunkRetriever:
         collection_name: str,
         *,
         enabled: bool = True,
-        max_snippet_chars: int = 1200,
     ) -> None:
         self.enabled = enabled
-        self.max_snippet_chars = max_snippet_chars
         if enabled:
             from core.rag_engine import RAGEngine
 
@@ -458,6 +457,7 @@ class VectorChunkRetriever:
             except (TypeError, ValueError):
                 score = 0.0
             item = {
+                **metadata,
                 "chunk_id": metadata.get("chunk_id") or row.get("id"),
                 "record_id": metadata.get("record_id"),
                 "source_id": metadata.get("source_id"),
@@ -474,7 +474,7 @@ class VectorChunkRetriever:
                 "design_platform_scope": metadata.get("design_platform_scope"),
                 "score": round(score, 4),
                 "vector_distance": distance,
-                "text": trim_text(document, self.max_snippet_chars),
+                "text": document,
                 "source": "VECTOR_INDEX",
                 "retrieval_sources": ["VECTOR_INDEX"],
             }
@@ -492,6 +492,7 @@ class KnowledgeGraphRetriever:
         self.relations: list[dict[str, Any]] = []
         self.entity_names: list[str] = []
         self._loaded = False
+        self._source_signature: tuple = ()
 
     @property
     def is_ready(self) -> bool:
@@ -512,8 +513,14 @@ class KnowledgeGraphRetriever:
         return [path for path in [kg_dir / "relations.jsonl", kg_dir / "relations.compact.jsonl.gz"] if path.exists()]
 
     def _ensure_loaded(self) -> None:
-        if self._loaded:
+        signature = _file_signature(path for directory in self._kg_dirs()
+                                    for path in [directory / "entities.jsonl", *self._relation_paths(directory)])
+        if self._loaded and signature == self._source_signature:
             return
+        self.entities.clear()
+        self.relations.clear()
+        self.entity_names.clear()
+        self._source_signature = signature
         self._loaded = True
         for kg_dir in self._kg_dirs():
             self.entities.extend(_jsonl_rows(kg_dir / "entities.jsonl"))
@@ -542,18 +549,21 @@ class KnowledgeGraphRetriever:
                 matches.add(name)
         return matches
 
-    def search(self, query: str, record_ids: Iterable[str], top_k: int = 8) -> list[dict[str, Any]]:
+    def search(self, query: str, chunks: Iterable[dict[str, Any]], top_k: int = 8) -> list[dict[str, Any]]:
         self._ensure_loaded()
         if not self.relations:
             return []
 
         matched_entities = self._matched_entities(query)
-        record_set = {str(record_id) for record_id in record_ids if str(record_id).strip()}
+        evidence = {chunk["chunk_id"]: chunk for chunk in chunks if exclusion_reason(chunk) is None}
         expanded_terms = [term for term in expand_query_terms(query) if len(term) >= 2]
         results: list[dict[str, Any]] = []
-        seen: set[tuple[str, str, str, str]] = set()
+        seen: set[tuple[str, ...]] = set()
 
         for relation in self.relations:
+            chunk = evidence.get(relation.get("evidence_chunk_id"))
+            if chunk is None or not binds_to_chunk(relation, chunk):
+                continue
             source = str(relation.get("source") or "")
             target = str(relation.get("target") or "")
             record_id = str(relation.get("record_id") or "")
@@ -562,8 +572,6 @@ class KnowledgeGraphRetriever:
             if source in matched_entities:
                 score += 2.0
             if target in matched_entities:
-                score += 2.0
-            if record_id in record_set:
                 score += 2.0
             relation_text = " ".join(
                 [
@@ -581,7 +589,7 @@ class KnowledgeGraphRetriever:
             if score <= 0:
                 continue
 
-            key = (source, relation_type, target, record_id)
+            key = (source, relation_type, target, record_id, chunk["chunk_id"], chunk["chunk_fingerprint"])
             if key in seen:
                 continue
             seen.add(key)
@@ -652,19 +660,19 @@ class DomainKnowledgeBase:
         self.builtin_manifest_path = builtin_manifest_path
         self.builtin_rag_chunks_path = builtin_rag_path
         self.builtin_kg_dir = builtin_kg_dir
-        max_snippet_chars = int(knowledge_config.get("max_snippet_chars", 1200) or 1200)
+        self.max_context_chars = max(0, int(knowledge_config.get("max_context_chars", 12000)))
+        self.last_evidence_audit: dict[str, Any] = {}
         vector_chroma_dir = _as_path(str(knowledge_config.get("vector_chroma_dir", CHROMA_DIR)))
         vector_collection_name = str(knowledge_config.get("vector_collection_name", "csdm_cph_project_knowledge"))
         vector_enabled = bool(knowledge_config.get("vector_enabled", False))
         vector_top_k_multiplier = int(knowledge_config.get("vector_top_k_multiplier", 2) or 2)
         builtin_rag_paths = [builtin_rag_path] if builtin_rag_path.exists() else []
         builtin_kg_dirs = [builtin_kg_dir] if builtin_kg_dir.exists() else []
-        self.rag = RagChunkRetriever(rag_path, max_snippet_chars=max_snippet_chars, builtin_chunks_paths=builtin_rag_paths)
+        self.rag = RagChunkRetriever(rag_path, builtin_chunks_paths=builtin_rag_paths)
         self.vector = VectorChunkRetriever(
             vector_chroma_dir,
             vector_collection_name,
             enabled=vector_enabled,
-            max_snippet_chars=max_snippet_chars,
         )
         self.vector_top_k_multiplier = max(1, vector_top_k_multiplier)
         from core.builtin_knowledge import BuiltinKnowledgeIndex
@@ -686,17 +694,34 @@ class DomainKnowledgeBase:
 
     def _retrieve_chunks(self, query: str, top_k: int) -> list[dict[str, Any]]:
         keyword_chunks = self.rag.search(query, top_k=top_k) if self.rag.is_ready else []
-        vector_chunks = (
+        vector_hits = (
             self.vector.search(query, top_k=top_k * self.vector_top_k_multiplier)
             if self.vector.is_ready
             else []
         )
+        # 向量命中只提供排序线索；完整证据从当前 JSONL 回填，过期向量不进入提示词。
+        vector_chunks = []
+        if vector_hits:
+            self.rag._ensure_loaded()
+        for hit in vector_hits:
+            chunk = self.rag.chunks_by_id.get(hit.get("chunk_id"))
+            if chunk is None or hit.get("record_id") != chunk.get("record_id"):
+                continue
+            document = str(chunk.get("content_plain") or chunk.get("content_markdown") or chunk.get("text") or "").strip()
+            if hit.get("text", "").strip() != document or (
+                hit.get("chunk_fingerprint") and hit["chunk_fingerprint"] != chunk["chunk_fingerprint"]
+            ):
+                continue
+            vector_chunks.append({**chunk, "text": full_text(chunk), "score": hit["score"],
+                                  "retrieval_sources": hit["retrieval_sources"], "source": hit["source"]})
         builtin_chunks = self.builtin_index.search(query, top_k) if self.builtin_index is not None else []
         ranked_chunks = []
         for group in (builtin_chunks, keyword_chunks, vector_chunks):
             ranked_chunks.extend({**chunk, "score": 61.0 / (60 + rank)} for rank, chunk in enumerate(group, 1))
         merged: dict[str, dict[str, Any]] = {}
         for chunk in ranked_chunks:
+            if exclusion_reason(chunk) is not None:
+                continue
             source_key = _normalize_source_key(
                 chunk.get("source_url"),
                 chunk.get("doi"),
@@ -730,7 +755,7 @@ class DomainKnowledgeBase:
             if not current.get("text") and chunk.get("text"):
                 current["text"] = chunk.get("text")
         result = sorted(merged.values(), key=lambda item: float(item.get("score") or 0.0), reverse=True)[:top_k]
-        return [{**item, "text": trim_text(item.get("text"), self.rag.max_snippet_chars)} for item in result]
+        return result
 
     def task_query_text(self, task: Dict[str, Any]) -> str:
         task_payload = task_payload_from_request(task)
@@ -755,8 +780,7 @@ class DomainKnowledgeBase:
             return {"query": "", "chunks": [], "relations": []}
         query = self.task_query_text(task)
         chunks = self._retrieve_chunks(query, top_k or self.top_k)
-        record_ids = [str(item.get("record_id") or "") for item in chunks]
-        relations = self.kg.search(query, record_ids, top_k=kg_top_k or self.kg_top_k) if self.kg.is_ready else []
+        relations = self.kg.search(query, chunks, top_k=kg_top_k or self.kg_top_k) if self.kg.is_ready else []
         return {"query": query, "chunks": chunks, "relations": relations}
 
     def retrieve_by_query(self, query: str, top_k: int | None = None, kg_top_k: int | None = None) -> dict[str, Any]:
@@ -765,79 +789,17 @@ class DomainKnowledgeBase:
         if not self.is_ready or not query_text:
             return {"query": query_text, "chunks": [], "relations": []}
         chunks = self._retrieve_chunks(query_text, top_k or self.top_k)
-        record_ids = [str(item.get("record_id") or "") for item in chunks]
-        relations = self.kg.search(query_text, record_ids, top_k=kg_top_k or self.kg_top_k) if self.kg.is_ready else []
+        relations = self.kg.search(query_text, chunks, top_k=kg_top_k or self.kg_top_k) if self.kg.is_ready else []
         return {"query": query_text, "chunks": chunks, "relations": relations}
 
     def format_snippets(self, task: Dict[str, Any], top_k: int | None = None) -> list[str]:
         payload = self.retrieve(task, top_k=top_k or self.top_k)
-        formatted: list[str] = []
-        source_labels: dict[str, str] = {}
-        source_items: dict[str, dict[str, Any]] = {}
-
-        def register_source(item: dict[str, Any], *, evidence: bool = False) -> str:
-            title = item.get("evidence_document_title") if evidence else item.get("document_title") or item.get("title")
-            source_url = item.get("evidence_source_url") if evidence else item.get("source_url")
-            doi = item.get("evidence_doi") if evidence else item.get("doi")
-            key = _normalize_source_key(source_url, doi, title, item.get("source_id"), item.get("record_id"))
-            if not key:
-                return ""
-            label = source_labels.get(key)
-            if label:
-                return label
-            label = f"S{len(source_labels) + 1}"
-            source_labels[key] = label
-            source_items[label] = {
-                "title": title,
-                "year": item.get("year"),
-                "venue": item.get("venue"),
-                "doi": doi,
-                "source_url": source_url,
-                "record_id": item.get("record_id"),
-            }
-            return label
-
-        for index, item in enumerate(payload.get("chunks", []), start=1):
-            title = item.get("title") or item.get("record_id") or f"资料片段{index}"
-            source_label = register_source(item)
-            meta_lines = [f"[项目知识库 {index}{f' | 来源 {source_label}' if source_label else ''}] {title}"]
-            if item.get("page_start") not in (None, ""):
-                page_end = item.get("page_end")
-                page_text = str(item.get("page_start")) if page_end in (None, "", item.get("page_start")) else f"{item.get('page_start')}-{page_end}"
-                meta_lines.append(f"页码：{page_text}")
-            formatted.append("\n".join([*meta_lines, str(item.get("text") or "")]))
-
-        relations = payload.get("relations", [])
-        if relations:
-            relation_lines = []
-            relation_keys: set[tuple[str, str, str, str, str]] = set()
-            for relation in relations:
-                key = (
-                    str(relation.get("source_type") or ""),
-                    str(relation.get("source") or ""),
-                    str(relation.get("relation") or ""),
-                    str(relation.get("target_type") or ""),
-                    str(relation.get("target") or ""),
-                )
-                if key in relation_keys:
-                    continue
-                relation_keys.add(key)
-                evidence_label = register_source(relation, evidence=True)
-                evidence_text = f"（依据 {evidence_label}）" if evidence_label else ""
-                relation_lines.append(
-                    "图谱 {idx}: {source}({source_type}) -[{rel}]-> {target}({target_type})".format(
-                        idx=len(relation_lines) + 1,
-                        source=relation.get("source"),
-                        source_type=relation.get("source_type"),
-                        rel=relation.get("relation"),
-                        target=relation.get("target"),
-                        target_type=relation.get("target_type"),
-                    )
-                    + evidence_text
-                )
-            formatted.append("知识图谱关系：\n" + "\n".join(relation_lines))
-        if source_items:
-            formatted.append("来源清单：\n" + "\n".join(_source_line(label, source_items[label]) for label in sorted(source_items, key=lambda item: int(item[1:]))))
+        formatted, self.last_evidence_audit = render_evidence(
+            payload["chunks"], payload["relations"], self.max_context_chars,
+        )
+        manifest = _load_json(self.builtin_manifest_path)
+        self.last_evidence_audit["builtin_source_package_sha256"] = manifest.get("source_package_sha256")
+        self.last_evidence_audit["builtin_generated_at"] = manifest.get("generated_at")
         return formatted
 
     def status(self) -> dict[str, Any]:

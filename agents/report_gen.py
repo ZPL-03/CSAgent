@@ -5,18 +5,18 @@ from __future__ import annotations
 import json
 import math
 import re
-import unicodedata
-from decimal import Decimal
 from pathlib import Path
 from typing import Any, Dict, List
 from xml.sax.saxutils import escape
 
 from agents.base import BaseAgent
 from core.config_loader import load_llm_config
-from core.display import NUMBER_DISPLAY_INSTRUCTION, format_number, format_parameter
+from core.display import format_number, format_parameter
+from core.layup_parameters import active_geometry, uses_task_angles
+from core.report_facts import FOLLOW_UPS, build_report_facts, render_report_selection, validate_report_selection
 from core.fem_result_semantics import (
     complete_case_result_errors, is_passed_design_check, is_successful_result,
-    result_semantic_errors, verified_capacity_pressure,
+    verified_capacity_pressure,
 )
 from core.io_utils import write_text
 from core.llm_backend import LLMBackend, auto_llm_enabled
@@ -38,6 +38,7 @@ class ReportGenAgent(BaseAgent):
         self.llm_config = load_llm_config()
         self.llm_backend: LLMBackend | None = None
         self._last_llm_explanation_used = False
+        self._last_llm_explanation_audit = {}
         if auto_llm_enabled():
             try:
                 self.llm_backend = LLMBackend(self.llm_config)
@@ -45,7 +46,7 @@ class ReportGenAgent(BaseAgent):
                 self.emit(f"报告解释 LLM 后端初始化失败，将使用确定性工程解释：{exc}")
 
     def _compact_candidate_record(self, candidate: Dict[str, Any]) -> Dict[str, Any]:
-        geometry = dict(candidate.get("geometry") or {})
+        geometry = active_geometry(candidate)
         layup = dict(candidate.get("layup") or {})
         material = dict(candidate.get("material_system") or {})
         return {
@@ -57,8 +58,9 @@ class ReportGenAgent(BaseAgent):
             "length_mm": geometry.get("length_mm"),
             "radius_mm": geometry.get("radius_mm"),
             "thickness_mm": geometry.get("thickness_mm"),
-            "alpha_deg": geometry.get("alpha_deg"),
-            "beta_deg": geometry.get("beta_deg"),
+            **({} if uses_task_angles(layup) else {
+                "alpha_deg": geometry.get("alpha_deg"), "beta_deg": geometry.get("beta_deg"),
+            }),
             "imperfection_ratio": geometry.get("imperfection_ratio"),
             "layup": layup.get("layup"),
             "layup_template": layup.get("template_name"),
@@ -116,7 +118,8 @@ class ReportGenAgent(BaseAgent):
         target_pressure = float(design_targets.get("ultimate_pressure_min_MPa") or 0.0)
         assessments = []
         for result in results:
-            errors = result_semantic_errors(result)
+            # 总体设计判定需要完整求解证据，阶段 verdict 不代表全流程通过。
+            errors = complete_case_result_errors(result)
             if not errors and is_passed_design_check(result):
                 state = "passed"
             elif not errors and is_successful_result(result) and result.get("verdict") == "不通过":
@@ -129,7 +132,8 @@ class ReportGenAgent(BaseAgent):
                 "state": state, "semantic_errors": list(errors),
             })
         confirmed_ultimate_results = [
-            result for result in results if verified_capacity_pressure(result) is not None
+            result for result in results if not complete_case_result_errors(result)
+            and verified_capacity_pressure(result) is not None
             and result.get("ultimate_pressure_MPa") is not None
             and result.get("riks_limit_point_confirmed") is True
         ]
@@ -143,6 +147,7 @@ class ReportGenAgent(BaseAgent):
             "session_task_id": task.get("task_id"),
             "application": task_payload["application"],
             "load_conditions": describe_load_conditions(task_payload["load_conditions"]),
+            "external_pressure_MPa": task_payload["load_conditions"]["external_pressure_MPa"],
             "boundary_conditions": describe_boundary_conditions(task_payload["boundary_conditions"]),
             "imperfection_ratio": task_imperfection_ratio(task_payload),
             "imperfection_source": describe_imperfection_source(task_payload),
@@ -173,6 +178,7 @@ class ReportGenAgent(BaseAgent):
                     "display_name": result.get("display_name"),
                     "status": result.get("status"),
                     "ultimate_pressure_MPa": result.get("ultimate_pressure_MPa"),
+                    "verified_capacity": not complete_case_result_errors(result) and verified_capacity_pressure(result) is not None,
                     "linear_buckling_pressure_MPa": result.get("linear_buckling_pressure_MPa"),
                     "ultimate_pressure_basis": result.get("ultimate_pressure_basis"),
                     "riks_lpf_max": result.get("riks_lpf_max"),
@@ -294,7 +300,7 @@ class ReportGenAgent(BaseAgent):
             [
                 "### 制造工艺适配性\n"
                 f"- 候选材料体系为 {material_text}。圆柱耐压壳可按纤维缠绕或预浸带铺放思路组织制造评审，重点检查铺层角、壁厚和端部约束区域的成型连续性。\n"
-                "- 报告中的制造建议不引入新的工艺参数；具体张力、固化制度和检验阈值需要由后续工艺文件或试验件确认。",
+                "- 制造评审需确定纤维张力、固化制度和检验标准。",
                 "### 铺层与材料原因\n"
                 f"- 候选的铺层表达式包括 {layup_text}。实际铺层角与顺序以求解输入中的逐层记录为准，可用于解释环向刚度、轴向刚度和屈曲稳定性的折中关系。\n"
                 "- 若后续目标转向更低面密度，应优先比较同一材料体系下的角度组合与厚度变化，避免把材料替换和几何减薄同时混在一次迭代里。",
@@ -361,220 +367,54 @@ class ReportGenAgent(BaseAgent):
             "analysis_scope": "复合材料圆柱壳数值模型，未建模金属封头、法兰连接和层间分层；制造工艺和试验认证不在求解范围内。",
         }
 
-    def _numeric_tokens(self, text: str) -> List[float]:
-        values: List[float] = []
-        for token in re.findall(r"[-+]?[0-9]+(?:\.[0-9]+)?", text):
-            try:
-                values.append(float(token))
-            except ValueError:
-                continue
-        return values
-
-    def _engineering_numeric_texts(self, text: str) -> List[str]:
-        pattern = (
-            r"([-+]?[0-9]+(?:\.[0-9]+)?)\s*"
-            r"(?:MPa|mm|kg\s*/\s*m\^?2|kg/m²|kg/m2|%|‰|deg|°|LPF|GPa)"
-        )
-        return [match.group(1) for match in re.finditer(pattern, text, flags=re.IGNORECASE)]
-
-    def _engineering_numeric_tokens(self, text: str) -> List[float]:
-        return [float(value) for value in self._engineering_numeric_texts(text)]
-
-    def _llm_text_uses_only_known_numbers(self, text: str, payload: Dict[str, Any]) -> bool:
-        serialized_payload = json.dumps(payload, ensure_ascii=False, default=str)
-        allowed_values = self._engineering_numeric_tokens(serialized_payload) + self._numeric_tokens(
-            serialized_payload
-        )
-        if not allowed_values:
-            return not self._engineering_numeric_tokens(text)
-        for token in self._engineering_numeric_texts(text):
-            value = Decimal(token)
-            # 仅允许显示精度内的舍入误差，保留尾随零所表达的小数位约束。
-            rounding_bound = Decimal(1).scaleb(value.as_tuple().exponent) / 2
-            if not any(abs(value - Decimal(str(allowed))) <= rounding_bound for allowed in allowed_values):
-                return False
-        return True
-
-    def _material_codes(self, text: str) -> set[str]:
-        text = re.sub(r"\b(?:kg|g)\s*/\s*m2\b", "", text, flags=re.IGNORECASE)
-        codes = re.findall(r"\b(?:T|M)[0-9]+[A-Z0-9-]*\b", text, flags=re.IGNORECASE)
-        return {code.upper() for code in codes}
-
-    def _llm_text_uses_only_known_material_codes(self, text: str, payload: Dict[str, Any]) -> bool:
-        known_codes = self._material_codes(json.dumps(payload, ensure_ascii=False, default=str))
-        return self._material_codes(text).issubset(known_codes)
-
-    def _validate_llm_engineering_text(self, text: str, payload: Dict[str, Any]) -> None:
-        if "<think" in text.lower() or "</think>" in text.lower():
-            raise ValueError("LLM 报告解释包含推理标签")
-        if any(term in text for term in ["对应工程量", "__MAT_CODE"]):
-            raise ValueError("LLM 报告解释包含占位式表达")
-        if not self._llm_text_uses_only_known_numbers(text, payload):
-            raise ValueError("LLM 报告解释包含结构化数据之外的数值")
-        if not self._llm_text_uses_only_known_material_codes(text, payload):
-            raise ValueError("LLM 报告解释包含结构化数据之外的材料牌号")
-        forbidden_structure_terms = ["加强筋", "加筋", "夹芯", "金属衬套"]
-        if any(term in text for term in forbidden_structure_terms):
-            raise ValueError("LLM 报告解释包含当前设计变量域之外的结构型式")
-        candidates = payload.get("all_candidates") or payload.get("screened_candidates") or []
-        if candidates and all(candidate.get("symmetric") is False for candidate in candidates):
-            if re.search(
-                r"(?<!不)(?<!未)(?:采用|属于|代表|具有|为|是|呈)[^。；，,\n]{0,8}"
-                r"(?<!非)对称(?:铺层|形式|结构|布置|构型|层合板|性)",
-                text,
-            ):
-                raise ValueError("候选均为非对称铺层，解释不能断言采用对称铺层")
-        if "质量效率" in text:
-            raise ValueError("未定义质量效率指标，不能把较低面密度等同于较高质量效率")
-        if re.search(r"损伤已(?:经)?(?:完全|充分)发展", text):
-            raise ValueError("损伤标志最大值不能证明整体损伤已完全发展")
-        if re.search(r"Riks\s*最大增量(?:为|是)", text, flags=re.IGNORECASE):
-            raise ValueError("Riks 载荷比例系数不能描述为最大增量")
-        if re.search(r"已(?:经)?[^。；\n]{0,12}(?:考虑缺陷敏感性|完成缺陷敏感性分析)", text):
-            raise ValueError("单一初始缺陷工况不构成已完成缺陷敏感性分析")
-        if any(candidate.get("imperfection_ratio") is not None for candidate in candidates):
-            if re.search(r"未提供[^。；\n]{0,12}缺陷(?:比|幅值)", text):
-                raise ValueError("分析缺陷条件已提供，不能描述为缺失")
-        if re.search(r"满足(?:安全系数|安全裕度)要求", text):
-            raise ValueError("未指定独立安全系数或裕度要求，不能增加安全验收结论")
-        if any(result.get("riks_termination_reason") == "post_peak_drop_20_percent"
-               for result in payload.get("results") or []):
-            if "未报告校核终止" in text or "作业均正常完成" in text:
-                raise ValueError("峰后受控终止不能描述为作业未终止或均正常完成")
-
-    def _normalize_llm_math(self, text: str) -> str:
-        from pylatexenc.latex2text import LatexNodes2Text
-        from pylatexenc.latexwalker import LatexMathNode, LatexWalker, LatexWalkerParseError
-
-        marker = re.compile(r"(?<!\\)(?:\${1,2}|\\\(|\\\[)")
-        converter = LatexNodes2Text()
-        walker = LatexWalker(text, tolerant_parsing=False)
-        parts: List[str] = []
-        offset = 0
-        while match := marker.search(text, offset):
-            try:
-                nodes, _, length = walker.get_latex_nodes(pos=match.start(), read_max_nodes=1)
-            except LatexWalkerParseError as exc:
-                raise ValueError("报告数学表达式未闭合或无法解析") from exc
-            if len(nodes) != 1 or not isinstance(nodes[0], LatexMathNode):
-                raise ValueError("报告数学表达式无法识别")
-            math_node = nodes[0]
-
-            def check_supported(node) -> None:
-                macro = getattr(node, "macroname", None)
-                if macro and converter.latex_context.get_macro_spec(macro) is None:
-                    raise ValueError(f"报告数学命令不支持转换：{macro}")
-                environment = getattr(node, "environmentname", None)
-                if environment and converter.latex_context.get_environment_spec(environment) is None:
-                    raise ValueError(f"报告数学环境不支持转换：{environment}")
-                children = list(getattr(node, "nodelist", None) or [])
-                arguments = getattr(getattr(node, "nodeargd", None), "argnlist", None) or []
-                for child in [*children, *arguments]:
-                    if child is not None:
-                        check_supported(child)
-
-            check_supported(math_node)
-            converted = converter.nodelist_to_text(math_node.nodelist).strip()
-            if not converted:
-                raise ValueError("报告数学表达式转换结果为空")
-            parts.extend([text[offset:match.start()], converted])
-            offset = match.start() + length
-        parts.append(text[offset:])
-        return "".join(parts)
-
-    def _strip_llm_reasoning_blocks(self, text: str) -> str:
-        cleaned = str(text or "")
-        cleaned = re.sub(r"(?is)<think\b[^>]*>.*?</think>", "", cleaned)
-        cleaned = re.sub(r"(?is)<think\b[^>]*>.*", "", cleaned)
-        cleaned = re.sub(r"(?is).*?</think>", "", cleaned)
-        cleaned_lines: List[str] = []
-        reasoning_heading = re.compile(
-            r"^\s*(?:reasoning|analysis|chain\s*of\s*thought|思考过程|推理过程|分析过程)\s*[:：]",
-            flags=re.IGNORECASE,
-        )
-        for raw_line in cleaned.splitlines():
-            stripped = raw_line.strip()
-            if not stripped:
-                cleaned_lines.append("")
-                continue
-            if reasoning_heading.match(stripped):
-                continue
-            if re.fullmatch(r"</?think\b[^>]*>", stripped, flags=re.IGNORECASE):
-                continue
-            cleaned_lines.append(raw_line)
-        return "\n".join(cleaned_lines).strip()
-
     def _render_llm_engineering_explanation(self, summary: Dict[str, Any]) -> str:
         if self.llm_backend is None:
             return ""
         payload = self._build_llm_explanation_payload(summary)
+        facts = build_report_facts(summary)
+        payload["facts"] = facts
+        payload["follow_up_codes"] = FOLLOW_UPS
         system_prompt = (
-            "你是复合材料外压圆柱耐压壳设计报告解释助手。"
-            "依据输入中的任务、候选和校核结果撰写中文工程说明，字段含义见 field_semantics。"
-            "数值、材料、工况、候选编号和校核结论以输入为准；引用数值时保留单位和对应对象。"
-            + NUMBER_DISPLAY_INSTRUCTION +
-            "区分计算结果、机理解释和建议，涉及制造工艺、材料性能或参数影响的推断须说明依据。"
-            "围绕候选的材料、铺层、几何、缺陷条件讨论，结合 analysis_scope 说明验证范围。"
-            "用 Markdown 分段，重点解释设计取舍和结果，不重复报告中的完整数据表。"
+            "你是复合材料耐压壳报告证据整理助手。依据 field_semantics 选择需要强调的事实和验证建议。"
+            "仅返回 JSON 对象，字段为 fact_refs、recommendation_candidate_id、follow_up_codes。"
+            "fact_refs 为输入 facts 的非空引用子集，每项只含 candidate_id 和 metric。"
+            "数值、单位和状态由程序读取对应事实，不要复制到响应中。"
+            "推荐编号必须等于 recommendation.selected.candidate_id，没有推荐则为 null。"
+            "follow_up_codes 只选输入提供的建议代码；不要附加自由文本、制造阈值或未计算的理论结论。"
         )
-        user_prompt = (
-            "请生成报告中的“工程解释与制造建议”段落，必须覆盖：制造工艺适配性、铺层/材料原因、缺陷与质量控制、"
-            "有限元结果解读、后续验证建议。建议应对应输入中的具体问题；缺少判断依据时说明所需信息。\n\n"
-            f"结构化事实 JSON：\n{json.dumps(payload, ensure_ascii=False, indent=2, default=str)}"
-        )
+        user_prompt = json.dumps(payload, ensure_ascii=False, default=str)
         try:
             answer = self.llm_backend.chat(
-                system_prompt,
-                user_prompt,
-                max_tokens_override=min(max(int(self.llm_backend.max_tokens), 1800), 2600),
-                json_mode=False,
-            ).strip()
+                system_prompt, user_prompt,
+                max_tokens_override=min(max(int(self.llm_backend.max_tokens), 1800), 4096),
+                json_mode=True,
+            )
         except Exception:
             self.emit_llm_trace(self.llm_backend, {"purpose": "report_engineering_explanation", "failed": True})
             raise
+        self._last_llm_explanation_audit["raw_response"] = answer
         self.emit_llm_trace(self.llm_backend, {"purpose": "report_engineering_explanation"})
-        answer = self._normalize_llm_math(self._strip_llm_reasoning_blocks(answer))
-        answer = self._postprocess_engineering_explanation(answer)
-        if not answer:
-            raise ValueError("LLM 报告解释为空")
-        self._validate_llm_engineering_text(answer, payload)
-        return answer
-
-    def _postprocess_engineering_explanation(self, text: str) -> str:
-        """统一标题层级和字符宽度，保留正文内容供事实校验。"""
-        cleaned_lines: List[str] = []
-        for raw_line in text.splitlines():
-            line = unicodedata.normalize("NFKC", raw_line.rstrip())
-            stripped = line.strip()
-            if not stripped:
-                cleaned_lines.append("")
-                continue
-            if re.fullmatch(r"#{1,6}\s*工程解释与制造建议", stripped) or stripped == "工程解释与制造建议":
-                continue
-            if stripped.startswith("# ") or stripped.startswith("## "):
-                stripped = re.sub(r"^#+\s*", "", stripped)
-                line = f"### {stripped}"
-            elif re.match(r"^\s*\d+[.、]\s+", stripped):
-                line = "- " + re.sub(r"^\s*\d+[.、]\s+", "", stripped)
-            cleaned_lines.append(line)
-        cleaned = "\n".join(cleaned_lines).strip()
-        while "\n\n\n" in cleaned:
-            cleaned = cleaned.replace("\n\n\n", "\n\n")
-        return cleaned
+        selection = validate_report_selection(answer, facts, summary["recommendation"])
+        self._last_llm_explanation_audit["selection"] = selection
+        return render_report_selection(selection)
 
     def _render_engineering_explanation(self, summary: Dict[str, Any]) -> str:
         self._last_llm_explanation_used = False
+        self._last_llm_explanation_audit = {"status": "disabled" if self.llm_backend is None else "pending"}
         if self.llm_backend is not None:
             try:
                 llm_text = self._render_llm_engineering_explanation(summary)
                 if llm_text:
                     self._last_llm_explanation_used = True
+                    self._last_llm_explanation_audit["status"] = "accepted"
                     return llm_text
             except ValueError as exc:
+                self._last_llm_explanation_audit.update(status="rejected", error=str(exc))
                 self.emit_event("report_explanation_rejected",
                                 f"总体报告解释未通过事实或格式校验，已使用结构化说明：{exc}",
                                 {"report_kind": "overall", "reason": str(exc)})
             except Exception as exc:
+                self._last_llm_explanation_audit.update(status="failed", error=str(exc))
                 self.emit(f"报告 LLM 工程解释生成失败，已使用确定性解释：{exc}")
         return self._render_deterministic_engineering_explanation(summary)
 
@@ -595,15 +435,15 @@ class ReportGenAgent(BaseAgent):
             f"- 任务初始几何缺陷比：{summary['imperfection_ratio']}（比例，{summary['imperfection_source']}）",
             f"- 用户指定几何：{self._field_text(task_payload.get('user_input_facts', {}).get('fixed_geometry'))}",
             f"- 优化目标：{task_payload['design_targets']['primary_objective']}",
-            "- 校核依据：有限元工作压力下的屈曲与首层失效检查，以及已确认的渐进损伤容量；不自动附加安全系数。",
-            "- 适用边界：圆柱壳数值模型，不包含金属封头、法兰连接、层间分层或试验认证。",
+            "- 计算模型：逐层复合材料圆柱壳、初始几何缺陷、外压载荷及任务指定的端部边界条件。",
+            "- 分析内容：线性屈曲、工作与目标压力下的首层失效检查、含场变量损伤退化的 Riks 容量分析。",
+            "- 未建模项：金属封头、法兰连接、层间分层与制造过程。",
+            "- 结果类型：代理预筛估计与有限元数值校核；工艺验收及试验认证结果未提供。",
             "", "## 全部候选方案与生成依据", "",
             f"- 有效候选总数：{len(candidates)}。候选编号保留会话生成时的编号，不因预筛排序重编。",
-            "- 生成依据按实际来源、参数和理由记录；制造工艺说明属于设计建议，不代表工艺已验证。",
-            "- 铺层对称性和平衡性以逐层角度核查为准，生成提案的自然语言理由不代替结构化核查。",
         ]
         for candidate in candidates:
-            geometry = candidate.get("geometry") or {}
+            geometry = active_geometry(candidate)
             material = candidate.get("material_system") or {}
             layup = candidate.get("layup") or {}
             candidate_id = str(candidate.get("session_candidate_id") or candidate.get("candidate_id") or "-")
@@ -614,11 +454,11 @@ class ReportGenAgent(BaseAgent):
                 f"- 材料体系：{material.get('name') or material.get('display_name') or material.get('material_key') or '-'}",
                 f"- 几何：长度 {format_number(geometry.get('length_mm'))} mm，半径 {format_number(geometry.get('radius_mm'))} mm，厚度 {format_number(geometry.get('thickness_mm'), None)} mm",
                 f"- 铺层：{layup.get('layup') or layup.get('angles_deg') or '-'}",
-                f"- 铺层参数：alpha={format_number(geometry.get('alpha_deg'), None)} deg，beta={format_number(geometry.get('beta_deg'), None)} deg；实际角度以铺层表达式为准",
+                *([] if uses_task_angles(layup) else [f"- 铺层参数：alpha={format_number(geometry.get('alpha_deg'), None)} deg，beta={format_number(geometry.get('beta_deg'), None)} deg"]),
                 f"- 逐层属性核查：对称性={self._field_text(layup.get('symmetric'))}，平衡性={self._field_text(layup.get('balanced'))}",
                 f"- 初始几何缺陷比：{geometry.get('imperfection_ratio')}",
                 f"- 候选缺陷条件与任务：{'未记录' if geometry.get('imperfection_ratio') is None else '一致' if geometry['imperfection_ratio'] == summary['imperfection_ratio'] else '不一致'}",
-                f"- 生成提案理由（原文）：{candidate.get('rationale') or '生成记录未提供额外理由，不作推断。'}",
+                f"- 生成提案理由（原文）：{candidate.get('rationale') or '未提供'}",
                 f"- 来源追踪：{candidate.get('origin_summary') or '见候选生成记录。'}",
                 *([f"- 来源提案缺陷比：{proposed_defect}"]
                   if proposed_defect is not None and proposed_defect != geometry.get("imperfection_ratio") else []),
@@ -626,7 +466,7 @@ class ReportGenAgent(BaseAgent):
         lines.extend(["", "## 代理预筛方案与筛选理由", ""])
         screened = [item for item in candidates if item.get("screening_rank") is not None]
         if not screened:
-            lines.append("- 未执行代理预筛或未提供预筛记录，不把候选生成顺序视为预筛排名。")
+            lines.append("- 未执行代理预筛或未提供预筛记录。")
         for candidate in sorted(screened, key=lambda item: item["screening_rank"]):
             lines.extend([
                 "", f"### 排名 {candidate['screening_rank']}：{candidate.get('session_candidate_id') or candidate.get('candidate_id')}",
@@ -650,9 +490,10 @@ class ReportGenAgent(BaseAgent):
             lines.extend([
                 "", f"### {result.get('session_candidate_id') or '-'} / {result.get('candidate_id')}",
                 f"- 作业状态：{result.get('status') or '-'}",
-                *(["- 实际求解几何：" + "，".join(f"{key}={format_parameter(key, value)}" for key, value in result['solved_design']['geometry'].items())]
+                *(["- 实际求解几何：" + "，".join(f"{key}={format_parameter(key, value)}" for key, value in active_geometry(result['solved_design']).items())]
                   if (result.get("solved_design") or {}).get("geometry") else []),
                 f"- 实际求解缺陷比：{self._field_text(solved_defect, '未记录')}",
+                f"- 实际缺陷幅值：{format_number(result.get('imperfection_amplitude_mm'), missing='未记录')} mm；缺陷比按中面半径归一化。",
                 f"- 求解缺陷条件与任务：{'未记录' if solved_defect is None else '一致' if solved_defect == summary['imperfection_ratio'] else '不一致'}",
                 f"- 工作压力校核：{result.get('service_pressure_check_status') or '-'}",
                 f"- 工作压力最大 Hashin 指数：{self._field_text(result.get('service_hashin_index_max'))}",
@@ -679,7 +520,6 @@ class ReportGenAgent(BaseAgent):
                 f"- 推荐：{best.get('session_candidate_id') or '-'} / {best['candidate_id']}。",
                 f"- 推荐依据：在完成真实校核、容量证据完整且满足任务压力要求的方案中，按“{recommendation['objective']}”比较。",
                 f"- 确认容量：{format_number(best['capacity_MPa'])} MPa；工作压力：{format_number(working_pressure)} MPa。",
-                "- 此结论属于当前模型的数值设计推荐，工程定型仍需工艺、网格与试验验证。",
             ])
         else:
             lines.append("- 当前没有同时具备完整通过证据及目标比较数据的方案，不给出最终推荐。")
@@ -916,6 +756,7 @@ class ReportGenAgent(BaseAgent):
         self.emit("总体设计方案报告已生成")
         return {
             **artifact, "content": markdown_text, "output_dir": str(output_dir),
+            "llm_explanation_audit": dict(self._last_llm_explanation_audit),
             "report_outputs": {"overall": artifact},
             "generated_output_keys": ["overall"] if generated else [],
         }

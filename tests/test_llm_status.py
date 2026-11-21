@@ -95,7 +95,7 @@ def test_probe_llm_backends_reports_live_status_without_secrets(monkeypatch) -> 
             self.completions = FakeCompletions(owner)
 
     class FakeOpenAI:
-        def __init__(self, base_url, api_key, timeout, default_headers):
+        def __init__(self, base_url, api_key, timeout, default_headers, http_client):
             self.base_url = base_url
             self.chat = FakeChat(self)
 
@@ -157,7 +157,7 @@ def test_llm_backend_rejects_incomplete_answers(monkeypatch, content, finish_rea
         completions = FakeCompletions()
 
     class FakeOpenAI:
-        def __init__(self, base_url, api_key, timeout, default_headers):
+        def __init__(self, base_url, api_key, timeout, default_headers, http_client):
             self.chat = FakeChat()
 
     backend._openai_cls = FakeOpenAI

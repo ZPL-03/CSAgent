@@ -43,6 +43,10 @@ layup_templates:
 
 surrogate_coefficients:
   PBIPF:
+    model_id: PBIPF_CYLINDRICAL_21F
+    input_dimension: 21
+    supported_hull_types:
+      - CYLINDRICAL
     q_method: ASME_RD_1172
     coefficient_basis: project_engineering_descriptor_units
     descriptor_definition: "D1=lg(Q_MPa)t_mm/R_mm; D2=Q_MPa*D22/(D33-D12); D3=Q_MPa*Ir_permille*L_mm/A22"

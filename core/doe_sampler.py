@@ -10,14 +10,14 @@ from core.config_loader import load_app_config, load_material_db, load_param_ran
 from core.id_utils import format_candidate_id
 from core.pressure_hull_profile import (
     layup_pattern,
-    load_param_ranges_for_type,
     normalize_geometry,
     normalize_layup,
     required_geometry_params,
     resolve_hull_type,
 )
 from core.rule_checker import RuleChecker
-from core.task_contract import task_payload_from_request
+from core.layup_parameters import TEMPLATE_ANGLE_FIELDS, active_geometry, active_layup
+from core.task_contract import candidate_constraints, task_geometry_bounds, task_payload_from_request
 
 
 class DOESampler:
@@ -76,23 +76,8 @@ class DOESampler:
         htype: str,
         feature_order: List[str],
     ) -> Dict[str, Dict[str, float]]:
-        type_ranges = load_param_ranges_for_type(htype)
-        task_ranges = dict(self._task_payload(task).get("geometry_envelope", {}))
-        bounds_by_feature: Dict[str, Dict[str, float]] = {}
-        for feature in feature_order:
-            base = type_ranges.get(feature) or {"min": 0.0, "max": 1.0}
-            low = float(base["min"])
-            high = float(base["max"])
-            task_value = task_ranges.get(feature)
-            if isinstance(task_value, (list, tuple)) and len(task_value) >= 2:
-                task_low = float(task_value[0])
-                task_high = float(task_value[1])
-                low = max(low, min(task_low, task_high))
-                high = min(high, max(task_low, task_high))
-            if low > high:
-                raise ValueError(f"任务的 {feature} 与模型适用范围无交集。")
-            bounds_by_feature[feature] = {"min": low, "max": high}
-        return bounds_by_feature
+        bounds = task_geometry_bounds(task, htype)
+        return {feature: bounds[feature] for feature in feature_order}
 
     def _lhs(self, dimensions: int, samples: int, seed_offset: int = 0) -> np.ndarray:
         rng = np.random.default_rng(self.random_seed + seed_offset)
@@ -104,7 +89,16 @@ class DOESampler:
             result[:, dim] = points
         return result
 
-    def _layup_payload(self, rng: np.random.Generator, geometry: Dict[str, Any]) -> Dict[str, Any]:
+    def _layup_payload(self, rng: np.random.Generator, geometry: Dict[str, Any], task: Dict) -> Dict[str, Any]:
+        constraints = self._task_payload(task)["layup_constraints"]
+        allowed = constraints["allowed_angles"]
+        if allowed:
+            # DOE 构造任务允许的逐层序列；历史模板及来源记录保持原值。
+            half = list(dict.fromkeys(allowed))
+            rng.shuffle(half)
+            half *= max(1, (20 + len(half) - 1) // len(half))
+            angles = half + half[::-1] if constraints["symmetric"] else half
+            return normalize_layup({"template_name": "TASK_ANGLES", "angles_deg": angles}, geometry)
         template = self.layup_templates[int(rng.integers(0, len(self.layup_templates)))]
         template_name = str(template.get("name") or "BASE_90_AB")
         pattern = str(template.get("pattern") or layup_pattern(geometry["alpha_deg"], geometry["beta_deg"], template_name))
@@ -114,6 +108,9 @@ class DOESampler:
             .replace("α", str(round(float(geometry["alpha_deg"]), 3)))
             .replace("β", str(round(float(geometry["beta_deg"]), 3)))
         )
+        if constraints["symmetric"]:
+            text += "s"
+            template_name += "_SYMMETRIC"
         return normalize_layup({"template_name": template_name, "layup": text}, geometry)
 
     def _estimate_rationale(self, material_name: str, layup_name: str) -> str:
@@ -134,6 +131,8 @@ class DOESampler:
         candidate_id_factory = id_factory or format_candidate_id
         htype = resolve_hull_type(hull_type)
         feature_order = required_geometry_params(htype)
+        if self._task_payload(task)["layup_constraints"]["allowed_angles"]:
+            feature_order = [key for key in feature_order if key not in TEMPLATE_ANGLE_FIELDS]
         type_ranges = self._feature_bounds(task, htype, feature_order)
 
         while len(valid_candidates) < n_samples and generation_round < 12:
@@ -153,8 +152,12 @@ class DOESampler:
                     value = float(bounds["min"]) + row[idx] * (float(bounds["max"]) - float(bounds["min"]))
                     geometry[feature] = float(bounds["min"]) if bounds["min"] == bounds["max"] else round(float(value), 3)
                 geometry = normalize_geometry(htype, geometry)
+                for key, bounds in type_ranges.items():
+                    if bounds["min"] == bounds["max"]:
+                        geometry[key] = bounds["min"]
 
-                layup = self._layup_payload(rng, geometry)
+                layup = active_layup(self._layup_payload(rng, geometry, task))
+                geometry = active_geometry({"geometry": geometry, "layup": layup})
                 candidate_index = start_index + len(valid_candidates)
                 material_system = self._select_material(task, candidate_index)
                 task_payload = self._task_payload(task)
@@ -183,11 +186,13 @@ class DOESampler:
                     "load_conditions": task_payload["load_conditions"],
                     "boundary_conditions": task_payload["boundary_conditions"],
                     "design_targets": task_payload["design_targets"],
+                    "task_constraints": candidate_constraints(task),
                 }
                 rule_check = self.rule_checker.run(
                     candidate,
                     strict_solver_window=strict_solver_window,
                     hull_type=htype,
+                    task=task,
                 )
                 candidate["rule_check"] = rule_check
                 if rule_check["is_valid"]:

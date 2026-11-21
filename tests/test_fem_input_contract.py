@@ -8,6 +8,7 @@ from pathlib import Path
 
 import pytest
 
+from abaqus.cylindrical_geometry import radius_reference
 from abaqus.runtime_build_pressure_hull import layup_angles, material_payload, validate_runtime_candidate
 from agents.fem_agent import FEMAgent
 from agents.orchestrator import OrchestratorAgent
@@ -19,6 +20,7 @@ from core.fem_input_contract import (
     validate_fem_input_or_raise,
 )
 from core.schema_validator import validate_or_raise
+from core.task_contract import normalize_task_payload
 from core.task_parser import TaskParser
 
 
@@ -69,20 +71,41 @@ def test_csllm_candidate_satisfies_csdm_schema_and_fem_contract() -> None:
     assert validate_runtime_candidate(candidate)["length"] == 600
 
 
-def test_orchestrator_promotes_csllm_candidate_without_changing_design_revision() -> None:
+def _historical_task(candidate):
+    """转交任务沿用候选半径基准，并允许历史提案中的非对称连续角度。"""
+    return normalize_task_payload({
+        "radius_reference": radius_reference(candidate["geometry"]),
+        "load_conditions": candidate["load_conditions"],
+        "boundary_conditions": candidate["boundary_conditions"],
+        "design_targets": candidate["design_targets"],
+        "layup_constraints": {"symmetric": False, "allowed_angles": [], "min_ratio_per_angle": 0},
+    })
+
+
+def test_orchestrator_rejects_task_radius_reference_mismatch(monkeypatch) -> None:
+    import agents.orchestrator as module
     candidate = _generated_candidate()
-    parser = TaskParser()
-    task = parser.parse_instruction(
-        "5000米水深复合材料圆柱耐压壳，长度600 mm，内半径150 mm，"
-        "生成50个候选，初筛保留5个候选，端部法兰约束"
-    )
+    task = _historical_task(candidate)
+    task["radius_reference"] = "middle_surface" if task["radius_reference"] == "inner" else "inner"
+    monkeypatch.setattr(module, "reserve_candidate_ids", lambda *_: pytest.fail("半径基准不一致不能分配编号"))
+    with pytest.raises(ValueError, match="半径基准"):
+        object.__new__(OrchestratorAgent).prepare_candidate_for_fem(task, candidate)
+
+
+def test_orchestrator_records_task_revision_without_changing_physical_design() -> None:
+    candidate = _generated_candidate()
+    task = _historical_task(candidate)
     orchestrator = object.__new__(OrchestratorAgent)
 
     promoted = orchestrator.prepare_candidate_for_fem(task, candidate)
 
     assert promoted["candidate_id"].startswith("C")
     assert promoted["session_candidate_id"] == "TMP_1"
-    assert promoted["design_revision_id"] == candidate["design_revision_id"]
+    assert promoted["design_revision_id"] != candidate["design_revision_id"]
+    assert promoted["parent_design_revision_id"] == candidate["design_revision_id"]
+    for field in ("geometry", "layup", "material_system", "load_conditions", "boundary_conditions"):
+        assert promoted[field] == candidate[field]
+    assert promoted["task_constraints"]["layup_constraints"]["symmetric"] is False
     assert validate_fem_input(promoted) == []
 
 
@@ -154,7 +177,7 @@ def test_orchestrator_expands_compact_layup_at_the_single_fem_boundary() -> None
     candidate["layup"]["layup"] = "[90_4/(±25/±80)_8/90_4]"
     candidate["layup"]["skin_layup"] = candidate["layup"]["layup"]
     candidate = attach_design_revision(candidate)
-    task = TaskParser().parse_instruction("外压 30 MPa，生成 1 个候选，初筛保留 1 个候选")
+    task = _historical_task(candidate)
     orchestrator = object.__new__(OrchestratorAgent)
 
     promoted = orchestrator.prepare_candidate_for_fem(task, candidate)

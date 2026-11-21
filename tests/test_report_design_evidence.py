@@ -1,6 +1,5 @@
 """求解修订、容量约束与报告推荐使用同一设计证据。"""
 from types import SimpleNamespace
-import pytest
 
 from agents.orchestrator import OrchestratorAgent
 from agents.report_gen import ReportGenAgent
@@ -81,14 +80,3 @@ def test_case_write_receives_actual_solved_design():
     orchestrator.persist_knowledge_records({}, [design], [result])
     assert captured["design"]["geometry"]["thickness_mm"] == 10.8
     assert design["geometry"]["thickness_mm"] == 10
-
-
-def test_explanation_distinguishes_analysis_defect_from_manufacturing_limits(monkeypatch):
-    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    agent = ReportGenAgent()
-    payload = {"all_candidates": [{"imperfection_ratio": 0.008}]}
-    with pytest.raises(ValueError, match="缺陷条件已提供"):
-        agent._validate_llm_engineering_text("所有候选均未提供明确的缺陷幅值。", payload)
-    with pytest.raises(ValueError, match="安全验收结论"):
-        agent._validate_llm_engineering_text("满足安全裕度要求。", payload)
-    agent._validate_llm_engineering_text("分析采用固定缺陷条件，制造验收阈值尚未指定。", payload)

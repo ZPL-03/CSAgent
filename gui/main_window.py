@@ -1610,7 +1610,7 @@ class MainWindow(QMainWindow):
                     ("Chunk token", self._settings_line("knowledge.chunk_token_size", knowledge.get("chunk_token_size", 512))),
                     ("Overlap token", self._settings_line("knowledge.chunk_overlap_tokens", knowledge.get("chunk_overlap_tokens", 64))),
                     ("最小 chunk token", self._settings_line("knowledge.min_chunk_tokens", knowledge.get("min_chunk_tokens", 80))),
-                    ("最大片段字符", self._settings_line("knowledge.max_snippet_chars", knowledge.get("max_snippet_chars", 1200))),
+                    ("证据上下文字符预算", self._settings_line("knowledge.max_context_chars", knowledge.get("max_context_chars", 12000))),
                     ("向量索引", self._settings_combo("knowledge.vector_enabled", knowledge.get("vector_enabled", True), [("启用", "true"), ("关闭", "false")])),
                     ("向量 top_k 倍率", self._settings_line("knowledge.vector_top_k_multiplier", knowledge.get("vector_top_k_multiplier", 2))),
                     ("向量集合", self._settings_line("knowledge.vector_collection_name", knowledge.get("vector_collection_name", ""))),
@@ -1971,7 +1971,7 @@ class MainWindow(QMainWindow):
             "knowledge.chunk_token_size": knowledge.get("chunk_token_size", 512),
             "knowledge.chunk_overlap_tokens": knowledge.get("chunk_overlap_tokens", 64),
             "knowledge.min_chunk_tokens": knowledge.get("min_chunk_tokens", 80),
-            "knowledge.max_snippet_chars": knowledge.get("max_snippet_chars", 1200),
+            "knowledge.max_context_chars": knowledge.get("max_context_chars", 12000),
             "knowledge.vector_enabled": knowledge.get("vector_enabled", True),
             "knowledge.vector_top_k_multiplier": knowledge.get("vector_top_k_multiplier", 2),
             "knowledge.vector_collection_name": knowledge.get("vector_collection_name", ""),
@@ -2054,7 +2054,7 @@ class MainWindow(QMainWindow):
         knowledge["chunk_token_size"] = chunk_token_size
         knowledge["chunk_overlap_tokens"] = chunk_overlap_tokens
         knowledge["min_chunk_tokens"] = min_chunk_tokens
-        knowledge["max_snippet_chars"] = max(120, self._settings_int("knowledge.max_snippet_chars", int(knowledge.get("max_snippet_chars", 1200) or 1200)))
+        knowledge["max_context_chars"] = max(0, self._settings_int("knowledge.max_context_chars", int(knowledge.get("max_context_chars", 12000))))
         knowledge["vector_enabled"] = self._settings_bool("knowledge.vector_enabled", bool(knowledge.get("vector_enabled", True)))
         knowledge["vector_top_k_multiplier"] = max(
             1,

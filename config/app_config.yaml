@@ -36,6 +36,7 @@ pipeline:
 
 rag:
   embedding_model: BAAI/bge-m3
+  embedding_device: cpu
   embedding_cache_dir: models/embedding_cache
   local_files_only: true
   use_hash_embedding_only: false
@@ -63,7 +64,7 @@ project_knowledge:
   structured_dir: knowledge/runtime/structured_text
   top_k: 5
   kg_top_k: 8
-  max_snippet_chars: 1200
+  max_context_chars: 12000
   chunk_token_size: 512
   chunk_overlap_tokens: 64
   min_chunk_tokens: 80

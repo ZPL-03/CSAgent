@@ -1,13 +1,16 @@
 """项目路径与目录工具。"""
 
 from __future__ import annotations
+
+import os
 from pathlib import Path
 
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
+RUN_ROOT = Path(os.environ["CSDM_CPH_RUN_ROOT"]).resolve() if os.getenv("CSDM_CPH_RUN_ROOT") else None
 CONFIG_DIR = ROOT_DIR / "config"
 SCHEMA_DIR = ROOT_DIR / "schemas"
-DATA_DIR = ROOT_DIR / "data"
+DATA_DIR = (RUN_ROOT or ROOT_DIR) / "data"
 ASSETS_DIR = ROOT_DIR / "assets"
 IO_DIR = DATA_DIR / "io"
 TASKS_DIR = DATA_DIR / "tasks"
@@ -16,14 +19,14 @@ CASES_DIR = DATA_DIR / "cases"
 ABAQUS_RUNS_DIR = DATA_DIR / "abaqus_runs"
 RUNTIME_DIR = DATA_DIR / "runtime"
 KNOWLEDGE_DIR = ROOT_DIR / "knowledge"
-RUNTIME_KNOWLEDGE_DIR = KNOWLEDGE_DIR / "runtime"
+RUNTIME_KNOWLEDGE_DIR = (RUN_ROOT / "knowledge" if RUN_ROOT else KNOWLEDGE_DIR) / "runtime"
 KNOWLEDGE_UPLOADS_DIR = RUNTIME_KNOWLEDGE_DIR / "uploads"
 RUNTIME_KNOWLEDGE_RAG_DIR = RUNTIME_KNOWLEDGE_DIR / "rag"
 RUNTIME_KNOWLEDGE_KG_DIR = RUNTIME_KNOWLEDGE_DIR / "kg"
 RUNTIME_KNOWLEDGE_STRUCTURED_DIR = RUNTIME_KNOWLEDGE_DIR / "structured_text"
-CHROMA_DIR = KNOWLEDGE_DIR / "chroma_db"
-CASE_LIBRARY_DIR = KNOWLEDGE_DIR / "case_library"
-MODELS_DIR = ROOT_DIR / "models"
+CHROMA_DIR = (RUN_ROOT / "knowledge" if RUN_ROOT else KNOWLEDGE_DIR) / "chroma_db"
+CASE_LIBRARY_DIR = (RUN_ROOT / "knowledge" if RUN_ROOT else KNOWLEDGE_DIR) / "case_library"
+MODELS_DIR = (RUN_ROOT or ROOT_DIR) / "models"
 DOCS_DIR = ROOT_DIR / "docs"
 ABAQUS_DIR = ROOT_DIR / "abaqus"
 ABAQUS_TEMPLATE_DIR = ABAQUS_DIR / "templates"

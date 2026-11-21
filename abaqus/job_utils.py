@@ -16,27 +16,41 @@ def is_abaqus_available(command: str = "abaqus") -> bool:
 
 
 def compiler_environment() -> dict[str, str]:
-    """仅为求解子进程加载 oneAPI 与 MSVC，不更改系统或 GUI 环境。"""
+    """按安装配置为求解子进程加载 Intel Fortran 与 MSVC，保持父进程环境不变。"""
     if shutil.which("ifort") and shutil.which("link"):
         return dict(os.environ)
     root = os.environ.get("ONEAPI_ROOT", "")
-    script = Path(root) / "setvars.bat" if root else None
-    if script is None or not script.is_file():
-        raise RuntimeError("未找到 Intel Fortran 编译环境，请配置 ONEAPI_ROOT 或从编译器命令行启动平台")
+    if root:
+        script = Path(root) / "setvars.bat"
+        arguments = "intel64 --force"
+    else:
+        # Parallel Studio 的安装变量包含版本号；ifortvars 使用安装时配置的 Visual Studio。
+        installations = sorted(
+            (int(match.group(1)), value)
+            for key, value in os.environ.items()
+            if (match := re.fullmatch(r"IFORT_COMPILER(\d+)", key.upper())) and value
+        )
+        if not installations:
+            raise RuntimeError("未找到 Intel Fortran 安装配置，请设置 ONEAPI_ROOT 或 IFORT_COMPILER<版本号>")
+        script = Path(installations[-1][1]) / "bin" / "ifortvars.bat"
+        arguments = "intel64"
+    if not script.is_file():
+        raise RuntimeError(f"Intel Fortran 初始化脚本不存在：{script}")
     completed = subprocess.run(
-        f'"{os.environ.get("COMSPEC", "cmd.exe")}" /d /u /c call "{script}" intel64 --force >nul 2>&1 && set',
+        f'"{os.environ.get("COMSPEC", "cmd.exe")}" /d /u /c call "{script}" {arguments} >nul 2>&1 && set',
         capture_output=True, timeout=60,
     )
     if completed.returncode:
-        raise RuntimeError("oneAPI 编译环境初始化失败")
-    environment = dict(os.environ)
+        raise RuntimeError(f"Intel Fortran 编译环境初始化失败：{script}")
+    environment = {key.upper(): value for key, value in os.environ.items()}
     # cmd /u 使内置 set 的重定向输出使用 UTF-16LE，保留中文和非本地代码页字符。
     for line in completed.stdout.decode("utf-16-le").splitlines():
         key, separator, value = line.partition("=")
         if separator and key and not key.startswith("="):
-            environment[key] = value
-    if not shutil.which("ifort", path=environment.get("Path") or environment.get("PATH")):
-        raise RuntimeError("oneAPI 环境中没有 ifort，无法编译 Abaqus/Standard 子程序")
+            environment[key.upper()] = value
+    missing = [name for name in ("ifort", "link") if not shutil.which(name, path=environment.get("PATH"))]
+    if missing:
+        raise RuntimeError(f"Intel Fortran 编译环境缺少 {', '.join(missing)}，无法编译 Abaqus/Standard 子程序")
     return environment
 
 

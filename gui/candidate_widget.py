@@ -26,6 +26,7 @@ from PyQt6.QtWidgets import (
 
 from gui.i18n import DEFAULT_LANGUAGE, text as tr
 from core.display import format_number as _format_number, format_parameter
+from core.layup_parameters import active_geometry
 from core.pressure_hull_profile import GEOMETRY_LABELS, TYPE_DISPLAY_NAMES
 from core.task_contract import describe_boundary_conditions, describe_load_conditions
 
@@ -349,7 +350,7 @@ class CandidateWidget(QWidget):
         candidate = selected[0]
         self.candidateSelected.emit(candidate)
         result = self._result_for_candidate(candidate)
-        geometry = candidate.get("geometry", {})
+        geometry = active_geometry(candidate)
         layup = candidate.get("layup", {})
         material = candidate.get("material_system", {})
         load_conditions = candidate.get("load_conditions", {})

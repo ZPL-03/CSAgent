@@ -98,6 +98,20 @@ class TaskParser:
             return "复合材料耐压舱段"
         return "复合材料外压圆柱耐压壳"
 
+    def _extract_hull_type(self, text: str) -> str:
+        """识别结构类型；未建模的结构类型不映射到圆柱壳。"""
+        unsupported_patterns = (
+            r"T\s*形\s*(?:加筋|筋条)?",
+            r"T\s*型\s*(?:加筋|筋条)?",
+            r"加筋(?:壁板|板|壳|结构)",
+            r"筋条(?:壁板|板|壳|结构)?",
+            r"stiffened\s+(?:panel|shell|structure)",
+            r"stiffener",
+        )
+        if any(re.search(pattern, text, flags=re.IGNORECASE) for pattern in unsupported_patterns):
+            raise ValueError("当前项目仅支持复合材料外压圆柱耐压壳，不支持 T 形加筋壁板或其他未建模结构类型。")
+        return "CYLINDRICAL"
+
     def _extract_load_conditions(self, text: str) -> Dict[str, Any]:
         pressure = self._external_pressure_value(text)
         if pressure is not None:
@@ -464,6 +478,7 @@ class TaskParser:
         load_conditions = self._extract_load_conditions(text)
         hints = {
             "application": self._extract_application(text),
+            "hull_type": self._extract_hull_type(text),
             "load_conditions": load_conditions,
             "boundary_conditions": self._extract_boundary_conditions(text),
             "geometry_envelope": self._extract_geometry_envelope(text),
@@ -486,7 +501,6 @@ class TaskParser:
                 "is_user_specified": is_user_specified,
             },
             "layup_constraints": dict(DEFAULT_LAYUP_CONSTRAINTS),
-            "hull_type": "CYLINDRICAL",
             "design_targets": self._extract_design_targets(
                 text,
                 float(load_conditions["external_pressure_MPa"]),

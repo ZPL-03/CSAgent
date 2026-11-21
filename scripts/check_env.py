@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import importlib
 import importlib.metadata
 import os
@@ -18,6 +19,7 @@ if str(ROOT) not in sys.path:
 
 from dotenv import load_dotenv
 
+from abaqus.job_utils import compiler_environment
 from core.paths import ensure_project_dirs
 
 load_dotenv(ROOT / ".env")
@@ -142,7 +144,25 @@ def secret_status(name: str) -> str:
     return "已提供" if os.getenv(name) else "未提供"
 
 
-def main() -> int:
+def check_compiler_runtime() -> tuple[bool, str]:
+    """初始化求解子进程环境并检查编译工具，不提交 Abaqus 作业。"""
+    try:
+        environment = compiler_environment()
+    except (RuntimeError, OSError, subprocess.TimeoutExpired) as exc:
+        return False, str(exc)
+    path = environment.get("PATH") or environment.get("Path")
+    commands = {name: shutil.which(name, path=path) for name in ("ifort", "link")}
+    return all(commands.values()), "; ".join(f"{name}={value or '未找到'}" for name, value in commands.items())
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--compiler-only", action="store_true", help="仅初始化并检查 Fortran/MSVC 编译环境")
+    args = parser.parse_args(argv)
+    if args.compiler_only:
+        ok, detail = check_compiler_runtime()
+        print(f"[{'PASS' if ok else 'FAIL'}] Intel Fortran/MSVC: {detail}")
+        return 0 if ok else 1
     ensure_project_dirs()
     checks: list[tuple[str, bool, str]] = []
 
@@ -151,6 +171,8 @@ def main() -> int:
 
     abaqus_path = shutil.which("abaqus")
     checks.append(("ABAQUS", abaqus_path is not None, abaqus_path or "未找到 abaqus 命令"))
+    compiler_ok, compiler_detail = check_compiler_runtime()
+    checks.append(("Intel Fortran/MSVC", compiler_ok, compiler_detail))
 
     checks.append(
         (

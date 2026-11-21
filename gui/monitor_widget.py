@@ -28,8 +28,6 @@ class MonitorCasePoint:
     length_mm: float
     radius_mm: float
     thickness_mm: float
-    alpha_deg: float
-    beta_deg: float
     source: str
 
 
@@ -76,8 +74,6 @@ def load_monitor_case_points(case_dir: Path = CASES_DIR) -> list[MonitorCasePoin
                 length_mm=_float_value(geometry.get("length_mm")),
                 radius_mm=_float_value(geometry.get("radius_mm")),
                 thickness_mm=_float_value(geometry.get("thickness_mm")),
-                alpha_deg=_float_value(geometry.get("alpha_deg")),
-                beta_deg=_float_value(geometry.get("beta_deg")),
                 source=str(design.get("source") or payload.get("source") or "-"),
             )
         )

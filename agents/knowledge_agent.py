@@ -88,6 +88,8 @@ class KnowledgeAgent(BaseAgent):
         for field in ("run_id", "task_id"):
             if design.get(field):
                 payload[field] = design[field]
+        if "task_constraints" in design:
+            payload["task_constraints"] = deepcopy(design["task_constraints"])
         # 修订号绑定实际求解输入，入库时保持这些字段的原值和缺省状态。
         if design.get("design_revision_id"):
             for field in REVISION_FIELDS:

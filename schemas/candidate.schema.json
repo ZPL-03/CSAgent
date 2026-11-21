@@ -31,8 +31,6 @@
         "length_mm",
         "radius_mm",
         "thickness_mm",
-        "alpha_deg",
-        "beta_deg",
         "imperfection_ratio"
       ],
       "properties": {
@@ -153,6 +151,15 @@
       "additionalProperties": true
     },
     "fem_readiness": {"type": "object"}
+  },
+  "if": {
+    "properties": {"layup": {"properties": {"template_name": {"const": "TASK_ANGLES"}}, "required": ["template_name"]}}
+  },
+  "then": {
+    "properties": {"layup": {"required": ["angles_deg"], "properties": {"angles_deg": {"minItems": 1}}}}
+  },
+  "else": {
+    "properties": {"geometry": {"required": ["alpha_deg", "beta_deg"]}}
   },
   "additionalProperties": true
 }

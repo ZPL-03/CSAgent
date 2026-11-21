@@ -23,6 +23,7 @@ from core.pressure_hull_profile import (
     estimate_linear_buckling_feature_q,
     geometry_to_feature_vector,
     normalize_layup,
+    validate_hull_type,
 )
 from core.task_contract import boundary_condition_code, load_case_code, normalize_boundary_conditions, normalize_load_conditions
 
@@ -50,6 +51,35 @@ FEATURE_ORDER = [
     "G12_GPa",
     "nu12",
 ]
+
+SURROGATE_MODEL_ID = "PBIPF_CYLINDRICAL_21F"
+SURROGATE_INPUT_DIMENSION = len(FEATURE_ORDER)
+SUPPORTED_HULL_TYPES = ("CYLINDRICAL",)
+
+
+def _candidate_hull_type(candidate: Dict[str, Any]) -> str:
+    """读取候选结构类型；缺省类型仅兼容历史圆柱壳记录。"""
+    raw = candidate.get("hull_type")
+    if raw is None or not str(raw).strip():
+        return "CYLINDRICAL"
+    return validate_hull_type(str(raw))
+
+
+def validate_surrogate_scope(candidate: Dict[str, Any], task: Dict[str, Any] | None = None) -> str:
+    """校验代理模型与候选、任务的结构类型合同。"""
+    candidate_type = _candidate_hull_type(candidate)
+    if candidate_type not in SUPPORTED_HULL_TYPES:
+        raise ValueError(
+            f"代理模型 {SURROGATE_MODEL_ID} 仅适用于 {', '.join(SUPPORTED_HULL_TYPES)}，"
+            f"不能用于 {candidate_type}。"
+        )
+    if task is not None:
+        task_payload = task.get("task") if isinstance(task.get("task"), dict) else task
+        task_raw = task_payload.get("hull_type") if isinstance(task_payload, dict) else None
+        task_type = "CYLINDRICAL" if task_raw is None or not str(task_raw).strip() else validate_hull_type(str(task_raw))
+        if task_type != candidate_type:
+            raise ValueError(f"代理模型结构类型与任务不一致：候选={candidate_type}，任务={task_type}。")
+    return candidate_type
 
 
 def _finite_number(value: Any, field: str) -> float:
@@ -82,6 +112,17 @@ def _validate_regression_report(pbipf: Dict[str, Any]) -> Dict[str, Any]:
     report = json.loads(path.read_text(encoding="utf-8"))
     if report.get("schema_version") != 3 or report.get("hash_format") != "utf8_lf" or report.get("status") != "evaluated" or report.get("model_type") != "linear" or pbipf.get("model_type") != "linear":
         raise ValueError("压力回归报告或模型类型不一致")
+    scope = {
+        "model_id": pbipf.get("model_id"),
+        "input_dimension": pbipf.get("input_dimension"),
+        "supported_hull_types": pbipf.get("supported_hull_types"),
+    }
+    if scope != {
+        "model_id": SURROGATE_MODEL_ID,
+        "input_dimension": SURROGATE_INPUT_DIMENSION,
+        "supported_hull_types": list(SUPPORTED_HULL_TYPES),
+    }:
+        raise ValueError("代理模型输入维度或适用结构类型配置不一致")
     contract = {
         "training_q_source": pbipf.get("training_q_source"), "prediction_q_source": pbipf.get("q_method"),
         "asme_radius_reference": "outer", "descriptor_radius_reference": pbipf.get("descriptor_radius_reference"),
@@ -213,6 +254,7 @@ def _leave_one_out_scale_predictions(predictions: Sequence[float], targets: Sequ
 
 
 def candidate_to_features(candidate: Dict[str, Any], task: Dict[str, Any] | None = None, feature_order: Sequence[str] | None = None) -> List[float]:
+    validate_surrogate_scope(candidate, task)
     geometry = dict(candidate.get("geometry", {}))
     layup = normalize_layup(candidate.get("layup", {}), geometry)
     material = dict(candidate.get("material_system", {}))
@@ -350,6 +392,7 @@ class SurrogateModelManager:
         return records
 
     def formula_prediction(self, candidate: Dict[str, Any], apply_calibration: bool = True) -> FormulaPrediction:
+        hull_type = validate_surrogate_scope(candidate)
         geometry = dict(candidate.get("geometry", {}))
         material = dict(candidate.get("material_system", {}))
         layup = normalize_layup(candidate.get("layup", {}), geometry)
@@ -401,6 +444,10 @@ class SurrogateModelManager:
             imperfection_input=str(pbipf.get("imperfection_input") or "permille"),
             stiffness=stiffness,
             model_validation={
+                "surrogate_model_id": SURROGATE_MODEL_ID,
+                "input_dimension": SURROGATE_INPUT_DIMENSION,
+                "supported_hull_types": list(SUPPORTED_HULL_TYPES),
+                "hull_type": hull_type,
                 "model_type": "linear",
                 "training_q_source": pbipf["training_q_source"], "prediction_q_source": pbipf["q_method"],
                 "regression_testing_rmse_MPa": self.validation_report["regression_evaluation"]["testing"]["rmse_MPa"],
@@ -464,8 +511,8 @@ class SurrogateModelManager:
         calibration = self._load_calibration()
         predictions: List[float] = []
         for row in feature_rows:
-            if len(row) != len(FEATURE_ORDER):
-                raise ValueError(f"代理模型特征需要 {len(FEATURE_ORDER)} 项，实际为 {len(row)} 项")
+            if len(row) != SURROGATE_INPUT_DIMENSION:
+                raise ValueError(f"代理模型 {SURROGATE_MODEL_ID} 需要 {SURROGATE_INPUT_DIMENSION} 项特征，实际为 {len(row)} 项")
             values = {name: _finite_number(value, name) for name, value in zip(FEATURE_ORDER, row)}
             descriptors = _pbipf_descriptors(
                 coefficients,

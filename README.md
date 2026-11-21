@@ -14,7 +14,7 @@ CSAgent 多智能体智能设计平台面向复合材料外压圆柱耐压壳智
 
 - 壳体类型：外压圆柱耐压壳 `CYLINDRICAL`
 - 几何变量：`length_mm`、`radius_mm`、`thickness_mm`
-- 铺层变量：`alpha_deg`、`beta_deg`
+- 铺层定义：显式层序使用 `angles_deg`；参数化模板使用 `alpha_deg`、`beta_deg`
 - 初始几何缺陷比：采用用户指定的固定值，未指定时使用 `config/param_ranges.yaml` 中的 `analysis_assumptions.imperfection_ratio=0.008`（8‰）
 - 材料体系：`T700/Epoxy`、`T800G/5228`、`M40J/TDE-85`、`IM7-8552`
 - 工况：用户所需工作压力，内部保存为外部静水压力 `external_pressure_MPa`
@@ -31,6 +31,12 @@ CSAgent 多智能体智能设计平台面向复合材料外压圆柱耐压壳智
 有限元结果的 `solved_design` 保存提交的设计，案例回流和报告目标比较使用其中的尺寸、铺层及分析条件。求解失败返回诊断，不自动改变设计或重复提交。源表候选在校验来源指纹后，采用任务的缺陷比和项目损伤分析配置；来源输入、历史结果及父修订号保留，条件变化后的历史结果不用于当前设计通过判定。
 
 候选铺层支持显式角度、正负角、重复组和中面对称记号。未知角度、未闭合括号、冲突的层序字段及无效重复次数会被拒绝；正负角均衡按层数判定。提案未给铺层时可由项目模板和角度参数装配，并记录模板来源；已有铺层不因规则失败而替换为其他模板。
+
+`task_constraints` 保存当前任务的几何、半径基准、铺层、载荷、边界、目标和固定材料约束，参与设计修订指纹并随案例保存。LLM、案例迁移、DOE、预筛和送算共用任务约束；`symmetric=true` 检查完整物理层序的镜像关系，不接受非对称 `BENCHMARK_A`。`allowed_angles` 限定实际角度，`min_ratio_per_angle` 检查集合内每种角度的层数比例；空集合表示仅使用全局角度范围，并对实际使用角度检查比例。DOE 按任务构造层序，不改变历史案例。固定几何保留原值；任务与当前支持域无交集时终止，不改变用户尺寸。
+
+`TASK_ANGLES` 用逐层 `angles_deg` 定义铺层，不采样或传播未参与层序的 alpha/beta。无模板标识的完整数值层序归入该类型，不从前两个角度推断模板参数。报告和案例检索按有效字段展示；历史记录及修订指纹保持原值，参数化模板仍保存并验证其 alpha/beta。代理公式继续使用实际层序计算刚度，不因显示字段变化而改变。
+
+报告模型仅选择 `candidate_id + metric` 事实引用和验证建议代码。代码从事实索引回填原始值、单位及状态，压力目标、承载结果、缺陷比和缺陷幅值不能互换；自由理论结论及制造阈值不属于该输出接口。中文报告使用项目显示函数格式化数值，计算原值保持不变；分析缺陷比无量纲，幅值为缺陷比乘中面半径。`llm_explanation_used` 只表示结构化选择被采用，不证明模型具备开放式理论解释能力；`llm_explanation_audit` 保存原始响应、回填事实、采用状态及拒绝原因。
 
 `geometry.radius_reference` 标明 `radius_mm` 是内半径（`inner`）、中面半径（`middle_surface`）或外半径（`outer`）。自然语言任务保留用户指定的基准，源表候选使用内半径；未标明基准的项目记录按中面半径解释。Abaqus 壳网格、截面质量和三维显示通过同一换算函数取得实际内、中面、外半径。初始几何缺陷幅值按项目缺陷比乘以中面半径计算。半径基准参与设计修订指纹，历史案例的输入及结果保持原样。
 
@@ -114,7 +120,7 @@ P       = d1 * lg(Q) * t / R
 - `knowledge/runtime/kg/relations.jsonl`：知识图谱关系
 - `knowledge/runtime/manifest.json`：用户增量文档数、chunk 数、向量索引数、实体关系数、检索验证结果、分块参数、去重键和最近一次入库流水线状态
 
-内置包包含 173,228 个 RAG 文本块、2,219 个实体、250,606 条关系和 1,931 条来源元数据；具体版本、计数和 SHA256 以 `provenance/manifest.json` 为准。内置检索使用只读 SQLite 连接和内存映射向量矩阵，不把全量文本载入 Python 扫描。查询使用与索引一致的 BGE-M3 归一化 CLS 编码、1024 token 窗口、128 token 重叠及去重 token 加权汇总，BM25 与语义候选通过 RRF 融合并按文献去重。模型按需在后台加载；缺失模型或编码失败明确报错，不用哈希向量冒充语义检索。用户增量仍使用独立 Chroma collection，入库流水线与内置索引状态分别显示。
+内置包的版本、记录数和文件 SHA256 保存在 `knowledge/csllm/provenance/manifest.json`。内置检索使用只读 SQLite 连接和内存映射向量矩阵。查询使用与索引一致的 BGE-M3 归一化 CLS 编码、1024 token 窗口、128 token 重叠及去重 token 加权汇总，BM25 与语义候选通过 RRF 融合并按文献去重。模型按需在后台加载；缺失模型或编码失败时返回错误。用户增量使用独立 Chroma collection，入库流水线与内置索引状态分别显示。
 
 知识包校验与同步：
 
@@ -124,6 +130,10 @@ python -B scripts/sync_builtin_knowledge.py --source <知识包目录> --archive
 ```
 
 同步校验文件哈希、实际记录数、文本块身份和图谱证据引用，只更新 `knowledge/csllm`，不覆盖用户增量、案例或求解工件。
+
+`python -B scripts/validate_knowledge_retrieval.py --output-dir <不存在的证据目录>` 执行知识包全校验与 CPU 领域检索，保存完整证据、适用条件、块和关系指纹、实际编码器设备及文件哈希。该入口离线读取嵌入模型，不调用生成 API 或求解器。候选提示词的证据按 `project_knowledge.max_context_chars` 整单元纳入，预算不足时记录排除原因。
+
+`python -B scripts/audit_chroma_state.py --database knowledge/chroma_db/chroma.sqlite3 --output <快照.json>` 只读记录状态库的 schema、迁移、集合及文档内容指纹；`--compare <既有快照.json>` 比较逻辑变化。文件 bytes 用于追溯，不作为状态库内容不变的判据。Chroma 客户端初始化可写入内部锁记录；文档、集合或迁移变化需要独立核查。源表、代码、配置及冻结知识包仍按文件 hash 校验。
 
 任务和案例库初始为空。案例由实际有限元校核结果建立，入库要求完整的逐层应力、损伤输出、已确认的容量极限点及对应求解工件。编号和入库条件见 [项目状态](docs/项目状态.md#案例库)。
 
@@ -140,15 +150,27 @@ GUI 的“监控”页提供最近运行记录下拉框、刷新运行记录和�
 内置 RAG 压缩文件、SQLite 索引和向量矩阵使用 Git LFS 保存。首次检出后执行 `git lfs install` 和 `git lfs pull`，确保工作目录中是完整文件，而不是 LFS 指针文本。各候选作业目录保留 INP、ODB、CAE、输入快照、结果展示数据、子程序、材料强度 include 和 Riks 监测结果；后屈曲输入通过 `*Imperfection` 引用的首阶缺陷场 `.fil` 同时保留。
 
 ```powershell
-D:\anaconda3\envs\AGENT\python.exe main.py
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\scripts\run_agent.ps1
 ```
 
-Windows 进程在导入核心模块时将未配置的 `MKL_THREADING_LAYER` 设为 `SEQUENTIAL`，避免 NumPy 矩阵运算与 PyTorch 初始化不同 OpenMP 运行时发生冲突；用户显式设置的值保持不变。该配置不修改系统或 Conda 环境，不设置 `KMP_DUPLICATE_LIB_OK`。
+`-ExecutionPolicy Bypass` 仅作用于上述 PowerShell 进程，不更改系统策略。`run_agent.ps1` 通过 Conda PowerShell hook 激活 `AGENT` 后启动 Python，保证 DLL 搜索路径完整；Conda 根目录可通过 `-CondaRoot` 指定。直接运行环境中的 `python.exe` 不等同于激活环境。Windows 核心模块将未配置的 `MKL_THREADING_LAYER` 设为 `SEQUENTIAL`，将 `PYTORCH_NVML_BASED_CUDA_CHECK` 设为 `1`；显式环境值保持不变。
+
+使用用户子程序的 Abaqus 作业通过 `abaqus.job_utils.compiler_environment()` 自动初始化编译环境。该接口复用已激活的 `ifort`/`link`，或按 `ONEAPI_ROOT` 加载 oneAPI；未配置 oneAPI 时按版本选择 `IFORT_COMPILER<版本号>` 指向的安装目录，调用 `bin/ifortvars.bat intel64` 并使用安装时配置的 Visual Studio。环境只传入求解子进程，不改写机器或 GUI 环境。初始化脚本缺失、执行失败或缺少任一编译工具均明确报错。
+
+仅检查 Conda 启动及编译器初始化，不调用模型 API 或启动求解：
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -Command "& .\scripts\run_agent.ps1 -PythonArguments @('scripts/check_env.py', '--compiler-only')"
+```
+
+内置与增量嵌入共用 `rag.embedding_device=cpu`，CPU 路径不调用 CUDA 可用性探测。`CSDM_CPH_EMBEDDING_DEVICE` 可显式选择 `cpu`、`cuda` 或 `cuda:N`；GPU 模式需要独立验证驱动和 PyTorch/CUDA 组合，设备失败不切换为 CPU。主模型和外部回退模型保持独立配置；`proxy_policy=bypass_loopback` 使 localhost、IPv4/IPv6 回环请求直连，外部地址继承环境代理。`direct` 禁用代理，`environment` 完全使用环境代理；不修改 `.env` 或进程代理变量。
+
+LLM 后端的 `extra_body` 原样传入 OpenAI SDK，不能覆盖模型、消息、输出预算或响应格式。当前 DeepSeek fallback 配置 `thinking: {type: disabled}`；primary 不继承该参数。[DeepSeek 官方协议](https://api-docs.deepseek.com/guides/thinking_mode)规定 Flash 默认开启 thinking，Chat Completions 通过 `extra_body.thinking` 控制，不能用 Responses API 的 `reasoning.effort=none` 替代。更换供应商时需按其协议配置扩展字段，不按模型名称自动猜测。
 
 环境自检：
 
 ```powershell
-D:\anaconda3\envs\AGENT\python.exe scripts\check_env.py
+& .\scripts\run_agent.ps1 -PythonArguments @('scripts/check_env.py')
 ```
 
 缓存清理先预览目标，再显式执行。发布审计只检查残留，不删除文件：
@@ -164,15 +186,30 @@ python -B scripts/release_audit.py
 多条自然语言输入端到端验收：
 
 ```powershell
-D:\anaconda3\envs\AGENT\python.exe scripts\run_natural_language_acceptance.py --disable-llm
+& .\scripts\run_agent.ps1 -PythonArguments @('scripts/run_natural_language_acceptance.py', '--disable-llm')
 ```
 
 该入口使用完整工作流运行时推进任务解析、候选生成、代理初筛、当前配置的 Abaqus 有限元阶段、知识回流和报告导出，并检查候选数量、初筛数量、结构去重、运行事件、快照状态和报告路径。`--disable-llm` 只关闭自然语言自动调用，不替换有限元求解器；未配置可用 Abaqus 命令时，验收直接报告求解不可用。
 
+分别验证真实 primary/fallback 的模型分支与求解全流程：
+
+```powershell
+& .\scripts\run_agent.ps1 -PythonArguments @('scripts/validate_model_workflow.py', '--backend', 'primary', '--run-real-abaqus')
+$LASTEXITCODE
+& .\scripts\run_agent.ps1 -PythonArguments @('scripts/validate_model_workflow.py', '--backend', 'fallback', '--run-real-abaqus')
+$LASTEXITCODE
+```
+
+上述命令会调用对应模型并运行真实 Abaqus，不属于离线单元测试。模型配置缺失直接失败，不自动切换模型。默认任务固定 L=500 mm、R=100 mm、缺陷比=0.008，生成两项候选并求解 Top-1；`--instruction` 可指定其他任务。每次运行使用 `data/runtime/model_validation/<时间>_<后端>_<模式>/` 独立目录，台账、案例、向量库、代理校准文件和报告均不写入正式数据目录。内置知识包、嵌入模型和压力回归资料只读，历史案例库不复制，因此该入口不验证正式历史案例的检索效果。`workflow.json` 保存完整业务结果，`validation.json` 分别记录来源计数、模型采用状态、调用轨迹和失败原因。必须同时检查验证文件与进程退出码；原生进程崩溃可能留下 `running` 或未正常退出的记录，不能算通过。
+
+工程流程验收检查当前任务约束、实际求解设计、完整有限元结果、案例入库和 PDF。`source_counter`、`generation_audit`、`llm_candidate_branch` 单独记录候选分支诊断；合法 DOE 承担精确候选构造时，不要求 LLM 来源数量大于零。`flow_status` 与 `model_report_status` 分别记录工程流程和模型报告结果，两者均通过才返回成功；模型事实选择被拒绝或调用失败时，确定性报告的生成不能替代模型报告通过。
+
+仅验证模型候选和报告时使用 `--replay-workflow <已有 workflow.json 的路径>`，与 `--run-real-abaqus` 互斥。重放目录保存 `candidate_replay.json`、`report_replay.json`、`model_events.json` 和 `validation.json`。原始求解证据只读，源文件路径与 SHA256 随验证结果保存；重生成候选不关联旧 FEM 结果，不创建求解器、不写案例库。该模式记录 `flow_status=not_run`、`solver_executed=false`，源证据检查单独记录为 `source_flow_status`，不代替新版本的真实全流程验收。
+
 批量生成初始案例：
 
 ```powershell
-D:\anaconda3\envs\AGENT\python.exe scripts\build_initial_cases.py --reset --count 5 --task-count 1 --pressures 30
+& .\scripts\run_agent.ps1 -PythonArguments @('scripts/build_initial_cases.py', '--count', '5', '--task-count', '1', '--pressures', '30')
 ```
 
 `--reset` 会清理现有案例、任务、报告、运行记录、求解输入输出、Abaqus 工件、案例记忆 collection 和代理公式校准文件，从空库重新计数；项目知识文档、知识图谱和项目检索 collection 保留。该操作会删除真实结果，应先核对并备份。初始案例使用参数范围内的拉丁超立方采样；`C<N>` 在求解前原子预占，`CASE_N` 只在完整结果入库时按顺序分配，两者独立。服务与目标压力全部铺层覆盖、渐进损伤输出或确认极限点证据不完整的结果只保留在求解记录中，不占案例号。批量建库使用 `--record-task` 时记录 `TASK_N` 台账；GUI 会话同时保留 `RUN_…`、`TASK_N`、`TMP_N` 追踪。
@@ -187,4 +224,4 @@ CS_LLM 的 FEM-ready 候选通过 `core/fem_candidate_transfer.py` 导入。导�
 
 默认损伤分析使用 `abaqus/subroutines/zhangusdfld.for`，由 `abaqus/wangge.py` 接收候选 JSON 并进入参数化建模与求解。子程序以三个不可逆状态变量控制横向、剪切和纤维刚度退化，强度参数来自当前候选材料，不是固定的材料常数。它与服务/目标压力校核使用的二维 Hashin 起始判据分别记录，不能视为同一个损伤准则。模型范围、退化规律和容量确认条件见 [有限元求解](docs/有限元求解.md)。
 
-`config/app_config.yaml` 的 `abaqus.user_subroutine` 和 `abaqus.use_user_subroutine` 控制损伤模型。Windows 求解子进程从可用的 `ifort/link` 或 `ONEAPI_ROOT/setvars.bat` 加载 Intel Fortran 与 MSVC；GUI 主线程和系统环境不被改写。每个作业目录保存子程序、候选材料强度 include 文件及其哈希。编译或链接失败会明确报告，不通过调整几何重试掩盖环境问题。未找到 ABAQUS 命令时返回带诊断信息的失败结果，不伪造有限元通过。
+`config/app_config.yaml` 的 `abaqus.user_subroutine` 和 `abaqus.use_user_subroutine` 控制损伤模型。Windows 求解子进程从可用的 `ifort/link`、`ONEAPI_ROOT` 或 `IFORT_COMPILER<版本号>` 安装配置加载 Intel Fortran 与 MSVC；GUI 主线程和系统环境不被改写。每个作业目录保存子程序、候选材料强度 include 文件及其哈希。编译或链接失败会明确报告，不通过调整几何重试掩盖环境问题。未找到 ABAQUS 命令时返回带诊断信息的失败结果，不伪造有限元通过。

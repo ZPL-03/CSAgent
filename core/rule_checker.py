@@ -2,12 +2,11 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import math
 from typing import Any, Dict, List
 
-from core.config_loader import load_param_ranges
-from abaqus.cylindrical_geometry import shell_radii
+from abaqus.cylindrical_geometry import radius_reference, shell_radii
+from core.layup_parameters import TEMPLATE_ANGLE_FIELDS, uses_task_angles
 from core.pressure_hull_profile import (
     load_param_ranges_for_type,
     normalize_layup,
@@ -15,22 +14,15 @@ from core.pressure_hull_profile import (
     rule_check_param_keys,
     solver_safe_window_keys,
     sequence_is_balanced,
+    sequence_is_symmetric,
 )
-
-
-@dataclass
-class RuleCheckResult:
-    is_valid: bool
-    errors: List[str]
-    suggestions: List[str]
-    details: Dict[str, bool]
+from core.task_contract import candidate_constraints, normalize_boundary_conditions, normalize_load_conditions, task_geometry_bounds
 
 
 class RuleChecker:
     """执行参数域内的几何、缺陷和铺层约束校验。"""
 
-    def __init__(self) -> None:
-        self.param_ranges = load_param_ranges()
+    MIN_PLY_COUNT = 16
 
     def _check_range(
         self,
@@ -60,6 +52,7 @@ class RuleChecker:
         candidate: Dict[str, Any],
         strict_solver_window: bool = False,
         hull_type: str | None = None,
+        task: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
         geometry = candidate.get("geometry", {})
         errors: List[str] = []
@@ -79,7 +72,35 @@ class RuleChecker:
 
         htype = resolve_hull_type(hull_type or candidate.get("hull_type"))
         type_ranges = load_param_ranges_for_type(htype)
+        active_task = task if task is not None else candidate.get("task_constraints")
+        constraints = candidate_constraints(active_task) if active_task is not None else None
+        if constraints is not None:
+            try:
+                type_ranges = task_geometry_bounds(constraints, htype)
+            except ValueError as exc:
+                errors.append(str(exc))
+            details["task_context_ok"] = True
+            comparisons = {
+                "hull_type": (candidate.get("hull_type"), constraints["hull_type"]),
+                "load_conditions": (normalize_load_conditions(candidate.get("load_conditions")), constraints["load_conditions"]),
+                "boundary_conditions": (normalize_boundary_conditions(candidate.get("boundary_conditions"))["type"], constraints["boundary_conditions"]["type"]),
+                "design_targets": ((candidate.get("design_targets") or {}).get("ultimate_pressure_min_MPa"), constraints["design_targets"]["ultimate_pressure_min_MPa"]),
+            }
+            for key, (actual, expected) in comparisons.items():
+                if key in candidate and actual != expected:
+                    errors.append(f"候选 {key} 与任务不一致")
+                    details["task_context_ok"] = False
+            if radius_reference(geometry) != constraints["radius_reference"]:
+                errors.append("候选半径基准与任务不一致")
+            material = constraints["material_system"]
+            if material.get("is_user_specified") and any(
+                (candidate.get("material_system") or {}).get(key) != value
+                for key, value in material.items() if key != "is_user_specified"
+            ):
+                errors.append("候选材料与任务固定材料不一致")
         for key in rule_check_param_keys(htype):
+            if uses_task_angles(candidate.get("layup")) and key in TEMPLATE_ANGLE_FIELDS:
+                continue
             self._check_range(key, float(geometry.get(key, 0.0)), errors, details, type_ranges)
 
         length = float(geometry.get("length_mm", 0.0))
@@ -104,18 +125,31 @@ class RuleChecker:
 
         angles = [float(angle) for angle in layup.get("angles_deg", [])]
         details["layup_defined"] = bool(angles)
-        details["ply_count_ok"] = int(layup.get("ply_count", 0) or 0) >= 16
+        details["ply_count_ok"] = int(layup.get("ply_count", 0) or 0) >= self.MIN_PLY_COUNT
         details["balanced"] = bool(angles) and sequence_is_balanced(angles)
+        details["symmetric"] = bool(angles) and sequence_is_symmetric(angles)
+        layup_constraints = constraints["layup_constraints"] if constraints is not None else {"balanced": True}
         details["angle_range_ok"] = all(abs(angle) <= 90.0 for angle in angles)
         if not details["layup_defined"]:
             errors.append("铺层定义为空")
             suggestions.append("使用 [90_4/(±alpha/±beta)_8/90_4] 或同等格式")
         if not details["ply_count_ok"]:
             errors.append("铺层层数低于当前耐压壳基准建模下限")
-            suggestions.append("至少使用 16 层以上铺层")
-        if not details["balanced"]:
+            suggestions.append(f"至少使用 {self.MIN_PLY_COUNT} 层铺层")
+        if layup_constraints.get("balanced") and not details["balanced"]:
             errors.append("铺层中正负角层数不相等")
             suggestions.append("保持 ±α 与 ±β 平衡铺设")
+        if layup_constraints.get("symmetric") and not details["symmetric"]:
+            errors.append("铺层不满足当前任务的中面对称约束")
+        allowed = layup_constraints.get("allowed_angles") or []
+        details["allowed_angles_ok"] = not allowed or all(angle in allowed for angle in angles)
+        if not details["allowed_angles_ok"]:
+            errors.append("物理层序含有任务允许集合之外的角度")
+        minimum = layup_constraints.get("min_ratio_per_angle", 0.0)
+        ratio_angles = set(allowed or angles)
+        details["angle_ratios_ok"] = bool(angles) and all(angles.count(angle) / len(angles) >= minimum for angle in ratio_angles)
+        if not details["angle_ratios_ok"]:
+            errors.append("物理层序不满足任务的各角度最小比例")
         if not details["angle_range_ok"]:
             errors.append("铺层角超出 ±90° 范围")
             suggestions.append("将铺层角控制在 0-90° 的工程可制造区间")

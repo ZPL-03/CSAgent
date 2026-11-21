@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from typing import Any, Dict, Iterable, List
 
 from core.config_loader import load_app_config
+from core.layup_parameters import active_geometry, uses_task_angles
+from core.display import format_parameter
 from core.fem_result_semantics import is_passed_design_check, verified_capacity_pressure
 from core.pressure_hull_profile import describe_geometry_text
 from core.task_contract import (
@@ -64,12 +66,14 @@ def case_record_to_search_text(record: Dict[str, Any]) -> str:
     layup = design.get("layup", {}) if isinstance(design.get("layup"), dict) else {}
     material = _material_name(design) or _material_name(task)
     hull_type = design.get("hull_type") or task.get("hull_type", "CYLINDRICAL")
-    geometry_text = describe_geometry_text(hull_type, geometry, layup)
+    geometry_text = (", ".join(f"{key}={format_parameter(key, value)}" for key, value in active_geometry(design).items())
+                     if uses_task_angles(layup) else describe_geometry_text(hull_type, geometry, layup))
     layup_text = (
         f"{layup.get('skin_layup') or layup.get('layup', '')}; "
-        f"ply_count={layup.get('ply_count', '')}; "
-        f"alpha={layup.get('alpha_deg', '')}; beta={layup.get('beta_deg', '')}"
+        f"ply_count={layup.get('ply_count', '')}"
     )
+    if not uses_task_angles(layup):
+        layup_text += f"; alpha={layup.get('alpha_deg', '')}; beta={layup.get('beta_deg', '')}"
     result_text = (
         f"status={results.get('status', '')}; "
         f"verdict={results.get('verdict') or record.get('verdict', '')}; "

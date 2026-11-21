@@ -146,6 +146,7 @@ def test_import_uses_user_defect_and_keeps_historical_geometry(tmp_path, monkeyp
     first = response["result"]["candidates"][0]
     first["provenance"]["source_geometry"] = {"length_mm": 500, "radius_mm": 140, "imperfection_ratio": 0.002}
     result = response["result"]
+    result["request"]["geometry"] = {"length_mm": 600, "radius_mm": 150}
     result["design_fingerprint"] = transfer._fingerprint({key: result[key] for key in ("request", "source_table", "candidates")})
     source = tmp_path / "source.json"
     source.write_text(json.dumps(response), encoding="utf-8")
@@ -243,6 +244,7 @@ def test_validated_response_builds_machine_task_without_markdown_parsing(monkeyp
     assert task["task"]["load_conditions"]["external_pressure_MPa"] == 50.259081
     assert task["task"]["geometry_envelope"]["length_mm"] == [600.0, 600.0]
     assert task["task"]["candidate_generation_preferences"]["total_candidates"] == 2
+    assert task["task"]["layup_constraints"]["symmetric"] is True
 
 
 @pytest.mark.parametrize("mutation", ["source", "revision", "fingerprint", "numbering", "screening"])

@@ -115,11 +115,10 @@ def validate_hull_type(name: str | None) -> str:
 
 
 def resolve_hull_type(raw: str | None) -> str:
-    """宽松解析壳体类型。"""
-    try:
-        return validate_hull_type(raw)
-    except ValueError:
+    """解析壳体类型；缺省值为圆柱壳，显式未知类型直接拒绝。"""
+    if raw is None or not str(raw).strip():
         return "CYLINDRICAL"
+    return validate_hull_type(raw)
 
 
 def required_geometry_params(hull_type: str = "CYLINDRICAL") -> List[str]:

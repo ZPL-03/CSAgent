@@ -9,6 +9,7 @@ import re
 from typing import Any, Dict, Iterable
 
 from core.config_loader import load_material_db
+from core.layup_parameters import TEMPLATE_ANGLE_FIELDS, uses_task_angles
 from abaqus.cylindrical_geometry import shell_radii
 from core.pressure_hull_profile import sequence_is_balanced, sequence_is_symmetric
 
@@ -31,7 +32,10 @@ REVISION_FIELDS = (
 
 def design_revision_payload(candidate: Dict[str, Any]) -> Dict[str, Any]:
     """提取会改变有限元模型或判定目标的设计输入。"""
-    return {field: candidate.get(field) for field in REVISION_FIELDS}
+    payload = {field: candidate.get(field) for field in REVISION_FIELDS}
+    if "task_constraints" in candidate:
+        payload["task_constraints"] = candidate["task_constraints"]
+    return payload
 
 
 def compute_design_revision_id(candidate: Dict[str, Any]) -> str:
@@ -76,6 +80,11 @@ def _finite_positive(value: Any, field: str, issues: list[str], *, allow_zero: b
 def validate_fem_input(candidate: Dict[str, Any], material_db: Dict[str, Any] | None = None) -> list[str]:
     """返回当前圆柱壳求解输入中缺失或不一致的字段。"""
     issues: list[str] = []
+    if candidate.get("task_constraints") is not None:
+        from core.rule_checker import RuleChecker
+
+        check = RuleChecker().run(candidate, task=candidate["task_constraints"])
+        issues.extend("task_constraints: " + error for error in check["errors"])
     if candidate.get("hull_type") != "CYLINDRICAL":
         issues.append("hull_type")
 
@@ -84,6 +93,8 @@ def validate_fem_input(candidate: Dict[str, Any], material_db: Dict[str, Any] | 
         issues.append("geometry")
     else:
         for field in ("length_mm", "radius_mm", "thickness_mm", "alpha_deg", "beta_deg", "imperfection_ratio"):
+            if uses_task_angles(candidate.get("layup")) and field in TEMPLATE_ANGLE_FIELDS:
+                continue
             _finite_positive(geometry.get(field), f"geometry.{field}", issues)
         try:
             shell_radii(geometry)

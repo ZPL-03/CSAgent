@@ -66,6 +66,21 @@ def test_batch_and_single_inference_reject_missing_values(tmp_path):
         surrogate.candidate_to_features(_candidate(1), feature_order=["unsupported"])
 
 
+def test_surrogate_scope_rejects_non_cylindrical_candidate(tmp_path):
+    manager = surrogate.SurrogateModelManager(models_dir=tmp_path)
+    candidate = _candidate(1)
+    candidate["hull_type"] = "T_STIFFENED_PANEL"
+    with pytest.raises(ValueError, match="未知壳体类型"):
+        manager.formula_prediction(candidate)
+
+
+def test_task_parser_rejects_unsupported_structure_type():
+    from core.task_parser import TaskParser
+
+    with pytest.raises(ValueError, match="仅支持.*圆柱耐压壳"):
+        TaskParser().parse_instruction("T形加筋壁板在外压30 MPa下设计，生成2个候选，初筛保留1个")
+
+
 @pytest.mark.parametrize("payload", ["not json", "[]", '{"calibration_status":"invalid"}'])
 def test_invalid_calibration_is_not_silently_ignored(tmp_path, payload):
     manager = surrogate.SurrogateModelManager(models_dir=tmp_path)
@@ -161,6 +176,7 @@ def test_runtime_pressure_matches_fem_trained_linear_regression(tmp_path):
 
 def test_nonpositive_estimate_is_audited_and_not_selected(tmp_path):
     from core.surrogate_dataset import load_dataset, row_to_candidate
+    from core.doe_sampler import DOESampler
 
     frame, _ = load_dataset()
     invalid = row_to_candidate(frame.sort_values("ultimate_pressure_MPa").iloc[0])
@@ -168,15 +184,20 @@ def test_nonpositive_estimate_is_audited_and_not_selected(tmp_path):
     invalid["material_system"]["density_kg_per_m3"] = _candidate(1)["material_system"]["density_kg_per_m3"]
     agent = ScreenerAgent()
     agent.model_manager = surrogate.SurrogateModelManager(models_dir=tmp_path)
-    task = {"screening_preferences": {"top_k_candidates": 2}}
-    ranked = agent.rank_candidates(task, [invalid, _candidate(1)])
+    task = {"screening_preferences": {"top_k_candidates": 2}, "radius_reference": "inner",
+            "layup_constraints": {"symmetric": False, "allowed_angles": [], "min_ratio_per_angle": 0}}
+    positive = DOESampler().sample_candidates(task, 1)[0]
+    invalid["load_conditions"] = positive["load_conditions"]
+    invalid["boundary_conditions"] = positive["boundary_conditions"]
+    invalid["design_targets"] = positive["design_targets"]
+    ranked = agent.rank_candidates(task, [invalid, positive])
     rejected = next(candidate for candidate in ranked if candidate["candidate_id"] == "TMP_2")
     assert rejected["surrogate_ultimate_pressure_MPa"] < 0
     assert rejected["surrogate_prediction_status"] == "nonpositive"
     assert rejected["rank_score"] is None and rejected["screening_rank"] is None
     assert rejected["screening_selected"] is False
     assert len([candidate for candidate in ranked if candidate["screening_selected"]]) == 1
-    assert agent.run({"task": {"screening_preferences": {"top_k_candidates": 1}}, "candidates": [invalid]}) == []
+    assert agent.run({"task": task, "candidates": [invalid]}) == []
 
 
 def test_prediction_uses_accepted_validation_error_without_historical_floor(tmp_path):
@@ -189,13 +210,15 @@ def test_prediction_uses_accepted_validation_error_without_historical_floor(tmp_
 
 @pytest.mark.parametrize("validation_error", [None, 0.0, 6.5])
 def test_screening_rank_does_not_use_global_validation_error(tmp_path, monkeypatch, validation_error):
+    from core.doe_sampler import DOESampler
+
     agent = ScreenerAgent()
     agent.model_manager = surrogate.SurrogateModelManager(models_dir=tmp_path)
-    candidate = _candidate(1)
+    task = {"screening_preferences": {"top_k_candidates": 1}}
+    candidate = DOESampler().sample_candidates(task, 1)[0]
     prediction = agent.model_manager.predict_candidate_payload(candidate)
     prediction["uncertainty_MPa"] = validation_error
     monkeypatch.setattr(agent.model_manager, "predict_candidate_payload", lambda _: prediction)
-    task = {"screening_preferences": {"top_k_candidates": 1}}
     result = agent.rank_candidates(task, [candidate])[0]
     assert result["surrogate_uncertainty_MPa"] == validation_error
     assert result["rank_score"] == round(

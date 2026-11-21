@@ -1,6 +1,6 @@
 {
   "package": "csllm",
-  "generated_at": "2026-11-16T19:32:12.188939+00:00",
+  "generated_at": "2026-11-19T15:54:55.137856+00:00",
   "source_files": {
     "rag_chunks": "dataset/processed/rag/rag_chunks.jsonl",
     "rag_retrieval_index": "dataset/processed/rag/retrieval_index.sqlite",
@@ -12,13 +12,20 @@
     "kg_stats": "dataset/processed/kg/kg_stats.json"
   },
   "record_counts": {
-    "rag_chunks": 173228,
-    "relations": 250606,
-    "entities": 2219,
+    "rag_chunks": 155599,
+    "relations": 234200,
+    "entities": 2217,
     "sources": 1931
   },
   "schemas": {
     "rag_chunks": [
+      "content_quality_version",
+      "content_quality_issues",
+      "retrieval_eligible",
+      "evidence_kind",
+      "evidence_usage",
+      "applicability_context",
+      "table_evidence",
       "chunk_id",
       "chunk_fingerprint",
       "content_hash",
@@ -61,6 +68,9 @@
       "content_plain"
     ],
     "relations": [
+      "evidence_kind",
+      "evidence_usage",
+      "applicability_context",
       "source_type",
       "source",
       "relation",
@@ -100,50 +110,50 @@
   "files": [
     {
       "path": "runtime/rag_chunks.compact.jsonl.gz",
-      "bytes": 98616296,
-      "sha256": "a04f6139218947e7fb86a74f1476cc8fdf70c75d28cc6b53d15a624bd72a3469",
-      "records": 173228
+      "bytes": 88088965,
+      "sha256": "b2ea960854e0587e8b2619db6e29fed34f11855f99134e8bb74fe354008f5261",
+      "records": 155599
     },
     {
       "path": "runtime/relations.compact.jsonl.gz",
-      "bytes": 7101644,
-      "sha256": "c5ea0ae10ed2257fb9fc2056c52280bf810b14bcf59fd5a3568a9d00da2de3bc",
-      "records": 250606
+      "bytes": 21879014,
+      "sha256": "3653b82b08aa5471126d710e3fc184c8306c3660c02816830c952505a2deaed5",
+      "records": 234200
     },
     {
       "path": "runtime/retrieval_index.sqlite",
-      "bytes": 1164275712,
-      "sha256": "17ef8f80a16b9f405873c27ce26b7aad9a0cf2f91a851b070be01b2b02814192",
-      "records": 173228
+      "bytes": 1119555584,
+      "sha256": "9df5a7c78659b3e2b48cbcd9a1a32299d0d3be3d663118ac8740d5c3ea957874",
+      "records": 155599
     },
     {
       "path": "runtime/retrieval_embeddings.npy",
-      "bytes": 709542016,
-      "sha256": "43ae517adafb2f65030b1850fcbdb8d6d03130714fdf9c9fb6c5940707c9198f",
-      "records": 173228
+      "bytes": 637333632,
+      "sha256": "5e28dea3026711875f3a48a07524a9a10323a8f6519262c313e574999fe72713",
+      "records": 155599
     },
     {
       "path": "provenance/source_metadata.compact.jsonl.gz",
       "bytes": 257322,
-      "sha256": "b883e169883dc4adb92c90ff68fbda0fa6d65b79be000917340324bfca0af256",
+      "sha256": "92ceb6631d2ec9a1bae60d30c7ff5b0031e0f975bdc0c48911f99edfcdb6a25d",
       "records": 1931
     },
     {
       "path": "provenance/retrieval_evaluation.json",
-      "bytes": 239323,
-      "sha256": "15ab8bbedddb78342a0b723074b2d1dd494fe05395e0178b7ccbe2137808ea31",
+      "bytes": 239181,
+      "sha256": "d6522494d5e02465735744f64a7e0d413069bd7c923650ad80dd87bda2c68dd4",
       "records": null
     },
     {
       "path": "kg/entities.jsonl",
-      "bytes": 1709708,
-      "sha256": "6a475d967cd1cd4edbbc1366fbb2932f4d8d5298961c6cd64c506c1c4b858ff5",
-      "records": 2219
+      "bytes": 1651213,
+      "sha256": "681e63c2829ffedf558a07969d333497d63c3eaeda37d603904d0dcbecf5d26e",
+      "records": 2217
     },
     {
       "path": "kg/kg_stats.json",
-      "bytes": 10644,
-      "sha256": "0e6043ed43eae05e721424ded8a9113d3d9a048016c785c49509a39652465345",
+      "bytes": 10722,
+      "sha256": "43145d928845c6b567326b65fa57dcfbcefacd3485c388a205e1ccb0c66749f7",
       "records": null
     },
     {
@@ -154,8 +164,8 @@
     },
     {
       "path": "provenance/file_manifest.jsonl",
-      "bytes": 1349,
-      "sha256": "a328f0b3458fda5e918428897f0715efcce2798a510b4d8acc95fa7b39740cda",
+      "bytes": 1350,
+      "sha256": "f8797cfd0514e7f284a64245587c2878a9527c68957e118d99bc0a2906801ce4",
       "records": 9
     }
   ]

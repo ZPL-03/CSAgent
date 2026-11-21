@@ -16,6 +16,7 @@ except Exception:  # pragma: no cover
 
 from core.paths import resolve_project_path
 from core.display import format_number
+from core.layup_parameters import uses_task_angles
 from core.pressure_hull_profile import build_pressure_hull_meshes
 
 
@@ -274,6 +275,8 @@ def render_candidate_png_bytes(
                     alpha=format_number(alpha, None),
                     beta=format_number(beta, None),
                 )
+                if uses_task_angles(candidate.get("layup")):
+                    subtitle = material + " | " + str(candidate["layup"].get("ply_count", "")) + " plies"
                 figure.text(0.035, 0.94, title, color=text_color, fontsize=10, weight="bold", **text_props)
                 figure.text(0.035, 0.885, subtitle, color=muted, fontsize=8, **text_props)
             buffer = io.BytesIO()
@@ -343,6 +346,8 @@ def render_candidate_png_bytes(
         alpha=format_number(alpha, None),
         beta=format_number(beta, None),
     )
+    if uses_task_angles(candidate.get("layup")):
+        subtitle = material + " | " + str(candidate["layup"].get("ply_count", "")) + " plies"
     axis.set_title(f"{title}\n{subtitle}", fontsize=11, color="#111827", **text_props)
     axis.set_xlabel(tr("render.x_axis", language=language), **text_props)
     axis.set_ylabel(tr("render.y_axis", language=language), **text_props)

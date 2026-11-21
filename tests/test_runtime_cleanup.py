@@ -24,11 +24,17 @@ def test_cleanup_preserves_case_referenced_solver_artifacts(monkeypatch, tmp_pat
         clean_artifacts.unreferenced_candidate_paths([" C7 "])
 
 
-def test_cleanup_rejects_project_root_and_outside_path(tmp_path):
+def test_cleanup_rejects_project_root_and_outside_path(monkeypatch, tmp_path):
+    root = tmp_path / "project"
+    outside = tmp_path / "outside"
+    root.mkdir()
+    outside.mkdir()
+    monkeypatch.setattr(clean_artifacts, "ROOT", root)
     with pytest.raises(ValueError, match="越界"):
-        clean_artifacts.remove_path(tmp_path)
+        clean_artifacts.remove_path(outside)
     with pytest.raises(ValueError, match="越界"):
-        clean_artifacts.remove_path(clean_artifacts.ROOT)
+        clean_artifacts.remove_path(root)
+    assert outside.is_dir() and root.is_dir()
 
 
 def test_cleanup_preserves_locked_solver_directory(monkeypatch, tmp_path):
