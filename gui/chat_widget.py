@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from PyQt6.QtCore import QRect, Qt, QTimer
+from PyQt6.QtCore import QEvent, QRect, Qt, QTimer
 from PyQt6.QtGui import QFont, QFontMetrics
 from PyQt6.QtWidgets import QFrame, QHBoxLayout, QLabel, QScrollArea, QSizePolicy, QVBoxLayout, QWidget
 
@@ -21,6 +21,7 @@ class ChatWidget(QWidget):
         self._last_render_width = 0
         self._resize_render_pending = False
         self._scroll_pending = False
+        self._follow_latest = True
 
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
@@ -32,6 +33,12 @@ class ChatWidget(QWidget):
         self.content_layout.setContentsMargins(16, 3, 16, 3)
         self.content_layout.setSpacing(3)
         self.scroll_area.setWidget(self.content)
+        scrollbar = self.scroll_area.verticalScrollBar()
+        scrollbar.actionTriggered.connect(self._user_scroll_action)
+        scrollbar.sliderMoved.connect(self._user_scroll_position)
+        scrollbar.rangeChanged.connect(self._scroll_range_changed)
+        self.scroll_area.viewport().installEventFilter(self)
+        self.scroll_area.installEventFilter(self)
 
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
@@ -59,6 +66,7 @@ class ChatWidget(QWidget):
 
     def clear(self) -> None:
         self._messages.clear()
+        self._follow_latest = True
         self._render_messages()
 
     def add_message(self, sender: str, message: str) -> None:
@@ -159,11 +167,35 @@ class ChatWidget(QWidget):
         self.content_layout.addStretch(1)
 
     def _should_follow_latest(self) -> bool:
+        return self._follow_latest
+
+    def _user_scroll_position(self, position: int) -> None:
         scrollbar = self.scroll_area.verticalScrollBar()
-        return scrollbar.maximum() <= 0 or scrollbar.value() >= scrollbar.maximum() - 24
+        self._follow_latest = position >= scrollbar.maximum() - 24
+
+    def _user_scroll_action(self, _action: int) -> None:
+        self._user_scroll_position(self.scroll_area.verticalScrollBar().sliderPosition())
+
+    def _scroll_range_changed(self, _minimum: int, _maximum: int) -> None:
+        # 消息换行和页面切换会延后改变范围，不把几何变化当成人工向上滚动。
+        if self._follow_latest:
+            self._queue_scroll_to_bottom()
+
+    def eventFilter(self, watched, event) -> bool:
+        if watched in {self.scroll_area, self.scroll_area.viewport()} and event.type() in {
+            QEvent.Type.Wheel, QEvent.Type.KeyPress,
+        }:
+            self._follow_latest = False
+            QTimer.singleShot(0, self._refresh_user_scroll_position)
+        return super().eventFilter(watched, event)
+
+    def _refresh_user_scroll_position(self) -> None:
+        self._user_scroll_position(self.scroll_area.verticalScrollBar().value())
 
     def _scroll_to_bottom(self) -> None:
         self._scroll_pending = False
+        if not self._follow_latest:
+            return
         scrollbar = self.scroll_area.verticalScrollBar()
         scrollbar.setValue(scrollbar.maximum())
 

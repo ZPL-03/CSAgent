@@ -234,3 +234,41 @@ def test_replay_does_not_create_solver_or_rebind_results_to_generated_candidates
     assert captured["candidates"][0]["geometry"]["thickness_mm"] != 12.345
     assert source_path.read_bytes() == source_bytes
     assert audit["source_workflow_sha256"] == hashlib.sha256(source_bytes).hexdigest()
+
+
+@pytest.mark.parametrize("quantities_in_instruction", [True, False])
+def test_model_validation_uses_conversation_state_and_persistent_queue(monkeypatch, tmp_path, quantities_in_instruction):
+    from scripts.validate_model_workflow import run_conversation_workflow
+    from tests.test_natural_language_acceptance import _patch_fem_boundary
+    from workflow.event_store import WorkflowEventStore
+    from workflow.simulation_queue import SimulationJobQueue
+
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    orchestrator = OrchestratorAgent()
+    _patch_fem_boundary(monkeypatch, orchestrator, tmp_path)
+    instruction = "工作压力30MPa，长度500mm，半径100mm"
+    if quantities_in_instruction:
+        instruction += "，生成4个候选，初筛保留1个"
+    result = run_conversation_workflow(orchestrator, instruction, tmp_path, {
+        "candidate_count": "4", "screen_count": "1",
+    })
+    validation = result["runtime_validation"]
+    assert validation["stage"] == "completed"
+    assert validation["candidate_count"] == 4 and validation["screened_count"] == 1
+    assert validation["result_count"] == 1 and validation["knowledge_update_count"] == 1
+    store = WorkflowEventStore(tmp_path / "workflow_runtime.sqlite3")
+    snapshot = store.load_snapshot(validation["run_id"])
+    assert snapshot["stage"] == "completed"
+    jobs = SimulationJobQueue(store.db_path).list_jobs(validation["run_id"])
+    assert len(jobs) == 1 and jobs[0]["status"] == "success"
+    assert jobs[0]["formal_candidate_id"] == result["results"][0]["candidate_id"]
+    assert jobs[0]["session_candidate_id"] == result["results"][0]["session_candidate_id"]
+
+
+@pytest.mark.parametrize("reply", [None, "-1", "abc"])
+def test_model_validation_does_not_guess_missing_quantity(monkeypatch, tmp_path, reply):
+    from scripts.validate_model_workflow import run_conversation_workflow
+
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    with pytest.raises(ValueError, match="candidate_count"):
+        run_conversation_workflow(OrchestratorAgent(), "工作压力30MPa", tmp_path, {"candidate_count": reply})

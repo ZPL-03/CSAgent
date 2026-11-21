@@ -107,6 +107,51 @@ def replay_models(source_path: Path, backend, output: Path) -> dict:
     return audit
 
 
+def run_conversation_workflow(orchestrator, instruction: str, output: Path, quantity_replies: dict) -> dict:
+    """通过桌面端共用的确认状态图执行，校验完成快照及队列事件。"""
+    from core.conversation_flow import ConversationFlowController
+    from scripts.run_natural_language_acceptance import _validate_completed_state
+    from workflow.event_store import WorkflowEventStore
+
+    events = []
+    store = WorkflowEventStore(output / "workflow_runtime.sqlite3")
+    controller = ConversationFlowController(
+        orchestrator,
+        event_callback=lambda kind, message, payload: events.append((kind, message, payload)),
+        event_store=store,
+    )
+    state = controller.start(instruction)
+    while state.pending_confirmation:
+        confirmation = state.pending_confirmation
+        if confirmation in {"candidate_count", "screen_count"}:
+            reply = quantity_replies.get(confirmation)
+            if reply is None:
+                raise ValueError(f"需要提供 {confirmation} 的用户回答")
+            state = controller.provide_quantity(state, str(reply))
+            if state.pending_confirmation == confirmation:
+                raise ValueError(f"{confirmation} 的用户回答无效：{reply}")
+        elif confirmation in {"screen_candidates", "fem_evaluation", "export_report"}:
+            state = controller.continue_after_confirmation(state, True)
+        else:
+            raise ValueError(f"未知确认节点：{confirmation}")
+    summary = _validate_completed_state(state, instruction)
+    snapshot = store.load_snapshot(state.workflow_run_id)
+    if snapshot.get("stage") != "completed" or store.list_runs(limit=1)[0]["status"] != "completed":
+        raise ValueError("工作流台账未记录完成状态")
+    runtime_types = {
+        payload.get("runtime_event_type") for kind, _, payload in events if kind == "workflow_runtime_event"
+    }
+    required = {"node_started", "tool_started", "tool_completed", "simulation_job_queued", "simulation_job_completed"}
+    if missing := required - runtime_types:
+        raise ValueError(f"缺少运行事件：{sorted(missing)}")
+    return {
+        "task": state.task, "candidates": state.candidates,
+        "top_candidates": state.evaluated_candidates, "fem_candidates": snapshot.get("fem_designs", []),
+        "results": state.results, "knowledge_updates": state.knowledge_updates, "report": state.report,
+        "runtime_validation": {**summary, "event_count": len(events), "event_types": sorted(runtime_types)},
+    }
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--backend", choices=("primary", "fallback"), required=True)
@@ -114,6 +159,8 @@ def main(argv=None) -> int:
     mode.add_argument("--run-real-abaqus", action="store_true", help="明确允许真实 Abaqus 求解。")
     mode.add_argument("--replay-workflow", type=Path, help="复用 workflow.json，仅执行模型候选生成和报告，不运行 Abaqus。")
     parser.add_argument("--instruction", default="外压30MPa，长度500mm，半径100mm，缺陷比0.008，生成2个候选，初筛保留1个")
+    parser.add_argument("--candidate-count-reply", help="任务未指定候选数量时的用户回答。")
+    parser.add_argument("--screen-count-reply", help="任务未指定预筛数量时的用户回答。")
     args = parser.parse_args(argv)
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     mode_name = "model_replay" if args.replay_workflow else "full_workflow"
@@ -153,16 +200,20 @@ def main(argv=None) -> int:
             orchestrator = OrchestratorAgent()
             orchestrator.candidate_gen.llm_backend = backend
             orchestrator.report_gen.llm_backend = backend
-            report["solver_executed"] = True
-            result = orchestrator.run(args.instruction)
+            result = run_conversation_workflow(orchestrator, args.instruction, output, {
+                "candidate_count": args.candidate_count_reply, "screen_count": args.screen_count_reply,
+            })
             write_json(output / "workflow.json", result)
             report.update(assess_workflow(result))
+            report["runtime_validation"] = result["runtime_validation"]
     except Exception as exc:
         report.update(status="failed", flow_status="not_run" if args.replay_workflow else "failed", model_report_status="not_completed",
                       error=backend._sanitize_trace_error(exc) if backend else type(exc).__name__)
         if orchestrator is not None:
             report["generation_audit"] = orchestrator.candidate_gen.last_generation_audit
     finally:
+        if args.run_real_abaqus:
+            report["solver_executed"] = any((output / "data/abaqus_runs").glob("C*/*.odb"))
         report["finished_at"] = datetime.now(timezone.utc).isoformat()
         report["llm_calls"] = backend.call_history if backend else []
         write_json(output / "validation.json", report)

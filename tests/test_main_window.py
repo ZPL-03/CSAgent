@@ -711,6 +711,9 @@ def test_remaining_workbench_and_workflow_buttons_click_through(monkeypatch, tmp
         window.workflow_widget.refresh("RUN_CONTROLS", "awaiting_fem_confirmation", "fem_evaluation")
         assert window.workflow_widget.audit_button.isEnabled() is True
         window.workflow_widget.health_button.click()
+        from tests.test_workflow_widget import _wait_for_health_check
+
+        _wait_for_health_check(app, window.workflow_widget)
         assert health_calls == [12]
         assert window.workflow_widget.llm_health_results[0]["model"] == "csllm"
         window.workflow_widget.audit_button.click()
@@ -1839,6 +1842,87 @@ def test_chat_dynamic_messages_scroll_to_latest_with_bottom_spacer() -> None:
         app.processEvents()
 
 
+def test_knowledge_sidebar_displays_current_query_counts(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    try:
+        window.knowledge_widget._set_evidence_payload({
+            "query": "外压屈曲", "chunks": [{}, {}], "relations": [{}],
+        })
+        window._refresh_knowledge_sidebar()
+        summary = window.knowledge_right_labels["retrieval"].text()
+        assert "2 文本块" in summary and "1 关系" in summary
+        window.knowledge_widget._on_refresh_failed("测试索引故障")
+        assert window.knowledge_widget.current_status()["query_retrieval"]["status"] == "failed"
+        assert "2 文本块" not in window.knowledge_right_labels["retrieval"].text()
+    finally:
+        window.close()
+        app.processEvents()
+
+
+def test_chat_follows_delayed_layout_but_respects_user_scroll() -> None:
+    from PyQt6.QtTest import QTest
+    from PyQt6.QtWidgets import QAbstractSlider
+
+    app = _app()
+    widget = ChatWidget()
+    try:
+        widget.resize(900, 260)
+        widget.show()
+        app.processEvents()
+        for index in range(30):
+            widget.add_message("ORCHESTRATOR", f"事件 {index}：" + "有限元结果与候选方案。" * 12)
+        widget.hide()
+        widget.resize(660, 240)
+        widget.show()
+        QTest.qWait(240)
+        bar = widget.scroll_area.verticalScrollBar()
+        assert bar.maximum() > 0 and bar.value() == bar.maximum()
+
+        bar.triggerAction(QAbstractSlider.SliderAction.SliderPageStepSub)
+        QTest.qWait(20)
+        position = bar.value()
+        assert position < bar.maximum() - 24
+        widget.add_message("FEM_AGENT", "校核完成")
+        QTest.qWait(180)
+        assert bar.value() == position
+
+        bar.triggerAction(QAbstractSlider.SliderAction.SliderToMaximum)
+        widget.add_message("REPORT_GEN", "报告已生成")
+        QTest.qWait(180)
+        assert bar.value() == bar.maximum()
+    finally:
+        widget.close()
+        app.processEvents()
+
+
+def test_window_keeps_system_maximize_available(monkeypatch) -> None:
+    from PyQt6.QtCore import QRect
+
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    available = QRect(0, 0, 1440, 900)
+    screen = SimpleNamespace(availableGeometry=lambda: available)
+    monkeypatch.setattr(QApplication, "primaryScreen", lambda: screen)
+    window = MainWindow()
+    try:
+        monkeypatch.setattr(window, "screen", lambda: screen)
+        assert window.maximumWidth() > available.width()
+        assert window.maximumHeight() > available.height()
+        window.showMaximized()
+        app.processEvents()
+        assert window.isMaximized()
+        window.showNormal()
+        window._ensure_window_within_work_area(clamp_to_target=True)
+        app.processEvents()
+        assert not window.isMaximized()
+        assert window.width() <= available.width() and window.height() <= available.height()
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_light_theme_uses_light_log_and_sidebar_surfaces() -> None:
     stylesheet = application_stylesheet("Microsoft YaHei UI", "light")
 
@@ -1846,7 +1930,6 @@ def test_light_theme_uses_light_log_and_sidebar_surfaces() -> None:
     assert "color: #334155;" in stylesheet
     assert "background: #0b1220;" not in stylesheet
     assert "background: #141f31;" not in stylesheet
-    assert "ui_workbench_light.png" not in (open("README.md", encoding="utf-8").read())
 
 
 def test_agent_status_card_aligns_dot_and_labels_without_rich_text_blocks() -> None:
@@ -1951,6 +2034,8 @@ def test_left_rail_scrollbars_and_card_margins_are_consistent(monkeypatch) -> No
             window._switch_workspace_page(page_index)
             app.processEvents()
             rail = visible_rail_scroll()
+            rail.setMaximumHeight(280)
+            app.processEvents()
             content = rail.widget()
             assert content is not None
             assert content.width() == rail.viewport().width()

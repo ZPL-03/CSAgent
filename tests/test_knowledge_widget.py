@@ -179,6 +179,32 @@ def test_knowledge_widget_renders_runtime_pipeline_and_evidence(monkeypatch, tmp
         app.processEvents()
 
 
+def test_knowledge_query_status_is_independent_of_ingestion_validation(monkeypatch, tmp_path) -> None:
+    global _DOCS_PATH
+    _DOCS_PATH = tmp_path / "documents.jsonl"
+    _DOCS_PATH.write_text("", encoding="utf-8")
+    monkeypatch.setattr("gui.knowledge_widget.DomainKnowledgeBase", FakeKnowledge)
+    monkeypatch.setattr("gui.knowledge_widget.KnowledgeIngestionService", FakeIngestionService)
+    app = _app()
+    widget = KnowledgeWidget()
+    try:
+        widget.refresh(query_text="外压屈曲")
+        status = widget.current_status()
+        verification = status["last_retrieval_verification"]
+        assert status["query_retrieval"] == {"status": "success", "chunk_count": 1, "relation_count": 1}
+        widget._on_refresh_failed("索引读取失败")
+        status = widget.current_status()
+        assert status["query_retrieval"]["status"] == "failed"
+        assert status["last_retrieval_verification"] == verification
+        widget._set_evidence_payload({"query": "无匹配", "chunks": [], "relations": []})
+        assert widget.current_status()["query_retrieval"] == {"status": "success", "chunk_count": 0, "relation_count": 0}
+        widget.refresh(load_evidence=False)
+        assert widget.current_status()["query_retrieval"]["status"] == "idle"
+    finally:
+        widget.close()
+        app.processEvents()
+
+
 def test_knowledge_widget_graph_search_filters_visible_graph(monkeypatch, tmp_path) -> None:
     global _DOCS_PATH
     _DOCS_PATH = tmp_path / "documents.jsonl"

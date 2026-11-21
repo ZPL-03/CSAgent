@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-import importlib.util
-from importlib.machinery import ModuleSpec
-import sys
 from copy import deepcopy
-from pathlib import Path
 
 import pytest
 
@@ -12,6 +8,7 @@ from abaqus.cylindrical_geometry import radius_reference
 from abaqus.runtime_build_pressure_hull import layup_angles, material_payload, validate_runtime_candidate
 from agents.fem_agent import FEMAgent
 from agents.orchestrator import OrchestratorAgent
+from core.config_loader import load_material_db
 from core.fem_input_contract import (
     FEMInputValidationError,
     attach_design_revision,
@@ -24,39 +21,37 @@ from core.task_contract import normalize_task_payload
 from core.task_parser import TaskParser
 
 
-CS_LLM_ENGINE = (
-    Path(__file__).resolve().parents[2]
-    / "CS_LLM"
-    / "scripts"
-    / "fem_ready_design_engine.py"
-)
-
-
-def _load_csllm_engine():
-    package_name = "_csllm_contract_scripts"
-    if package_name not in sys.modules:
-        spec = ModuleSpec(package_name, loader=None, is_package=True)
-        spec.submodule_search_locations = [str(CS_LLM_ENGINE.parent)]
-        sys.modules[package_name] = importlib.util.module_from_spec(spec)
-    return importlib.import_module(f"{package_name}.fem_ready_design_engine")
-
-
 def _generated_candidate() -> dict:
-    engine = _load_csllm_engine()
-    result = engine.generate_fem_ready_design(
-        {
-            "schema_version": "2",
-            "generation_mode": "fem_ready_cylindrical_shell",
-            "candidate_count": 1,
-            "geometry": {"length_mm": 600, "radius_mm": 150, "imperfection_ratio": 0.008},
-            "load_conditions": {"service_depth_m": 5000},
-            "boundary_conditions": {"type": "FLANGE_CONSTRAINED"},
-        }
-    )
-    return result["candidates"][0]
+    """合同样本只依赖本项目材料库，逐层输入不依赖相邻项目的代码。"""
+    angles = [90.0] * 4 + [25.0, -25.0, 80.0, -80.0] * 8 + [90.0] * 4
+    text = "[" + "/".join(f"{angle:g}" for angle in angles) + "]"
+    return attach_design_revision({
+        "candidate_id": "TMP_1",
+        "display_name": "TMP_1",
+        "source": "CASE_TRANSFER",
+        "hull_type": "CYLINDRICAL",
+        "geometry": {
+            "length_mm": 600.0, "radius_mm": 150.0, "radius_reference": "inner",
+            "thickness_mm": 20.0, "alpha_deg": 25.0, "beta_deg": 80.0,
+            "imperfection_ratio": 0.008,
+        },
+        "layup": {
+            "template_name": "BASE_90_AB", "layup": text, "skin_layup": text,
+            "angles_deg": angles, "ply_count": 40, "ply_thickness_mm": 0.5,
+            "balanced": True, "symmetric": False,
+        },
+        "material_system": {
+            **load_material_db()["M40J_TDE_85"],
+            "name": "M40J/TDE-85", "material_key": "M40J_TDE_85",
+        },
+        "load_conditions": {"type": "external_pressure", "external_pressure_MPa": 50.259081},
+        "boundary_conditions": {"type": "FLANGE_CONSTRAINED"},
+        "design_targets": {"ultimate_pressure_min_MPa": 50.259081},
+        "analysis": {"analysis_type": "linear_buckling_plus_first_mode_imperfection_riks"},
+    })
 
 
-def test_csllm_candidate_satisfies_csdm_schema_and_fem_contract() -> None:
+def test_cylindrical_candidate_satisfies_schema_and_fem_contract() -> None:
     candidate = _generated_candidate()
 
     validate_or_raise("candidate.schema.json", candidate)

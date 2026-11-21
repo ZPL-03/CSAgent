@@ -6,7 +6,7 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import QObject, QRunnable, Qt, QThreadPool, pyqtSignal
 from PyQt6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QTextBrowser, QVBoxLayout, QWidget
 
 from core.llm_status import configured_llm_backends, probe_llm_backends
@@ -17,6 +17,28 @@ from workflow.agent_contracts import list_agent_contracts
 from workflow.event_store import WorkflowEventStore
 from workflow.run_audit import write_run_audit
 from workflow.simulation_queue import SimulationJobQueue
+
+
+class LLMHealthSignals(QObject):
+    completed = pyqtSignal(list)
+    failed = pyqtSignal(str)
+
+
+class LLMHealthTask(QRunnable):
+    """在线探测只在工作线程运行，结果通过信号交给界面。"""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.signals = LLMHealthSignals()
+
+    def run(self) -> None:
+        try:
+            results = probe_llm_backends(timeout_seconds=12)
+        except Exception as exc:
+            # 配置错误也必须呈现；异常正文可能含连接信息，不直接显示。
+            self.signals.failed.emit(type(exc).__name__)
+        else:
+            self.signals.completed.emit(results)
 
 
 class WorkflowWidget(QWidget):
@@ -58,6 +80,7 @@ class WorkflowWidget(QWidget):
         self.audit_output_dir = audit_output_dir or RESULTS_DIR
         self.theme = "dark"
         self.llm_health_results: list[dict[str, Any]] = []
+        self._health_task: LLMHealthTask | None = None
         self._last_refresh_args: tuple[str | None, str, str | None] = (None, "", None)
         self.health_button = QPushButton("检测 LLM 后端")
         self.audit_button = QPushButton("导出运行审计")
@@ -105,24 +128,32 @@ class WorkflowWidget(QWidget):
         )
 
     def _run_llm_health_check(self) -> None:
+        if self._health_task is not None:
+            return
         self.health_button.setEnabled(False)
         self.health_button.setText("正在检测 LLM 后端...")
-        try:
-            self.llm_health_results = probe_llm_backends(timeout_seconds=12)
-            workflow_run_id, stage, pending = self._last_refresh_args
-            if workflow_run_id:
-                self.refresh(workflow_run_id, stage, pending)
-            else:
-                self.browser.setHtml(
-                    self._page_html(
-                        self._initial_dag_html()
-                        + self._llm_status_html()
-                        + self._agent_contracts_html()
-                    )
-                )
-        finally:
-            self.health_button.setText("检测 LLM 后端")
-            self.health_button.setEnabled(True)
+        self._health_task = LLMHealthTask()
+        self._health_task.signals.completed.connect(self._on_llm_health_results)
+        self._health_task.signals.failed.connect(self._on_llm_health_failed)
+        QThreadPool.globalInstance().start(self._health_task)
+
+    def _on_llm_health_results(self, results: list) -> None:
+        self.llm_health_results = results
+        workflow_run_id, stage, pending = self._last_refresh_args
+        if workflow_run_id:
+            self.refresh(workflow_run_id, stage, pending)
+        else:
+            self.reset_view()
+        self._finish_llm_health_check()
+
+    def _on_llm_health_failed(self, error_type: str) -> None:
+        self._on_llm_health_results([])
+        self.audit_status_label.setText(f"LLM 后端检测失败：{error_type}")
+
+    def _finish_llm_health_check(self) -> None:
+        self._health_task = None
+        self.health_button.setText("检测 LLM 后端")
+        self.health_button.setEnabled(True)
 
     def _export_run_audit(self) -> None:
         workflow_run_id, stage, pending = self._last_refresh_args

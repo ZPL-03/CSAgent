@@ -904,4 +904,26 @@ def application_stylesheet(font_family: str, theme: str = "dark") -> str:
     QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
         background: transparent;
     }}
+    QScrollBar:horizontal {{
+        background: transparent;
+        height: 8px;
+        margin: 2px 2px 2px 2px;
+        border: 0;
+    }}
+    QScrollBar::handle:horizontal {{
+        background: {color["border_soft"]};
+        min-width: 34px;
+        border-radius: 4px;
+    }}
+    QScrollBar::handle:horizontal:hover {{
+        background: {color["accent"]};
+    }}
+    QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+        width: 0;
+        border: 0;
+        background: transparent;
+    }}
+    QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+        background: transparent;
+    }}
     """

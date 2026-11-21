@@ -1296,6 +1296,7 @@ class KnowledgeWidget(QWidget):
         self.theme = "dark"
         self._last_task: dict[str, Any] | None = None
         self._last_merged_status: dict[str, Any] = {}
+        self._query_retrieval: dict[str, Any] = {}
         self._ingest_thread: QThread | None = None
         self._ingest_worker: KnowledgeIngestWorker | None = None
         self._maintenance_thread: QThread | None = None
@@ -1718,6 +1719,9 @@ class KnowledgeWidget(QWidget):
             query = query_text.strip() or DEFAULT_EVIDENCE_QUERY
             self.search_input.setText(query)
             query_text = query
+        if load_evidence:
+            self._query_retrieval = {"status": "running"}
+            self.refreshed.emit()
         if self._refresh_thread is not None:
             self._pending_refresh_request = (task, query_text, load_evidence)
             return
@@ -1732,7 +1736,8 @@ class KnowledgeWidget(QWidget):
         self._refresh_thread.start()
 
     def current_status(self) -> dict[str, Any]:
-        return dict(self._last_merged_status)
+        # 当前查询与入库验证分别保存，查询不改写资料清单。
+        return {**self._last_merged_status, "query_retrieval": dict(self._query_retrieval)}
 
     def _stop_worker_thread(self, thread_attr: str, worker_attr: str) -> None:
         thread = getattr(self, thread_attr, None)
@@ -1779,6 +1784,7 @@ class KnowledgeWidget(QWidget):
         self.refreshed.emit()
 
     def _on_refresh_failed(self, message: str) -> None:
+        self._query_retrieval = {"status": "failed"}
         self._set_evidence_html(f"<h3>知识库刷新失败</h3><p>{escape(message)}</p>", scrollable=True)
         self.refreshed.emit()
 
@@ -2350,7 +2356,6 @@ class KnowledgeWidget(QWidget):
 
     def _update_status_pills(self, status: dict[str, Any]) -> None:
         ready = bool(status.get("ready"))
-        doc_count = int(status.get("runtime_document_count", status.get("document_count", 0)) or 0)
         chunk_count = int(status.get("rag_chunk_count", 0) or 0)
         vector_count = int(status.get("vector_chunk_count", 0) or 0)
         vector_status = str(status.get("vector_status") or "")
@@ -2567,6 +2572,11 @@ class KnowledgeWidget(QWidget):
         chunks = payload.get("chunks") if isinstance(payload.get("chunks"), list) else []
         relations = payload.get("relations") if isinstance(payload.get("relations"), list) else []
         query = str(payload.get("query") or "").strip()
+        self._query_retrieval = {
+            "status": "success" if query else "idle",
+            "chunk_count": len(chunks),
+            "relation_count": len(relations),
+        }
         scrollable = bool(query or chunks or relations)
         self._set_evidence_html(self._evidence_html(payload), scrollable=scrollable)
 

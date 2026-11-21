@@ -1215,10 +1215,19 @@ class MainWindow(QMainWindow):
         right_labels = getattr(self, "knowledge_right_labels", None)
         if right_labels:
             verification = merged_status.get("last_retrieval_verification") if isinstance(merged_status.get("last_retrieval_verification"), dict) else {}
+            query = merged_status.get("query_retrieval") or {}
+            if query.get("status") == "success":
+                retrieval_summary = ("当前检索", f"命中 {query['chunk_count']} 文本块 · {query['relation_count']} 关系")
+            elif query.get("status") == "running":
+                retrieval_summary = ("当前检索", "正在查询")
+            elif query.get("status") == "failed":
+                retrieval_summary = ("当前检索", "查询失败，详见检索证据")
+            else:
+                retrieval_summary = ("入库验证", str(verification.get("message") or "尚无入库验证记录"))
             vector_count = int(merged_status.get("vector_chunk_count", 0) or 0)
             right_payload = {
                 "merged": ("合并检索入口", f"RAG {total_chunks} 块 · KG {total_entities}/{total_relations}"),
-                "retrieval": ("检索验证", str(verification.get("message") or "等待检索命中")),
+                "retrieval": retrieval_summary,
                 "vector": ("向量索引", f"{vector_status} · {vector_count} 向量块"),
                 "graph": ("知识图谱", f"{total_entities} 实体 · {total_relations} 关系"),
                 "cases": ("案例记忆", f"会话 {archive_cases} · 正式 {formal_cases}"),
@@ -2237,10 +2246,6 @@ class MainWindow(QMainWindow):
         return QSize(width, height)
 
     def _resize_to_available_work_area(self) -> None:
-        screen = QApplication.primaryScreen()
-        if screen is not None:
-            available = screen.availableGeometry()
-            self.setMaximumSize(available.width(), available.height())
         self.resize(self._target_window_size())
 
     def _ensure_window_within_work_area(self, *, clamp_to_target: bool = False) -> None:
@@ -2248,7 +2253,7 @@ class MainWindow(QMainWindow):
         if screen is None:
             return
         available = screen.availableGeometry()
-        self.setMaximumSize(available.width(), available.height())
+        # 工作区限制只用于普通窗口定位，系统负责最大化与跨屏尺寸。
         if self.isMaximized() or self.isFullScreen():
             return
         target = self._target_window_size()

@@ -200,7 +200,11 @@ def test_report_model_response_and_rejection_are_separate_from_render_success(mo
     summary = {**report_summary(), "recommendation": {"selected": {"candidate_id": "C1"}}}
     def respond(_system, user, **kwargs):
         assert kwargs["json_mode"] is True
-        return json.dumps(selection(json.loads(user)["facts"]))
+        payload = json.loads(user)
+        example = validate_report_selection(json.dumps(payload["response_example"]), payload["facts"],
+                                            payload["recommendation"])
+        assert example["recommendation_candidate_id"] == "C1"
+        return json.dumps(selection(payload["facts"]))
     agent.llm_backend = SimpleNamespace(max_tokens=1800, chat=respond)
     text = agent._render_engineering_explanation(summary)
     assert agent._last_llm_explanation_used and "0.6 mm" in text

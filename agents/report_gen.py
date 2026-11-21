@@ -374,11 +374,18 @@ class ReportGenAgent(BaseAgent):
         facts = build_report_facts(summary)
         payload["facts"] = facts
         payload["follow_up_codes"] = FOLLOW_UPS
+        # 完整事实与输出引用具有不同字段；示例使用当前任务的真实编号。
+        payload["response_example"] = {
+            "fact_refs": [{key: facts[0][key] for key in ("candidate_id", "metric")}],
+            "recommendation_candidate_id": (summary["recommendation"].get("selected") or {}).get("candidate_id"),
+            "follow_up_codes": ["mesh_convergence"],
+        }
         system_prompt = (
             "你是复合材料耐压壳报告证据整理助手。依据 field_semantics 选择需要强调的事实和验证建议。"
             "仅返回 JSON 对象，字段为 fact_refs、recommendation_candidate_id、follow_up_codes。"
             "fact_refs 为输入 facts 的非空引用子集，每项只含 candidate_id 和 metric。"
             "数值、单位和状态由程序读取对应事实，不要复制到响应中。"
+            "输出结构严格按照 response_example；facts 是只读事实表，不是输出模板。"
             "推荐编号必须等于 recommendation.selected.candidate_id，没有推荐则为 null。"
             "follow_up_codes 只选输入提供的建议代码；不要附加自由文本、制造阈值或未计算的理论结论。"
         )

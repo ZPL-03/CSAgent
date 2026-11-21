@@ -1,8 +1,12 @@
 import os
+import threading
+import time
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QTimer
+from PyQt6.QtTest import QTest
 
 from gui.workflow_widget import WorkflowWidget
 from workflow.event_store import WorkflowEventStore
@@ -15,6 +19,14 @@ def _app() -> QApplication:
     if app is None:
         app = QApplication([])
     return app
+
+
+def _wait_for_health_check(app, widget) -> None:
+    deadline = time.monotonic() + 3
+    while widget._health_task is not None and time.monotonic() < deadline:
+        QTest.qWait(10)
+        app.processEvents()
+    assert widget._health_task is None
 
 
 def test_workflow_widget_renders_runtime_events(tmp_path) -> None:
@@ -221,6 +233,7 @@ def test_workflow_widget_renders_manual_llm_health_check(monkeypatch) -> None:
     widget = WorkflowWidget()
     try:
         widget._run_llm_health_check()
+        _wait_for_health_check(app, widget)
         html = widget.browser.toHtml()
 
         assert "实时检测" in html
@@ -230,6 +243,60 @@ def test_workflow_widget_renders_manual_llm_health_check(monkeypatch) -> None:
         assert "connection refused" in html
         assert "可用" in html
         assert "8.1 ms" in html
+    finally:
+        widget.close()
+        app.processEvents()
+
+
+def test_llm_health_check_keeps_gui_responsive_and_does_not_duplicate_requests(monkeypatch) -> None:
+    app = _app()
+    release = threading.Event()
+    started = threading.Event()
+    thread_ids = []
+    heartbeat = []
+
+    def probe(timeout_seconds=12):
+        thread_ids.append(threading.get_ident())
+        started.set()
+        assert release.wait(3)
+        return []
+
+    monkeypatch.setattr("gui.workflow_widget.probe_llm_backends", probe)
+    widget = WorkflowWidget()
+    try:
+        widget._run_llm_health_check()
+        widget._run_llm_health_check()
+        assert started.wait(1)
+        QTimer.singleShot(0, lambda: heartbeat.append(True))
+        QTest.qWait(100)
+        assert heartbeat and len(thread_ids) == 1
+        assert thread_ids[0] != threading.get_ident()
+        assert not widget.health_button.isEnabled()
+        release.set()
+        _wait_for_health_check(app, widget)
+        assert widget.health_button.isEnabled()
+    finally:
+        release.set()
+        _wait_for_health_check(app, widget)
+        widget.close()
+
+
+def test_llm_health_worker_exposes_failure_without_connection_details(monkeypatch) -> None:
+    app = _app()
+
+    def probe(timeout_seconds=12):
+        raise ValueError("private-key https://private.example/v1")
+
+    monkeypatch.setattr("gui.workflow_widget.probe_llm_backends", probe)
+    widget = WorkflowWidget()
+    try:
+        widget._run_llm_health_check()
+        _wait_for_health_check(app, widget)
+        assert "ValueError" in widget.audit_status_label.text()
+        assert "private-key" not in widget.audit_status_label.text()
+        assert "private.example" not in widget.audit_status_label.text()
+        assert not widget.llm_health_results
+        assert widget.health_button.isEnabled()
     finally:
         widget.close()
         app.processEvents()

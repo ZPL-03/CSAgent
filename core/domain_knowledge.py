@@ -8,7 +8,7 @@ import math
 import re
 from collections import Counter
 from pathlib import Path
-from typing import Any, Dict, Iterable, List
+from typing import Any, Dict, Iterable
 
 from core.config_loader import load_app_config
 from core.paths import CHROMA_DIR, ROOT_DIR
