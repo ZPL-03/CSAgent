@@ -1,0 +1,987 @@
+{
+  "summary": {
+    "session_task_id": "TASK_1",
+    "application": "复合材料外压圆柱耐压壳",
+    "load_conditions": "外部静水压力：p=25.0 MPa",
+    "external_pressure_MPa": 25.0,
+    "boundary_conditions": "两端固支",
+    "imperfection_ratio": 0.008,
+    "imperfection_source": "用户指定",
+    "primary_objective": "最小壳体质量",
+    "result_count": 1,
+    "passed_count": 1,
+    "failed_count": 0,
+    "unknown_count": 0,
+    "result_assessments": [
+      {
+        "candidate_id": "C1",
+        "session_candidate_id": "TMP_2",
+        "state": "passed",
+        "semantic_errors": []
+      }
+    ],
+    "recommendation": {
+      "objective": "最小壳体质量",
+      "selected": {
+        "candidate_id": "C1",
+        "session_candidate_id": "TMP_2",
+        "objective_value": 8.966457291722472,
+        "capacity_MPa": 97.79671
+      },
+      "ranked": [
+        {
+          "candidate_id": "C1",
+          "session_candidate_id": "TMP_2",
+          "objective_value": 8.966457291722472,
+          "capacity_MPa": 97.79671
+        }
+      ],
+      "excluded": []
+    },
+    "best_pressure_candidate": "C1",
+    "best_pressure_MPa": 97.79671,
+    "lightest_candidate": "C1",
+    "lightest_weight_kg_per_m2": 28.54112,
+    "all_candidates": [
+      {
+        "candidate_id": "TMP_2",
+        "session_candidate_id": "TMP_2",
+        "display_name": "TMP_2",
+        "source": "DOE",
+        "material": "T800G/5228",
+        "length_mm": 500.0,
+        "radius_mm": 100.0,
+        "thickness_mm": 18.064,
+        "imperfection_ratio": 0.008,
+        "layup": "[45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45]",
+        "layup_template": "TASK_ANGLES",
+        "ply_count": 40,
+        "balanced": true,
+        "symmetric": true,
+        "rationale": "DOE 拉丁超立方探索生成 | 材料=T800G/5228 | 铺层模板=TASK_ANGLES",
+        "screening_summary": "描述符回归压力估计=80 MPa，ASME RD-1172线性屈曲压力=96.8 MPa，公式测试 RMSE=5 MPa，ASME代入评估 RMSE=7.9 MPa，校准留一验证 RMSE=未提供，校准状态=not_available，面密度=28.5 kg/m^2。 按 score = 1.00 × P_ult - 0.12 × 面密度 得分 76.5。",
+        "selection_reason": "Top-1 入选：描述符回归压力估计=80 MPa，ASME RD-1172线性屈曲压力=96.8 MPa，公式测试 RMSE=5 MPa，ASME代入评估 RMSE=7.9 MPa，校准留一验证 RMSE=未提供，校准状态=not_available，面密度=28.5 kg/m^2。 按 score = 1.00 × P_ult - 0.12 × 面密度 得分 76.5。 当前排序靠前，适合优先进入真实有限元校核。",
+        "screening_rank": 1,
+        "screening_selected": true,
+        "surrogate_ultimate_pressure_MPa": 79.967,
+        "surrogate_prediction_status": "positive",
+        "asme_linear_buckling_pressure_MPa": 96.809,
+        "rank_score": 76.5421,
+        "weight_kg_per_m2": 28.541
+      },
+      {
+        "candidate_id": "TMP_1",
+        "session_candidate_id": "TMP_1",
+        "display_name": "TMP_1",
+        "source": "LLM",
+        "material": "T700/Epoxy",
+        "length_mm": 500.0,
+        "radius_mm": 100.0,
+        "thickness_mm": 12.0,
+        "imperfection_ratio": 0.008,
+        "layup": "[0/45/-45/90/0/45/-45/90]s",
+        "layup_template": "TASK_ANGLES",
+        "ply_count": 16,
+        "balanced": true,
+        "symmetric": true,
+        "rationale": "0°与90°层提供轴向与环向刚度折中、±45°层增强抗屈曲与剪切稳定性，且16层对称均衡铺层缠绕/铺放可实现性好、铺层角偏差与8‰初始缺陷的敏感性相对可控。",
+        "screening_summary": "描述符回归压力估计=27.4 MPa，ASME RD-1172线性屈曲压力=19.5 MPa，公式测试 RMSE=5 MPa，ASME代入评估 RMSE=7.9 MPa，校准留一验证 RMSE=未提供，校准状态=not_available，面密度=18.6 kg/m^2。 按 score = 1.00 × P_ult - 0.12 × 面密度 得分 25.1。",
+        "selection_reason": "排序第 2：描述符回归压力估计=27.4 MPa，ASME RD-1172线性屈曲压力=19.5 MPa，公式测试 RMSE=5 MPa，ASME代入评估 RMSE=7.9 MPa，校准留一验证 RMSE=未提供，校准状态=not_available，面密度=18.6 kg/m^2。 按 score = 1.00 × P_ult - 0.12 × 面密度 得分 25.1。 未进入默认 Top-K 校核队列，但仍可由人工选择进入有限元校核。",
+        "screening_rank": 2,
+        "screening_selected": false,
+        "surrogate_ultimate_pressure_MPa": 27.355,
+        "surrogate_prediction_status": "positive",
+        "asme_linear_buckling_pressure_MPa": 19.549,
+        "rank_score": 25.123,
+        "weight_kg_per_m2": 18.6
+      }
+    ],
+    "screened_candidates": [
+      {
+        "candidate_id": "TMP_2",
+        "session_candidate_id": "TMP_2",
+        "display_name": "TMP_2",
+        "source": "DOE",
+        "material": "T800G/5228",
+        "length_mm": 500.0,
+        "radius_mm": 100.0,
+        "thickness_mm": 18.064,
+        "imperfection_ratio": 0.008,
+        "layup": "[45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45]",
+        "layup_template": "TASK_ANGLES",
+        "ply_count": 40,
+        "balanced": true,
+        "symmetric": true,
+        "rationale": "DOE 拉丁超立方探索生成 | 材料=T800G/5228 | 铺层模板=TASK_ANGLES",
+        "screening_summary": "描述符回归压力估计=80 MPa，ASME RD-1172线性屈曲压力=96.8 MPa，公式测试 RMSE=5 MPa，ASME代入评估 RMSE=7.9 MPa，校准留一验证 RMSE=未提供，校准状态=not_available，面密度=28.5 kg/m^2。 按 score = 1.00 × P_ult - 0.12 × 面密度 得分 76.5。",
+        "selection_reason": "Top-1 入选：描述符回归压力估计=80 MPa，ASME RD-1172线性屈曲压力=96.8 MPa，公式测试 RMSE=5 MPa，ASME代入评估 RMSE=7.9 MPa，校准留一验证 RMSE=未提供，校准状态=not_available，面密度=28.5 kg/m^2。 按 score = 1.00 × P_ult - 0.12 × 面密度 得分 76.5。 当前排序靠前，适合优先进入真实有限元校核。",
+        "screening_rank": 1,
+        "screening_selected": true,
+        "surrogate_ultimate_pressure_MPa": 79.967,
+        "surrogate_prediction_status": "positive",
+        "asme_linear_buckling_pressure_MPa": 96.809,
+        "rank_score": 76.5421,
+        "weight_kg_per_m2": 28.541
+      }
+    ],
+    "results": [
+      {
+        "candidate_id": "C1",
+        "session_candidate_id": "TMP_2",
+        "display_name": "C1",
+        "status": "success",
+        "solved_geometry": {
+          "length_mm": 500.0,
+          "radius_mm": 100.0,
+          "thickness_mm": 18.064,
+          "imperfection_ratio": 0.008,
+          "radius_reference": "middle_surface"
+        },
+        "material": "T800G/5228",
+        "layup": "[45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45]",
+        "ultimate_pressure_MPa": 97.79671,
+        "verified_capacity": true,
+        "linear_buckling_pressure_MPa": 174.11,
+        "ultimate_pressure_basis": "含场变量刚度退化的 Static Riks 已确认后峰极限点",
+        "riks_lpf_max": 0.57527477,
+        "imperfection_amplitude_mm": 0.8,
+        "solved_imperfection_ratio": 0.008,
+        "weight_kg_per_m2": 28.54112,
+        "verdict": "通过",
+        "failure_mode": "场变量损伤与几何非线性极限点",
+        "service_pressure_checked_MPa": 25.0,
+        "service_hashin_index_max": 0.06471503,
+        "service_pressure_check_status": "passed",
+        "riks_increment_count": 21,
+        "riks_limit_point_confirmed": true,
+        "progressive_damage_complete": true,
+        "damage_state_output_complete": true,
+        "progressive_damage_model": "irreversible_stress_triggered_field_degradation",
+        "damage_state_maxima": {
+          "SDV3": 1.0,
+          "SDV2": 1.0,
+          "SDV1": 1.0
+        },
+        "damage_observed": true,
+        "service_stress_coverage": {
+          "status": "complete",
+          "expected_section_points": 120,
+          "incomplete_element_positions": 0,
+          "checked_element_positions": 1140
+        },
+        "riks_termination_reason": "post_peak_drop_20_percent",
+        "verification_scope": "composite_cylindrical_shell_submodel",
+        "design_check_status": "passed",
+        "design_verdict_basis": "工作压力下强度校核与已确认损伤极限压力和工作压力的比较",
+        "capacity_assessment_status": "geometric_limit_confirmed",
+        "diagnosis_summary": "外压圆柱壳有限元校核已完成，线性屈曲压力 174.1 MPa；极限压力按“含场变量刚度退化的 Static Riks 已确认后峰极限点”计算，基准外压 170 MPa，最大 LPF=0.57527477，得到极限压力 97.8 MPa，当前结论为“通过”。"
+      }
+    ]
+  },
+  "facts": [
+    {
+      "candidate_id": null,
+      "metric": "external_pressure_MPa",
+      "value": 25.0,
+      "unit": "MPa",
+      "status": "specified",
+      "label": "工作压力"
+    },
+    {
+      "candidate_id": null,
+      "metric": "imperfection_ratio",
+      "value": 0.008,
+      "unit": "1",
+      "status": "specified",
+      "label": "分析缺陷比"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "design_check",
+      "value": "passed",
+      "unit": null,
+      "status": "passed",
+      "label": "设计校核状态"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "solved_imperfection_ratio",
+      "value": 0.008,
+      "unit": "1",
+      "status": "passed",
+      "label": "实际求解缺陷比"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "imperfection_amplitude_mm",
+      "value": 0.8,
+      "unit": "mm",
+      "status": "passed",
+      "label": "实际缺陷幅值"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "ultimate_pressure_MPa",
+      "value": 97.79671,
+      "unit": "MPa",
+      "status": "passed",
+      "label": "确认极限承载压力"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "linear_buckling_pressure_MPa",
+      "value": 174.11,
+      "unit": "MPa",
+      "status": "passed",
+      "label": "线性屈曲压力"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "service_pressure_checked_MPa",
+      "value": 25.0,
+      "unit": "MPa",
+      "status": "passed",
+      "label": "工作校核压力"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "service_hashin_index_max",
+      "value": 0.06471503,
+      "unit": "1",
+      "status": "passed",
+      "label": "工作压力最大 Hashin 指数"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "weight_kg_per_m2",
+      "value": 28.54112,
+      "unit": "kg/m^2",
+      "status": "passed",
+      "label": "面密度"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "riks_limit_point_confirmed",
+      "value": true,
+      "unit": null,
+      "status": "passed",
+      "label": "Riks 极限点确认"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "riks_termination_reason",
+      "value": "post_peak_drop_20_percent",
+      "unit": null,
+      "status": "passed",
+      "label": "Riks 终止原因"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "imperfection_ratio",
+      "value": 0.008,
+      "unit": "1",
+      "status": "proposal",
+      "label": "分析缺陷比"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "symmetric",
+      "value": true,
+      "unit": null,
+      "status": "proposal",
+      "label": "中面对称"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "balanced",
+      "value": true,
+      "unit": null,
+      "status": "proposal",
+      "label": "正负角均衡"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "surrogate_ultimate_pressure_MPa",
+      "value": 79.967,
+      "unit": "MPa",
+      "status": "positive",
+      "label": "代理承载压力估计"
+    },
+    {
+      "candidate_id": "TMP_1",
+      "metric": "imperfection_ratio",
+      "value": 0.008,
+      "unit": "1",
+      "status": "proposal",
+      "label": "分析缺陷比"
+    },
+    {
+      "candidate_id": "TMP_1",
+      "metric": "symmetric",
+      "value": true,
+      "unit": null,
+      "status": "proposal",
+      "label": "中面对称"
+    },
+    {
+      "candidate_id": "TMP_1",
+      "metric": "balanced",
+      "value": true,
+      "unit": null,
+      "status": "proposal",
+      "label": "正负角均衡"
+    },
+    {
+      "candidate_id": "TMP_1",
+      "metric": "surrogate_ultimate_pressure_MPa",
+      "value": 27.355,
+      "unit": "MPa",
+      "status": "positive",
+      "label": "代理承载压力估计"
+    },
+    {
+      "candidate_id": "TMP_1",
+      "metric": "design_check",
+      "value": "not_run",
+      "unit": null,
+      "status": "not_run",
+      "label": "设计校核状态"
+    },
+    {
+      "candidate_id": null,
+      "metric": "candidate_count",
+      "value": 2,
+      "unit": "个",
+      "status": "recorded",
+      "label": "候选总数"
+    },
+    {
+      "candidate_id": null,
+      "metric": "result_count",
+      "value": 1,
+      "unit": "个",
+      "status": "recorded",
+      "label": "实际校核数"
+    },
+    {
+      "candidate_id": null,
+      "metric": "comparable_count",
+      "value": 1,
+      "unit": "个",
+      "status": "derived",
+      "label": "满足推荐条件的方案数"
+    },
+    {
+      "candidate_id": null,
+      "metric": "analysis_scope",
+      "value": "逐层圆柱壳、初始几何缺陷、弹性首层失效与含损伤 Riks；未建模封头、法兰、层间分层及制造过程，未提供试验认证。",
+      "unit": null,
+      "status": "scope",
+      "label": "分析范围"
+    },
+    {
+      "candidate_id": null,
+      "metric": "recommendation_status",
+      "value": "有满足条件的方案",
+      "unit": null,
+      "status": "derived",
+      "label": "推荐状态"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "objective_value",
+      "value": 8.966457291722472,
+      "unit": "kg",
+      "status": "derived",
+      "label": "优化目标比较值"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "capacity_margin_percent",
+      "value": 291.18684,
+      "unit": "%",
+      "status": "derived",
+      "label": "容量相对工作压力的余量"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "length_mm",
+      "value": 500.0,
+      "unit": "mm",
+      "status": "solved_input",
+      "label": "实际求解长度"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "radius_mm",
+      "value": 100.0,
+      "unit": "mm",
+      "status": "solved_input",
+      "label": "实际求解半径"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "thickness_mm",
+      "value": 18.064,
+      "unit": "mm",
+      "status": "solved_input",
+      "label": "实际求解厚度"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "radius_reference",
+      "value": "middle_surface",
+      "unit": null,
+      "status": "solved_input",
+      "label": "实际求解半径基准"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "material",
+      "value": "T800G/5228",
+      "unit": null,
+      "status": "solved_input",
+      "label": "实际求解材料"
+    },
+    {
+      "candidate_id": "C1",
+      "metric": "layup",
+      "value": "[45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45]",
+      "unit": null,
+      "status": "solved_input",
+      "label": "实际求解铺层"
+    }
+  ],
+  "llm_explanation_used": true,
+  "llm_explanation_audit": {
+    "status": "accepted",
+    "call_traces": [
+      [
+        {
+          "backend": "configured_fallback",
+          "model": "deepseek-flash",
+          "json_mode": true,
+          "max_tokens": 2048,
+          "estimated_prompt_tokens": 10665,
+          "token_estimator": "conservative_max(character, utf8_bytes_per_4, cl100k_base)",
+          "context_window_tokens": 1048576,
+          "status": "success",
+          "thinking": {
+            "type": "disabled"
+          },
+          "context_budget_status": "within_limit",
+          "finish_reason": "stop",
+          "content_chars": 1140,
+          "usage": {
+            "completion_tokens": 533,
+            "prompt_tokens": 4292,
+            "total_tokens": 4825,
+            "completion_tokens_details": null,
+            "prompt_cache_hit_tokens": 1024,
+            "prompt_cache_miss_tokens": 3268
+          },
+          "latency_ms": 3382.643
+        }
+      ],
+      [
+        {
+          "backend": "configured_fallback",
+          "model": "deepseek-flash",
+          "json_mode": true,
+          "max_tokens": 2048,
+          "estimated_prompt_tokens": 7023,
+          "token_estimator": "conservative_max(character, utf8_bytes_per_4, cl100k_base)",
+          "context_window_tokens": 1048576,
+          "status": "success",
+          "thinking": {
+            "type": "disabled"
+          },
+          "context_budget_status": "within_limit",
+          "finish_reason": "stop",
+          "content_chars": 32,
+          "usage": {
+            "completion_tokens": 11,
+            "prompt_tokens": 2975,
+            "total_tokens": 2986,
+            "completion_tokens_details": null,
+            "prompt_cache_hit_tokens": 256,
+            "prompt_cache_miss_tokens": 2719
+          },
+          "latency_ms": 494.333
+        }
+      ]
+    ],
+    "input": {
+      "contract_version": "engineering-review-v1",
+      "facts": [
+        {
+          "candidate_id": null,
+          "metric": "external_pressure_MPa",
+          "value": 25.0,
+          "unit": "MPa",
+          "status": "specified",
+          "label": "工作压力",
+          "ref": "TASK.external_pressure_MPa",
+          "display": "25 MPa"
+        },
+        {
+          "candidate_id": null,
+          "metric": "imperfection_ratio",
+          "value": 0.008,
+          "unit": "1",
+          "status": "specified",
+          "label": "分析缺陷比",
+          "ref": "TASK.imperfection_ratio",
+          "display": "0.008（无量纲）"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "design_check",
+          "value": "passed",
+          "unit": null,
+          "status": "passed",
+          "label": "设计校核状态",
+          "ref": "C1.design_check",
+          "display": "通过"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "solved_imperfection_ratio",
+          "value": 0.008,
+          "unit": "1",
+          "status": "passed",
+          "label": "实际求解缺陷比",
+          "ref": "C1.solved_imperfection_ratio",
+          "display": "0.008（无量纲）"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "imperfection_amplitude_mm",
+          "value": 0.8,
+          "unit": "mm",
+          "status": "passed",
+          "label": "实际缺陷幅值",
+          "ref": "C1.imperfection_amplitude_mm",
+          "display": "0.8 mm"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "ultimate_pressure_MPa",
+          "value": 97.79671,
+          "unit": "MPa",
+          "status": "passed",
+          "label": "确认极限承载压力",
+          "ref": "C1.ultimate_pressure_MPa",
+          "display": "97.8 MPa"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "linear_buckling_pressure_MPa",
+          "value": 174.11,
+          "unit": "MPa",
+          "status": "passed",
+          "label": "线性屈曲压力",
+          "ref": "C1.linear_buckling_pressure_MPa",
+          "display": "174.1 MPa"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "service_pressure_checked_MPa",
+          "value": 25.0,
+          "unit": "MPa",
+          "status": "passed",
+          "label": "工作校核压力",
+          "ref": "C1.service_pressure_checked_MPa",
+          "display": "25 MPa"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "service_hashin_index_max",
+          "value": 0.06471503,
+          "unit": "1",
+          "status": "passed",
+          "label": "工作压力最大 Hashin 指数",
+          "ref": "C1.service_hashin_index_max",
+          "display": "0.065（无量纲）"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "weight_kg_per_m2",
+          "value": 28.54112,
+          "unit": "kg/m^2",
+          "status": "passed",
+          "label": "面密度",
+          "ref": "C1.weight_kg_per_m2",
+          "display": "28.5 kg/m^2"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "riks_limit_point_confirmed",
+          "value": true,
+          "unit": null,
+          "status": "passed",
+          "label": "Riks 极限点确认",
+          "ref": "C1.riks_limit_point_confirmed",
+          "display": "已确认"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "riks_termination_reason",
+          "value": "post_peak_drop_20_percent",
+          "unit": null,
+          "status": "passed",
+          "label": "Riks 终止原因",
+          "ref": "C1.riks_termination_reason",
+          "display": "峰后载荷下降达到 20% 阈值，受控终止"
+        },
+        {
+          "candidate_id": null,
+          "metric": "candidate_count",
+          "value": 2,
+          "unit": "个",
+          "status": "recorded",
+          "label": "候选总数",
+          "ref": "TASK.candidate_count",
+          "display": "2"
+        },
+        {
+          "candidate_id": null,
+          "metric": "result_count",
+          "value": 1,
+          "unit": "个",
+          "status": "recorded",
+          "label": "实际校核数",
+          "ref": "TASK.result_count",
+          "display": "1"
+        },
+        {
+          "candidate_id": null,
+          "metric": "comparable_count",
+          "value": 1,
+          "unit": "个",
+          "status": "derived",
+          "label": "满足推荐条件的方案数",
+          "ref": "TASK.comparable_count",
+          "display": "1"
+        },
+        {
+          "candidate_id": null,
+          "metric": "analysis_scope",
+          "value": "逐层圆柱壳、初始几何缺陷、弹性首层失效与含损伤 Riks；未建模封头、法兰、层间分层及制造过程，未提供试验认证。",
+          "unit": null,
+          "status": "scope",
+          "label": "分析范围",
+          "ref": "TASK.analysis_scope",
+          "display": "含初始几何缺陷的圆柱壳损伤容量分析"
+        },
+        {
+          "candidate_id": null,
+          "metric": "recommendation_status",
+          "value": "有满足条件的方案",
+          "unit": null,
+          "status": "derived",
+          "label": "推荐状态",
+          "ref": "TASK.recommendation_status",
+          "display": "有满足条件的方案"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "objective_value",
+          "value": 8.966457291722472,
+          "unit": "kg",
+          "status": "derived",
+          "label": "优化目标比较值",
+          "ref": "C1.objective_value",
+          "display": "8.9665 kg"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "capacity_margin_percent",
+          "value": 291.18684,
+          "unit": "%",
+          "status": "derived",
+          "label": "容量相对工作压力的余量",
+          "ref": "C1.capacity_margin_percent",
+          "display": "291.19 %"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "length_mm",
+          "value": 500.0,
+          "unit": "mm",
+          "status": "solved_input",
+          "label": "实际求解长度",
+          "ref": "C1.length_mm",
+          "display": "500 mm"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "radius_mm",
+          "value": 100.0,
+          "unit": "mm",
+          "status": "solved_input",
+          "label": "实际求解半径",
+          "ref": "C1.radius_mm",
+          "display": "100 mm"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "thickness_mm",
+          "value": 18.064,
+          "unit": "mm",
+          "status": "solved_input",
+          "label": "实际求解厚度",
+          "ref": "C1.thickness_mm",
+          "display": "18.064 mm"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "radius_reference",
+          "value": "middle_surface",
+          "unit": null,
+          "status": "solved_input",
+          "label": "实际求解半径基准",
+          "ref": "C1.radius_reference",
+          "display": "中面半径"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "material",
+          "value": "T800G/5228",
+          "unit": null,
+          "status": "solved_input",
+          "label": "实际求解材料",
+          "ref": "C1.material",
+          "display": "T800G/5228"
+        },
+        {
+          "candidate_id": "C1",
+          "metric": "layup",
+          "value": "[45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45]",
+          "unit": null,
+          "status": "solved_input",
+          "label": "实际求解铺层",
+          "ref": "C1.layup",
+          "display": "[45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45]"
+        }
+      ],
+      "unavailable_facts": [],
+      "recommendation": {
+        "objective": "最小壳体质量",
+        "selected": {
+          "candidate_id": "C1",
+          "session_candidate_id": "TMP_2",
+          "objective_value": 8.966457291722472,
+          "capacity_MPa": 97.79671
+        },
+        "ranked": [
+          {
+            "candidate_id": "C1",
+            "session_candidate_id": "TMP_2",
+            "objective_value": 8.966457291722472,
+            "capacity_MPa": 97.79671
+          }
+        ],
+        "excluded": []
+      },
+      "required_assessment_refs": [
+        "TASK.external_pressure_MPa",
+        "C1.ultimate_pressure_MPa",
+        "C1.objective_value"
+      ],
+      "comparison_count": 1,
+      "candidate_bindings": [],
+      "candidate_ids": [
+        "C1"
+      ],
+      "evidence": [],
+      "context": {
+        "task": {
+          "application": "复合材料外压圆柱耐压壳",
+          "load_case": "外部静水压力：p=25.0 MPa",
+          "external_pressure_MPa": 25.0,
+          "boundary_conditions": "两端固支",
+          "primary_objective": "最小壳体质量"
+        },
+        "screened_candidates": [
+          {
+            "candidate_id": "TMP_2",
+            "session_candidate_id": "TMP_2",
+            "source": "DOE",
+            "screening_rank": 1,
+            "screening_selected": true,
+            "surrogate_ultimate_pressure_MPa": 79.967,
+            "surrogate_prediction_status": "positive",
+            "asme_linear_buckling_pressure_MPa": 96.809,
+            "rank_score": 76.5421,
+            "weight_kg_per_m2": 28.541
+          }
+        ],
+        "candidate_pool_summary": {
+          "total_count": 2,
+          "source_counts": {
+            "DOE": 1,
+            "LLM": 1
+          },
+          "screening_selected_count": 1,
+          "screening_selected_ids": [
+            "TMP_2"
+          ],
+          "surrogate_pressure_range_MPa": {
+            "min_MPa": 27.355,
+            "max_MPa": 79.967
+          }
+        },
+        "result_diagnostics": [
+          {
+            "candidate_id": "C1",
+            "session_candidate_id": "TMP_2",
+            "status": "success",
+            "design_check_status": "passed",
+            "capacity_assessment_status": "geometric_limit_confirmed",
+            "verified_capacity": true,
+            "service_pressure_check_status": "passed",
+            "riks_increment_count": 21,
+            "riks_limit_point_confirmed": true,
+            "progressive_damage_complete": true,
+            "damage_state_output_complete": true,
+            "progressive_damage_model": "irreversible_stress_triggered_field_degradation",
+            "damage_state_maxima": {
+              "SDV1": 1.0,
+              "SDV2": 1.0,
+              "SDV3": 1.0
+            },
+            "service_stress_coverage": {
+              "checked_element_positions": 1140,
+              "expected_section_points": 120,
+              "incomplete_element_positions": 0,
+              "status": "complete"
+            },
+            "failure_mode": "场变量损伤与几何非线性极限点",
+            "verification_scope": "composite_cylindrical_shell_submodel",
+            "diagnosis_summary": "外压圆柱壳有限元校核已完成，线性屈曲压力 174.1 MPa；极限压力按“含场变量刚度退化的 Static Riks 已确认后峰极限点”计算，基准外压 170 MPa，最大 LPF=0.57527477，得到极限压力 97.8 MPa，当前结论为“通过”。"
+          }
+        ],
+        "aggregate": {
+          "overall": "当前校核样本均满足设计目标",
+          "result_count": 1,
+          "passed_count": 1,
+          "failed_count": 0,
+          "unknown_count": 0,
+          "population": "有限元结果记录"
+        },
+        "result_assessments": [
+          {
+            "candidate_id": "C1",
+            "session_candidate_id": "TMP_2",
+            "state": "passed",
+            "semantic_errors": []
+          }
+        ],
+        "recommendation": {
+          "objective": "最小壳体质量",
+          "selected": {
+            "candidate_id": "C1",
+            "session_candidate_id": "TMP_2",
+            "objective_value": 8.966457291722472,
+            "capacity_MPa": 97.79671
+          },
+          "ranked": [
+            {
+              "candidate_id": "C1",
+              "session_candidate_id": "TMP_2",
+              "objective_value": 8.966457291722472,
+              "capacity_MPa": 97.79671
+            }
+          ],
+          "excluded": []
+        },
+        "analysis_conditions": {
+          "task_imperfection_ratio": 0.008,
+          "imperfection_source": "用户指定",
+          "imperfection_ratios": [
+            0.008
+          ]
+        },
+        "field_semantics": {
+          "candidate_sets": "candidate_pool_summary 统计全部候选，screened_candidates 为预筛入选候选，facts 与 result_diagnostics 共同描述实际校核结果；aggregate 只统计 results，未送检候选不在统计母集中。",
+          "result_assessments": "passed 为设计校核通过，failed 为设计校核不通过，unknown 为求解失败、未判定或结果语义不一致。",
+          "result_diagnostics": "result_diagnostics 只保存未在 facts 中重复出现的完整诊断字段；数值、单位和推荐依据以 facts 为准。",
+          "recommendation": "selected 为按任务目标选出的推荐对象，ranked 为具备完整证据且可比较的方案，excluded 记录未入选原因。",
+          "layup": "symmetric 和 balanced 是逐层核查结果；false 表示属性不满足，null 表示没有记录。",
+          "pressure_checks": "工作压力下检查应力与首层失效；极限压力由含损伤 Riks 分析的已确认极限点确定，并与工作压力比较。",
+          "progressive_damage_complete": "容量分析是否包含场变量损伤退化。",
+          "damage_state_maxima": "局部损伤触发标志的最大值，不表示整体损伤程度。",
+          "riks_lpf_max": "Riks 路径的最大载荷比例系数。",
+          "post_peak_drop_20_percent": "峰后受控终止状态。",
+          "imperfection_ratio": "分析使用的初始几何缺陷比，制造验收阈值需另行给定。"
+        },
+        "analysis_scope": "复合材料圆柱壳数值模型，未建模金属封头、法兰连接和层间分层；制造工艺和试验认证不在求解范围内。"
+      },
+      "response_schema": {
+        "recommendation_candidate_id": "C1",
+        "assessment": "中文解释段落，包含这些标记：{{TASK.external_pressure_MPa}}、{{C1.ultimate_pressure_MPa}}、{{C1.objective_value}}",
+        "tradeoffs": [],
+        "verification": [
+          "每段至少引用一个 facts.ref 或 evidence.ref，例如 {{C1.layup}}"
+        ]
+      }
+    },
+    "raw_response": "{\"recommendation_candidate_id\": \"C1\", \"assessment\": \"推荐 C1 作为当前载荷与边界条件下的设计选择：其工作压力为 {{TASK.external_pressure_MPa}}，含初始几何缺陷的损伤 Riks 分析确认极限承载压力为 {{C1.ultimate_pressure_MPa}}，容量相对工作压力的余量为 {{C1.capacity_margin_percent}}，设计校核状态为 {{C1.design_check}}，且优化目标比较值为 {{C1.objective_value}}，在本次唯一完成校核的候选里同时满足承载门槛与最小壳体质量目标。需要说明的是，该结论只适用于 {{TASK.analysis_scope}} 所限定的逐层圆柱壳模型，不能外推为含封头、法兰或分层等实际结构细节的认证结论。\", \"tradeoffs\": [], \"verification\": [\"当前仅有一个候选完成校核（实际校核数为 {{TASK.result_count}}，满足推荐条件的方案数为 {{TASK.comparable_count}}），因此无法在候选之间做重量与承载余量的取舍比较；在补充第二个候选的同等分析前，不应把 {{C1.weight_kg_per_m2}} 或 {{C1.objective_value}} 视为已证明的最优质量。\", \"极限承载由含场变量刚度退化的 Riks 分析给出，终止原因为 {{C1.riks_termination_reason}}，极限点确认为 {{C1.riks_limit_point_confirmed}}；但 {{TASK.analysis_scope}} 未覆盖封头、法兰与层间分层，需针对这些连接与界面区域补充局部建模或试验核查，否则 {{C1.ultimate_pressure_MPa}} 不能直接支撑整体结构验收判断。\", \"分析采用缺陷比 {{TASK.imperfection_ratio}}（对应实际缺陷幅值 {{C1.imperfection_amplitude_mm}}），该值来自用户指定而非制造验收实测；需结合制造工艺实测缺陷分布核查该缺陷比是否覆盖实际最不利几何偏差，否则 {{C1.capacity_margin_percent}} 的容量余量对制造偏差的适用性无法确认。\", \"工作压力下最大 Hashin 指数为 {{C1.service_hashin_index_max}}，仅表示当前弹性首层失效判据下的数值余量；需通过材料许用值与环境（湿热、老化）折减的核查确认该判据适用性，否则不能据此判断长期服役下的安全裕度。\"]}",
+    "attempts": [
+      {
+        "backend": "configured_fallback",
+        "raw_response": "{\"recommendation_candidate_id\": \"C1\", \"assessment\": \"推荐 C1 作为当前载荷与边界条件下的设计选择：其工作压力为 {{TASK.external_pressure_MPa}}，含初始几何缺陷的损伤 Riks 分析确认极限承载压力为 {{C1.ultimate_pressure_MPa}}，容量相对工作压力的余量为 {{C1.capacity_margin_percent}}，设计校核状态为 {{C1.design_check}}，且优化目标比较值为 {{C1.objective_value}}，在本次唯一完成校核的候选里同时满足承载门槛与最小壳体质量目标。需要说明的是，该结论只适用于 {{TASK.analysis_scope}} 所限定的逐层圆柱壳模型，不能外推为含封头、法兰或分层等实际结构细节的认证结论。\", \"tradeoffs\": [], \"verification\": [\"当前仅有一个候选完成校核（实际校核数为 {{TASK.result_count}}，满足推荐条件的方案数为 {{TASK.comparable_count}}），因此无法在候选之间做重量与承载余量的取舍比较；在补充第二个候选的同等分析前，不应把 {{C1.weight_kg_per_m2}} 或 {{C1.objective_value}} 视为已证明的最优质量。\", \"极限承载由含场变量刚度退化的 Riks 分析给出，终止原因为 {{C1.riks_termination_reason}}，极限点确认为 {{C1.riks_limit_point_confirmed}}；但 {{TASK.analysis_scope}} 未覆盖封头、法兰与层间分层，需针对这些连接与界面区域补充局部建模或试验核查，否则 {{C1.ultimate_pressure_MPa}} 不能直接支撑整体结构验收判断。\", \"分析采用缺陷比 {{TASK.imperfection_ratio}}（对应实际缺陷幅值 {{C1.imperfection_amplitude_mm}}），该值来自用户指定而非制造验收实测；需结合制造工艺实测缺陷分布核查该缺陷比是否覆盖实际最不利几何偏差，否则 {{C1.capacity_margin_percent}} 的容量余量对制造偏差的适用性无法确认。\", \"工作压力下最大 Hashin 指数为 {{C1.service_hashin_index_max}}，仅表示当前弹性首层失效判据下的数值余量；需通过材料许用值与环境（湿热、老化）折减的核查确认该判据适用性，否则不能据此判断长期服役下的安全裕度。\"]}",
+        "content_checks": [
+          {
+            "raw_response": "{\"accepted\": true, \"issues\": []}",
+            "accepted": true,
+            "issues": []
+          }
+        ],
+        "status": "accepted"
+      }
+    ],
+    "review": {
+      "recommendation_candidate_id": "C1",
+      "assessment": "推荐 C1 作为当前载荷与边界条件下的设计选择：其工作压力为 {{TASK.external_pressure_MPa}}，含初始几何缺陷的损伤 Riks 分析确认极限承载压力为 {{C1.ultimate_pressure_MPa}}，容量相对工作压力的余量为 {{C1.capacity_margin_percent}}，设计校核状态为 {{C1.design_check}}，且优化目标比较值为 {{C1.objective_value}}，在本次唯一完成校核的候选里同时满足承载门槛与最小壳体质量目标。需要说明的是，该结论只适用于 {{TASK.analysis_scope}} 所限定的逐层圆柱壳模型，不能外推为含封头、法兰或分层等实际结构细节的认证结论。",
+      "tradeoffs": [],
+      "verification": [
+        "当前仅有一个候选完成校核（实际校核数为 {{TASK.result_count}}，满足推荐条件的方案数为 {{TASK.comparable_count}}），因此无法在候选之间做重量与承载余量的取舍比较；在补充第二个候选的同等分析前，不应把 {{C1.weight_kg_per_m2}} 或 {{C1.objective_value}} 视为已证明的最优质量。",
+        "极限承载由含场变量刚度退化的 Riks 分析给出，终止原因为 {{C1.riks_termination_reason}}，极限点确认为 {{C1.riks_limit_point_confirmed}}；但 {{TASK.analysis_scope}} 未覆盖封头、法兰与层间分层，需针对这些连接与界面区域补充局部建模或试验核查，否则 {{C1.ultimate_pressure_MPa}} 不能直接支撑整体结构验收判断。",
+        "分析采用缺陷比 {{TASK.imperfection_ratio}}（对应实际缺陷幅值 {{C1.imperfection_amplitude_mm}}），该值来自用户指定而非制造验收实测；需结合制造工艺实测缺陷分布核查该缺陷比是否覆盖实际最不利几何偏差，否则 {{C1.capacity_margin_percent}} 的容量余量对制造偏差的适用性无法确认。",
+        "工作压力下最大 Hashin 指数为 {{C1.service_hashin_index_max}}，仅表示当前弹性首层失效判据下的数值余量；需通过材料许用值与环境（湿热、老化）折减的核查确认该判据适用性，否则不能据此判断长期服役下的安全裕度。"
+      ],
+      "paragraph_refs": [
+        [
+          "TASK.external_pressure_MPa",
+          "C1.ultimate_pressure_MPa",
+          "C1.capacity_margin_percent",
+          "C1.design_check",
+          "C1.objective_value",
+          "TASK.analysis_scope"
+        ],
+        [
+          "TASK.result_count",
+          "TASK.comparable_count",
+          "C1.weight_kg_per_m2",
+          "C1.objective_value"
+        ],
+        [
+          "C1.riks_termination_reason",
+          "C1.riks_limit_point_confirmed",
+          "TASK.analysis_scope",
+          "C1.ultimate_pressure_MPa"
+        ],
+        [
+          "TASK.imperfection_ratio",
+          "C1.imperfection_amplitude_mm",
+          "C1.capacity_margin_percent"
+        ],
+        [
+          "C1.service_hashin_index_max"
+        ]
+      ]
+    }
+  }
+}

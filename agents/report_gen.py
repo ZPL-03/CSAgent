@@ -388,6 +388,16 @@ class ReportGenAgent(BaseAgent):
             return default
         return text
 
+    def _report_asset_path(self, value: Any) -> str:
+        """规范报告中资源路径的分隔符和重复数据目录。"""
+        if value is None:
+            return "-"
+        text = str(value).strip().replace("\\", "/")
+        parts = [part for part in text.split("/") if part]
+        while len(parts) > 1 and parts[0].casefold() == "data" and parts[1].casefold() == "data":
+            parts.pop(0)
+        return "/".join(parts) if parts else "-"
+
     def _explanation_chat(self, system_prompt: str, user_prompt: str, **kwargs: Any) -> str:
         """统一使用报告解释的输出预算，保证输入和输出不超过模型上下文。"""
         try:
@@ -614,7 +624,7 @@ class ReportGenAgent(BaseAgent):
                 f"- 后峰终止依据：{result.get('riks_termination_reason') or '-'}",
                 f"- 结论：{result.get('verdict') or '未判定'}",
                 f"- 诊断说明：{self._field_text(result.get('diagnosis_summary') or result.get('error_log'))}",
-                f"- 模态云图数据：{result.get('visualization_json') or '-'}",
+                f"- 模态云图数据：{self._report_asset_path(result.get('visualization_json'))}",
             ])
         lines.extend(["", "## 最终推荐设计方案", ""])
         recommendation = summary["recommendation"]

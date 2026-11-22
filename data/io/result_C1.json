@@ -1,0 +1,275 @@
+{
+  "capacity_assessment_status": "geometric_limit_confirmed",
+  "abaqus_job_status": "JOB_STATUS_TERMINATED_BY_EXTERNAL_REQUEST",
+  "design_revision_id": "DR_ead908409b19db961fade0e5e82e0b0521a889ff3700a857f817add1c8c8ee29",
+  "mode_eigenvalues": [
+    174.11
+  ],
+  "visualization_json": "data\\abaqus_runs\\C1\\C1_mode1.json",
+  "riks_time_last": 1.61781251,
+  "riks_lpf_max": 0.57527477,
+  "service_pressure_check_status": "passed",
+  "design_check_status": "passed",
+  "damage_observed": true,
+  "max_displacement_mm": 2.249001,
+  "first_ply_failure_element_label": 575,
+  "riks_time_at_lpf_max": 0.71781248,
+  "service_pressure_checked_MPa": 25.0,
+  "service_failure_criterion": "Hashin_2D_1980_plane_stress",
+  "linear_buckling_odb": "data\\abaqus_runs\\C1\\C1.odb",
+  "geometric_limit_pressure_MPa": 97.79671,
+  "abaqus_inp": "data\\abaqus_runs\\C1\\C1.inp",
+  "analysis_type": "linear_buckling_plus_exact_service_load_plus_capacity_riks",
+  "failure_pressure_MPa": 97.79671,
+  "service_hashin_section_point": "fraction = -0.950000, Layer = 2",
+  "failure_mode": "场变量损伤与几何非线性极限点",
+  "artifact_dir": "data\\abaqus_runs\\C1",
+  "postbuckling_pressure_MPa": 97.79671,
+  "abaqus_odb": "data\\abaqus_runs\\C1\\C1_post.odb",
+  "postbuckling_last_pressure_MPa": 72.404892,
+  "imperfection_amplitude_mm": 0.8,
+  "error_type": null,
+  "boundary_implementation": "两端边线采用 Encastre 固支约束",
+  "candidate_id": "C1",
+  "service_stress_coverage": {
+    "status": "complete",
+    "expected_section_points": 120,
+    "incomplete_element_positions": 0,
+    "checked_element_positions": 1140
+  },
+  "first_ply_failure_mode": "fiber_compression",
+  "riks_lpf_last": 0.42591113,
+  "runtime_script_sha256": "aa05a1b826a70d83e2c62064a571df487446e08e73763cc6259c03faabccf664",
+  "geometric_limit_pressure_basis": "一阶屈曲模态缺陷 Static Riks 已确认后峰极限点",
+  "postbuckling_reference_pressure_MPa": 170.0,
+  "damage_state_maxima": {
+    "SDV3": 1.0,
+    "SDV2": 1.0,
+    "SDV1": 1.0
+  },
+  "riks_termination_reason": "post_peak_drop_20_percent",
+  "first_ply_failure_section_point": "fraction = -0.950000, Layer = 2",
+  "status": "success",
+  "first_ply_failure_pressure_lower_bound_MPa": 88.398811,
+  "user_subroutine_used": true,
+  "first_ply_failure_index": 1.25183041,
+  "ultimate_pressure_MPa": 97.79671,
+  "first_ply_failure_pressure_MPa": null,
+  "riks_increment_count": 21,
+  "first_ply_failure_pressure_upper_bound_MPa": 97.79671,
+  "boundary_condition_type": "END_CLAMPED",
+  "linear_buckling_pressure_MPa": 174.11,
+  "service_inp": "data\\abaqus_runs\\C1\\C1_service.inp",
+  "ultimate_pressure_basis": "含场变量刚度退化的 Static Riks 已确认后峰极限点",
+  "damage_state_output_complete": true,
+  "service_hashin_failure_mode": "fiber_compression",
+  "postbuckling_inp": "data\\abaqus_runs\\C1\\C1_post.inp",
+  "service_hashin_index_max": 0.06471503,
+  "postbuckling_odb": "data\\abaqus_runs\\C1\\C1_post.odb",
+  "parent_design_revision_id": "DR_e029e1d09f2bac411b01361e388f88f8a4d42df7e1e018d63e5f6a2a4c71280a",
+  "service_abaqus_job_status": "JOB_STATUS_COMPLETED_SUCCESSFULLY",
+  "progressive_damage_complete": true,
+  "verification_scope": "composite_cylindrical_shell_submodel",
+  "riks_limit_point_confirmed": true,
+  "riks_post_peak_drop_ratio": 0.26946993,
+  "error_log": null,
+  "retry_count": 0,
+  "verdict": "通过",
+  "first_mode_eigenvalue": 174.11,
+  "service_odb": "data\\abaqus_runs\\C1\\C1_service.odb",
+  "design_verdict_basis": "工作压力下强度校核与已确认损伤极限压力和工作压力的比较",
+  "riks_limit_point_observed": true,
+  "first_ply_failure_criterion": "Hashin_2D_1980_plane_stress",
+  "weight_kg_per_m2": 28.54112,
+  "service_hashin_element_label": 575,
+  "run_id": "RUN_A2085760C21B",
+  "task_id": "TASK_1",
+  "session_candidate_id": "TMP_2",
+  "user_subroutine_sha256": "c804d7ddb7a6145bbf785da2e5426a4527e24fdaf6cbf4d8e34ad9f493e177e8",
+  "material_strength_sha256": "3296871ce54eb66d781936335eea7c8b848d4f3bdb8c27c8e9a1b66d0fa2a7aa",
+  "user_subroutine_path": "data\\abaqus_runs\\C1\\zhangusdfld.for",
+  "material_strength_include": "data\\abaqus_runs\\C1\\pressure_hull_strength.inc",
+  "progressive_damage_model": "irreversible_stress_triggered_field_degradation",
+  "load_summary": "外部静水压力：p=25.0 MPa",
+  "boundary_summary": "两端固支",
+  "solved_design": {
+    "hull_type": "CYLINDRICAL",
+    "geometry": {
+      "length_mm": 500.0,
+      "radius_mm": 100.0,
+      "thickness_mm": 18.064,
+      "imperfection_ratio": 0.008,
+      "radius_reference": "middle_surface"
+    },
+    "layup": {
+      "template_name": "TASK_ANGLES",
+      "layup": "[45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45]",
+      "skin_layup": "[45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45]",
+      "ply_count": 40,
+      "ply_thickness_mm": 0.4516,
+      "angles_deg": [
+        45.0,
+        90.0,
+        0.0,
+        -45.0,
+        45.0,
+        90.0,
+        0.0,
+        -45.0,
+        45.0,
+        90.0,
+        0.0,
+        -45.0,
+        45.0,
+        90.0,
+        0.0,
+        -45.0,
+        45.0,
+        90.0,
+        0.0,
+        -45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0
+      ],
+      "symmetric": true,
+      "balanced": true,
+      "skin_f0": 0.25,
+      "skin_f45": 0.5,
+      "skin_f90": 0.25
+    },
+    "load_conditions": {
+      "type": "external_pressure",
+      "label": "外部静水压力",
+      "external_pressure_MPa": 25.0
+    },
+    "boundary_conditions": {
+      "type": "END_CLAMPED",
+      "label": "两端固支",
+      "description": "圆柱耐压壳两端截面平动与转动约束，用于基准外压屈曲与后屈曲校核。",
+      "axial_edges": [
+        "X0",
+        "X1"
+      ],
+      "radial_constraint": true,
+      "rotation_constraint": true
+    },
+    "material_system": {
+      "name": "T800G/5228",
+      "density_kg_per_m3": 1580.0,
+      "E1_GPa": 147.0,
+      "E2_GPa": 9.32,
+      "G12_GPa": 4.53,
+      "nu12": 0.3,
+      "Xt_MPa": 2820.0,
+      "Xc_MPa": 1538.0,
+      "Yt_MPa": 60.2,
+      "Yc_MPa": 190.0,
+      "S_MPa": 125.0,
+      "material_key": "T800G_5228"
+    },
+    "design_targets": {
+      "primary_objective": "最小壳体质量"
+    },
+    "analysis": {
+      "use_user_subroutine": true,
+      "solver_command": "abaqus"
+    },
+    "task_constraints": {
+      "hull_type": "CYLINDRICAL",
+      "geometry_envelope": {
+        "length_mm": [
+          500.0,
+          500.0
+        ],
+        "radius_mm": [
+          100.0,
+          100.0
+        ],
+        "thickness_mm": [
+          5.0,
+          20.0
+        ],
+        "alpha_deg": [
+          10.0,
+          80.0
+        ],
+        "beta_deg": [
+          10.0,
+          80.0
+        ],
+        "imperfection_ratio": [
+          0.008,
+          0.008
+        ]
+      },
+      "radius_reference": "middle_surface",
+      "layup_constraints": {
+        "allowed_angles": [
+          0,
+          45,
+          -45,
+          90
+        ],
+        "symmetric": true,
+        "balanced": true,
+        "min_ratio_per_angle": 0.05
+      },
+      "load_conditions": {
+        "type": "external_pressure",
+        "label": "外部静水压力",
+        "external_pressure_MPa": 25.0
+      },
+      "boundary_conditions": {
+        "type": "END_CLAMPED",
+        "label": "两端固支",
+        "description": "圆柱耐压壳两端截面平动与转动约束，用于基准外压屈曲与后屈曲校核。",
+        "axial_edges": [
+          "X0",
+          "X1"
+        ],
+        "radial_constraint": true,
+        "rotation_constraint": true
+      },
+      "design_targets": {
+        "primary_objective": "最小壳体质量"
+      },
+      "material_system": {
+        "name": "T700/Epoxy",
+        "density_kg_per_m3": 1550,
+        "E1_GPa": 102.0,
+        "E2_GPa": 7.0,
+        "G12_GPa": 3.35,
+        "nu12": 0.16,
+        "Xt_MPa": 1400,
+        "Xc_MPa": 1050,
+        "Yt_MPa": 28,
+        "Yc_MPa": 105,
+        "S_MPa": 75,
+        "material_key": "T700_Epoxy",
+        "is_user_specified": false
+      }
+    },
+    "design_revision_id": "DR_ead908409b19db961fade0e5e82e0b0521a889ff3700a857f817add1c8c8ee29",
+    "parent_design_revision_id": "DR_e029e1d09f2bac411b01361e388f88f8a4d42df7e1e018d63e5f6a2a4c71280a"
+  },
+  "diagnosis_summary": "外压圆柱壳有限元校核已完成，线性屈曲压力 174.1 MPa；极限压力按“含场变量刚度退化的 Static Riks 已确认后峰极限点”计算，基准外压 170 MPa，最大 LPF=0.57527477，得到极限压力 97.8 MPa，当前结论为“通过”。",
+  "display_name": "C1"
+}

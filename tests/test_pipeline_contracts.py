@@ -1420,6 +1420,15 @@ def test_report_summarizes_provenance_without_internal_layup_dump(monkeypatch):
     assert "初始几何缺陷比：0.008" in text
 
 
+def test_report_normalizes_duplicate_data_asset_prefix(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, results, candidates = _report_sample()
+    results[0]["visualization_json"] = r"data\data\abaqus_runs\C1\C1_mode1.json"
+    text = ReportGenAgent()._render_markdown(task, results, candidates)
+    assert "模态云图数据：data/abaqus_runs/C1/C1_mode1.json" in text
+    assert "data/data/abaqus_runs" not in text
+
+
 def test_report_without_fem_never_claims_final_recommendation(monkeypatch, tmp_path):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task, _, candidates = _report_sample()

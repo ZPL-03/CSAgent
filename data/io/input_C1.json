@@ -1,0 +1,414 @@
+{
+  "candidate_id": "C1",
+  "display_name": "C1",
+  "source": "DOE",
+  "hull_type": "CYLINDRICAL",
+  "geometry": {
+    "length_mm": 500.0,
+    "radius_mm": 100.0,
+    "thickness_mm": 18.064,
+    "imperfection_ratio": 0.008,
+    "radius_reference": "middle_surface"
+  },
+  "layup": {
+    "template_name": "TASK_ANGLES",
+    "layup": "[45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45]",
+    "skin_layup": "[45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45]",
+    "ply_count": 40,
+    "ply_thickness_mm": 0.4516,
+    "angles_deg": [
+      45.0,
+      90.0,
+      0.0,
+      -45.0,
+      45.0,
+      90.0,
+      0.0,
+      -45.0,
+      45.0,
+      90.0,
+      0.0,
+      -45.0,
+      45.0,
+      90.0,
+      0.0,
+      -45.0,
+      45.0,
+      90.0,
+      0.0,
+      -45.0,
+      -45.0,
+      0.0,
+      90.0,
+      45.0,
+      -45.0,
+      0.0,
+      90.0,
+      45.0,
+      -45.0,
+      0.0,
+      90.0,
+      45.0,
+      -45.0,
+      0.0,
+      90.0,
+      45.0,
+      -45.0,
+      0.0,
+      90.0,
+      45.0
+    ],
+    "symmetric": true,
+    "balanced": true,
+    "skin_f0": 0.25,
+    "skin_f45": 0.5,
+    "skin_f90": 0.25
+  },
+  "rule_check": {
+    "is_valid": true,
+    "errors": [],
+    "suggestions": [],
+    "details": {
+      "radius_reference_ok": true,
+      "task_context_ok": true,
+      "length_mm_ok": true,
+      "radius_mm_ok": true,
+      "thickness_mm_ok": true,
+      "imperfection_ratio_ok": true,
+      "slenderness_ok": true,
+      "thickness_radius_ratio_ok": true,
+      "imperfection_positive_ok": true,
+      "layup_defined": true,
+      "ply_count_ok": true,
+      "balanced": true,
+      "symmetric": true,
+      "angle_range_ok": true,
+      "allowed_angles_ok": true,
+      "angle_ratios_ok": true,
+      "solver_length_ok": true,
+      "solver_radius_ok": true,
+      "solver_thickness_ok": true,
+      "solver_imperfection_ok": true
+    }
+  },
+  "surrogate_ultimate_pressure_MPa": 79.967,
+  "surrogate_PBIPF_MPa": 79.967,
+  "surrogate_uncertainty_MPa": null,
+  "asme_linear_buckling_pressure_MPa": 96.809,
+  "linear_buckling_source": "ASME RD-1172线性屈曲公式",
+  "surrogate_weight": 28.541,
+  "rank_score": 76.5421,
+  "rationale": "DOE 拉丁超立方探索生成 | 材料=T800G/5228 | 铺层模板=TASK_ANGLES",
+  "material_system": {
+    "name": "T800G/5228",
+    "density_kg_per_m3": 1580.0,
+    "E1_GPa": 147.0,
+    "E2_GPa": 9.32,
+    "G12_GPa": 4.53,
+    "nu12": 0.3,
+    "Xt_MPa": 2820.0,
+    "Xc_MPa": 1538.0,
+    "Yt_MPa": 60.2,
+    "Yc_MPa": 190.0,
+    "S_MPa": 125.0,
+    "material_key": "T800G_5228"
+  },
+  "load_conditions": {
+    "type": "external_pressure",
+    "label": "外部静水压力",
+    "external_pressure_MPa": 25.0
+  },
+  "boundary_conditions": {
+    "type": "END_CLAMPED",
+    "label": "两端固支",
+    "description": "圆柱耐压壳两端截面平动与转动约束，用于基准外压屈曲与后屈曲校核。",
+    "axial_edges": [
+      "X0",
+      "X1"
+    ],
+    "radial_constraint": true,
+    "rotation_constraint": true
+  },
+  "design_targets": {
+    "primary_objective": "最小壳体质量"
+  },
+  "task_constraints": {
+    "hull_type": "CYLINDRICAL",
+    "geometry_envelope": {
+      "length_mm": [
+        500.0,
+        500.0
+      ],
+      "radius_mm": [
+        100.0,
+        100.0
+      ],
+      "thickness_mm": [
+        5.0,
+        20.0
+      ],
+      "alpha_deg": [
+        10.0,
+        80.0
+      ],
+      "beta_deg": [
+        10.0,
+        80.0
+      ],
+      "imperfection_ratio": [
+        0.008,
+        0.008
+      ]
+    },
+    "radius_reference": "middle_surface",
+    "layup_constraints": {
+      "allowed_angles": [
+        0,
+        45,
+        -45,
+        90
+      ],
+      "symmetric": true,
+      "balanced": true,
+      "min_ratio_per_angle": 0.05
+    },
+    "load_conditions": {
+      "type": "external_pressure",
+      "label": "外部静水压力",
+      "external_pressure_MPa": 25.0
+    },
+    "boundary_conditions": {
+      "type": "END_CLAMPED",
+      "label": "两端固支",
+      "description": "圆柱耐压壳两端截面平动与转动约束，用于基准外压屈曲与后屈曲校核。",
+      "axial_edges": [
+        "X0",
+        "X1"
+      ],
+      "radial_constraint": true,
+      "rotation_constraint": true
+    },
+    "design_targets": {
+      "primary_objective": "最小壳体质量"
+    },
+    "material_system": {
+      "name": "T700/Epoxy",
+      "density_kg_per_m3": 1550,
+      "E1_GPa": 102.0,
+      "E2_GPa": 7.0,
+      "G12_GPa": 3.35,
+      "nu12": 0.16,
+      "Xt_MPa": 1400,
+      "Xc_MPa": 1050,
+      "Yt_MPa": 28,
+      "Yc_MPa": 105,
+      "S_MPa": 75,
+      "material_key": "T700_Epoxy",
+      "is_user_specified": false
+    }
+  },
+  "generation_audit": {
+    "source_targets": {
+      "total": 2,
+      "LLM": 1,
+      "CASE_TRANSFER": 1,
+      "DOE": 0
+    },
+    "raw_counts": {
+      "LLM": 1,
+      "CASE_TRANSFER": 0,
+      "DOE": 1
+    },
+    "valid_counts": {
+      "LLM": 1,
+      "CASE_TRANSFER": 0,
+      "DOE": 1
+    },
+    "invalid_counts": {
+      "LLM": 0,
+      "CASE_TRANSFER": 0,
+      "DOE": 0
+    },
+    "added_counts": {
+      "LLM": 1,
+      "CASE_TRANSFER": 0,
+      "DOE": 1
+    },
+    "duplicate_counts": {
+      "LLM": 0,
+      "CASE_TRANSFER": 0,
+      "DOE": 0,
+      "total": 0
+    },
+    "filter_reasons": {
+      "LLM": [],
+      "CASE_TRANSFER": [],
+      "DOE": []
+    },
+    "doe_rounds": 1,
+    "doe_fill_count": 1,
+    "llm_diagnostics": [],
+    "llm_requests": [
+      {
+        "system_prompt": "你是 csllm 领域微调模型中的复合材料耐压壳候选方案生成助手。输入是系统整理的工程任务书，不是原始用户自然语言，也不是 JSON 任务契约。请按自然语言工程回答风格输出，候选方案表是主体，表外说明保持简洁。候选方案必须用 Markdown 表格表达，列名中直接写出编号、材料、长度、半径或内径、厚度、完整铺层形式、缺陷比和推荐理由。铺层使用完整数值层序表达，不另列未参与层序定义的 alpha、beta 参数。表格中的推荐理由必须用一句话同时包含结构性能依据和制造/缺陷风险依据，不要只写泛化结论。只能把“用户已给信息”中列出的内容写成用户事实；用户没有给出的工况、材料、几何、目标或边界，不要当成用户事实写入回答。知识证据单元的 applicability_context 是来源适用条件，evidence_kind 和 evidence_usage 标明证据类型与使用范围；source_conditions_only 仅支持来源条件下的结论，不能作为当前候选的计算结果。为了形成候选而提出的材料和铺层角必须写成候选建议值，不能写成用户已给条件。缺陷比采用任务给定的固定分析值。每个候选必须先满足系统参数域约束；对称铺层展开后的物理层数不得少于约束给出的最小层数，不能用过短的对称基元代替完整层序。不要输出 JSON，不要输出 XML 标签，不要展开长篇推理过程。",
+        "user_prompt": "工程任务：批量生成复合材料耐压壳初始候选方案。\n设计对象：外压圆柱耐压壳\n需要生成的 LLM 来源候选数量：1\n\n用户已给信息：\n- 候选池总数：2\n- 初筛保留：1\n- 设计对象：复合材料外压圆柱耐压壳\n- 外压：25.0 MPa\n- 固定几何约束：长度=500.0，半径=100.0，缺陷比=0.008\n\n系统候选字段约束（用于保证候选可解析和可校核，不代表用户已给事实）：\n- 材料必须从项目材料库选择：T700/Epoxy、T800G/5228、M40J/TDE-85、IM7-8552\n- 长度 L(mm) 必须为数值；参考尺寸只表示设计中心，候选值仍需在 500-500 内提出；只有固定几何约束才必须沿用\n- 半径 R(mm) 必须为数值；参考尺寸只表示设计中心，候选值仍需在 100-100 内提出；只有固定几何约束才必须沿用\n- 厚度 t(mm) 必须为数值；参考尺寸只表示设计中心，候选值仍需在 5-20 内提出；只有固定几何约束才必须沿用\n- 初始几何缺陷比：任务采用 0.008（8‰），所有候选使用同一数值\n- 铺层形式用数值角度、重复组和中面对称记号表达；每个允许角度都必须达到 min_ratio_per_angle，不得省略 0 度等必需方向\n- 展开后的物理层数不得少于 16 层\n- 物理铺层约束：{'allowed_angles': [0, 45, -45, 90], 'symmetric': True, 'balanced': True, 'min_ratio_per_angle': 0.05}；symmetric=true 时必须逐层镜像，可使用 [...]s；允许角度集合不等于实际使用角度\n\n项目知识库/知识图谱依据：\n{\"chunk_id\":\"SRC_d7b3438f5c94e8e4_image_ocr_3991721938c8\",\"chunk_fingerprint\":\"3991721938c8fc769aa56d9a0af113cc7a8a42bd\",\"record_id\":\"SRC_d7b3438f5c94e8e4\",\"source_id\":\"SRC_d7b3438f5c94e8e4\",\"document_title\":\"静水压下含缺陷中厚复合材料圆柱耐压壳的极限强度\",\"title\":\"静水压下含缺陷中厚复合材料圆柱耐压壳的极限强度\",\"section_path\":[\"1.1 GFRP 圆柱壳试验模型\"],\"page_start\":0,\"page_end\":0,\"doi\":\"\",\"source_url\":\"\",\"year\":\"\",\"venue\":\"pdf\",\"retrieval_eligible\":true,\"evidence_kind\":\"text\",\"evidence_usage\":\"reference\",\"applicability_context\":[],\"table_evidence\":[],\"content_quality_version\":\"3\",\"content_quality_issues\":[],\"retrieval_scope\":\"main\",\"load_case_tag\":\"external_pressure\",\"design_platform_scope\":\"pressure_hull_pressure_vessel_design\",\"formula_validity\":\"none\",\"table_structure_status\":\"none\",\"text\":\"# 静水压下含缺陷中厚复合材料圆柱耐压壳的极限强度\\n## 1.1 GFRP 圆柱壳试验模型\\n\\nCylindrical shell (GFRP)\\nSeal ring (Rubber)\\nClosure (Steel)\\nNut (Steel)\\nScrew (Steel)\\nUnit: mm\\nφ53\\nφ125\\nφ—Diameter\",\"relations\":[]}\n\n{\"chunk_id\":\"SRC_635bb429ad94767e_fulltext_4e858ca3f621\",\"chunk_fingerprint\":\"4e858ca3f6219cddd77eb50134d1cc6e6a3ad1db\",\"record_id\":\"SRC_635bb429ad94767e\",\"source_id\":\"SRC_635bb429ad94767e\",\"document_title\":\"Research on Methodology of Optimization Design for Composite Material Pressure Hull of Underwater Vehicle\",\"title\":\"Research on Methodology of Optimization Design for Composite Material Pressure Hull of Underwater Vehicle\",\"section_path\":[\"2.6.1复合材料圆柱壳性能分析\"],\"page_start\":0,\"page_end\":0,\"doi\":\"\",\"source_url\":\"\",\"year\":\"\",\"venue\":\"pdf\",\"retrieval_eligible\":true,\"evidence_kind\":\"text\",\"evidence_usage\":\"reference\",\"applicability_context\":[],\"table_evidence\":[],\"content_quality_version\":\"3\",\"content_quality_issues\":[],\"retrieval_scope\":\"main\",\"load_case_tag\":\"external_pressure\",\"design_platform_scope\":\"pressure_hull_pressure_vessel_design\",\"formula_validity\":\"valid\",\"table_structure_status\":\"none\",\"text\":\"# Research on Methodology of Optimization Design for Composite Material Pressure Hull of Underwater Vehicle\\n## 2.6.1复合材料圆柱壳性能分析\\n\\n圆柱耐压壳是水下航行器常用基本设备,由于复合材料比强度大、比刚度高和可设计性等特点,采用复合材料圆柱壳制造水下航行器耐压壳具有优越性。耐压壳结构长度 $L = 1000 \\\\mathrm { m m }$,内半径R=150mm,金属内衬材料选用7075铝合金,厚度为$t _ { m } = 1 \\\\mathrm { m m }$,采用T700/环氧树脂复合材料,为避免拉伸-弯曲耦合影响采用10层对称铺设,各单层材料性质相同,材料性能参数如表2.10所示。圆柱耐压壳层合板厚$t = 25 \\\\mathrm { m m }$,纤维体积分数 $V _ { f } = 0.6$,铺层角 $[ 0 ^ { \\\\circ }, 90 ^ { \\\\circ }, 45 ^ { \\\\circ }, - 45 ^ { \\\\circ }, 0 ^ { \\\\circ } ] _ { \\\\mathrm { s y m } }$ 中\\n\\n表2.10复合材料耐压壳材料属性 Table 2.10 The material properties of composite pressure hull\",\"relations\":[{\"evidence_kind\":\"text\",\"evidence_usage\":\"reference\",\"applicability_context\":[],\"source_type\":\"Structure\",\"source\":\"Cylindrical Shell\",\"relation\":\"HAS_PROPERTY\",\"target\":\"Stiffness\",\"target_type\":\"Property\",\"record_id\":\"SRC_635bb429ad94767e\",\"evidence_chunk_id\":\"SRC_635bb429ad94767e_fulltext_4e858ca3f621\",\"evidence_chunk_fingerprint\":\"4e858ca3f6219cddd77eb50134d1cc6e6a3ad1db\",\"evidence_source_id\":\"SRC_635bb429ad94767e\",\"evidence_document_title\":\"Research on Methodology of Optimization Design for Composite Material Pressure Hull of Underwater Vehicle\",\"evidence_source_url\":\"\",\"evidence_doi\":\"\",\"page_start\":0,\"page_end\":0,\"section_path\":[\"2.6.1复合材料圆柱壳性能分析\"]},{\"evidence_kind\":\"text\",\"evidence_usage\":\"reference\",\"applicability_context\":[],\"source_type\":\"DesignVariable\",\"source\":\"Radius\",\"relation\":\"MENTIONED_IN\",\"target\":\"SRC_635bb429ad94767e\",\"target_type\":\"Literature\",\"record_id\":\"SRC_635bb429ad94767e\",\"evidence_chunk_id\":\"SRC_635bb429ad94767e_fulltext_4e858ca3f621\",\"evidence_chunk_fingerprint\":\"4e858ca3f6219cddd77eb50134d1cc6e6a3ad1db\",\"evidence_source_id\":\"SRC_635bb429ad94767e\",\"evidence_document_title\":\"Research on Methodology of Optimization Design for Composite Material Pressure Hull of Underwater Vehicle\",\"evidence_source_url\":\"\",\"evidence_doi\":\"\",\"page_start\":0,\"page_end\":0,\"section_path\":[\"2.6.1复合材料圆柱壳性能分析\"]}]}\n\n硬约束优先级高于知识片段中的示例：候选必须满足系统候选字段约束和物理铺层层数要求；知识片段中的尺寸、材料和层序不能直接替代当前任务的候选约束。\n\n回答要求：\n1. 候选表给出 1 行；每行必须包含可解析的材料、长度、半径、厚度、缺陷比、完整铺层形式。\n2. 表格列使用：编号 | 材料 | 长度(mm) | 半径(mm) | 厚度(mm) | 缺陷比 | 铺层形式 | 推荐理由。\n3. 推荐理由必须说明结构性能依据和制造/缺陷风险依据，例如屈曲稳定性、环向/轴向刚度折中、缠绕或铺放可实现性、铺层角偏差敏感性、缺陷控制风险。\n4. 未给出的用户事实不要补写为输入条件；如果为了形成候选而提出建议值，请在回答中表明这是候选建议值。\n5. 每个候选展开后的物理层数至少为 16 层；若使用 [..]s，对称基元至少包含 8 层。\n6. 最后检查：展开后的物理铺层必须至少 16 层；对称基元至少 8 层。可采用 [0/45/-45/90/0/45/-45/90]s 作为层数格式示例，但它不是固定设计；禁止输出少于该层数的层序。\n7. 表格后最多保留 3 条简短工程说明，不要输出完整报告。",
+        "max_tokens": 3000,
+        "batch_count": 1,
+        "accepted_count": 0
+      }
+    ],
+    "knowledge_evidence": {
+      "budget_chars": 12000,
+      "used_chars": 3839,
+      "included": [
+        {
+          "chunk_id": "SRC_d7b3438f5c94e8e4_image_ocr_3991721938c8",
+          "chunk_fingerprint": "3991721938c8fc769aa56d9a0af113cc7a8a42bd",
+          "record_id": "SRC_d7b3438f5c94e8e4",
+          "chars": 943,
+          "relations": 0
+        },
+        {
+          "chunk_id": "SRC_635bb429ad94767e_fulltext_4e858ca3f621",
+          "chunk_fingerprint": "4e858ca3f6219cddd77eb50134d1cc6e6a3ad1db",
+          "record_id": "SRC_635bb429ad94767e",
+          "chars": 2894,
+          "relations": 2
+        }
+      ],
+      "excluded": [
+        {
+          "chunk_id": "LIT_bb78dfbe911b_fulltext_86adc76a4bf8",
+          "chunk_fingerprint": "86adc76a4bf8cb5f430ab5d7b7c84835c576fa44",
+          "record_id": "LIT_bb78dfbe911b",
+          "reason": "context_budget"
+        }
+      ],
+      "builtin_source_package_sha256": "385175cc1caec01671499af1bb75cf253ddfe155b11ba6949e16bfa843541bc8",
+      "builtin_generated_at": "2026-11-19T15:54:55.137856+00:00"
+    },
+    "summary": "初始配额 LLM=1 / 案例迁移=1 / DOE=0；有效进入候选池 LLM=1，案例迁移=0，DOE补足=1；规则过滤 LLM=0，案例迁移=0；结构去重=0"
+  },
+  "surrogate_calibration_status": "not_available",
+  "surrogate_prediction_status": "positive",
+  "linear_buckling_feature_Q": 96.80874,
+  "screening_breakdown": {
+    "formula": "score = 1.00 × P_ult - 0.12 × 面密度",
+    "pressure_component": 79.967,
+    "weight_component": 3.4249,
+    "surrogate_detail": {
+      "raw_PBIPF_MPa": 79.96714624408614,
+      "PBIPF_MPa": 79.96714624408614,
+      "ultimate_pressure_MPa": 79.96714624408614,
+      "asme_linear_buckling_pressure_MPa": 96.80874,
+      "linear_buckling_feature_Q": 96.80874,
+      "linear_buckling_source": "ASME RD-1172线性屈曲公式",
+      "uncertainty_MPa": null,
+      "calibration_status": "not_available",
+      "model_validation": {
+        "surrogate_model_id": "PBIPF_CYLINDRICAL_21F",
+        "input_dimension": 21,
+        "supported_hull_types": [
+          "CYLINDRICAL"
+        ],
+        "hull_type": "CYLINDRICAL",
+        "model_type": "linear",
+        "training_q_source": "finite_element_eigenvalue",
+        "prediction_q_source": "ASME_RD_1172",
+        "regression_testing_rmse_MPa": 5.042441872483573,
+        "deployment_rmse_MPa": 7.883273978842711,
+        "outside_descriptor_range": false
+      },
+      "prediction_status": "positive",
+      "PBIPF_descriptors": {
+        "D1": 0.394353627103,
+        "D2": 3628.768420076849,
+        "D3": 0.346177357878
+      },
+      "PBIPF_imperfection_input": "permille",
+      "stiffness_terms": {
+        "A22": 1118602.794746841,
+        "B23": 2.9103830456733704e-11,
+        "D12": 9638032.110908266,
+        "D22": 31631280.62907583,
+        "D33": 10481895.391173031
+      },
+      "areal_density_kg_per_m2": 28.54112
+    }
+  },
+  "screening_summary": "描述符回归压力估计=80 MPa，ASME RD-1172线性屈曲压力=96.8 MPa，公式测试 RMSE=5 MPa，ASME代入评估 RMSE=7.9 MPa，校准留一验证 RMSE=未提供，校准状态=not_available，面密度=28.5 kg/m^2。 按 score = 1.00 × P_ult - 0.12 × 面密度 得分 76.5。",
+  "screening_rank": 1,
+  "screening_selected": true,
+  "selection_reason": "Top-1 入选：描述符回归压力估计=80 MPa，ASME RD-1172线性屈曲压力=96.8 MPa，公式测试 RMSE=5 MPa，ASME代入评估 RMSE=7.9 MPa，校准留一验证 RMSE=未提供，校准状态=not_available，面密度=28.5 kg/m^2。 按 score = 1.00 × P_ult - 0.12 × 面密度 得分 76.5。 当前排序靠前，适合优先进入真实有限元校核。",
+  "provenance": {
+    "source_layup": {
+      "template_name": "TASK_ANGLES",
+      "layup": "[45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45]",
+      "skin_layup": "[45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/45/90/0/-45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45/-45/0/90/45]",
+      "ply_count": 40,
+      "ply_thickness_mm": 0.4516,
+      "angles_deg": [
+        45.0,
+        90.0,
+        0.0,
+        -45.0,
+        45.0,
+        90.0,
+        0.0,
+        -45.0,
+        45.0,
+        90.0,
+        0.0,
+        -45.0,
+        45.0,
+        90.0,
+        0.0,
+        -45.0,
+        45.0,
+        90.0,
+        0.0,
+        -45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0,
+        -45.0,
+        0.0,
+        90.0,
+        45.0
+      ],
+      "symmetric": true,
+      "balanced": true,
+      "skin_f0": 0.25,
+      "skin_f45": 0.5,
+      "skin_f90": 0.25
+    },
+    "fem_input_layup": "explicit_physical_plies"
+  },
+  "fem_readiness": {
+    "status": "ready_for_cylindrical_shell_screening",
+    "layup_expanded": true,
+    "input_contract": "explicit_physical_plies"
+  },
+  "session_candidate_id": "TMP_2",
+  "run_id": "RUN_A2085760C21B",
+  "task_id": "TASK_1",
+  "design_revision_id": "DR_ead908409b19db961fade0e5e82e0b0521a889ff3700a857f817add1c8c8ee29",
+  "analysis": {
+    "use_user_subroutine": true,
+    "solver_command": "abaqus"
+  },
+  "parent_design_revision_id": "DR_e029e1d09f2bac411b01361e388f88f8a4d42df7e1e018d63e5f6a2a4c71280a"
+}

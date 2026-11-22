@@ -1,0 +1,111 @@
+{
+  "task_id": "TASK_1",
+  "created_at": "2026-11-22T12:54:33.882415+00:00",
+  "source": "gui_instruction",
+  "task": {
+    "application": "复合材料外压圆柱耐压壳",
+    "hull_type": "CYLINDRICAL",
+    "load_conditions": {
+      "type": "external_pressure",
+      "label": "外部静水压力",
+      "external_pressure_MPa": 25.0
+    },
+    "boundary_conditions": {
+      "type": "END_CLAMPED",
+      "label": "两端固支",
+      "description": "圆柱耐压壳两端截面平动与转动约束，用于基准外压屈曲与后屈曲校核。",
+      "axial_edges": [
+        "X0",
+        "X1"
+      ],
+      "radial_constraint": true,
+      "rotation_constraint": true
+    },
+    "geometry_envelope": {
+      "length_mm": [
+        500.0,
+        500.0
+      ],
+      "radius_mm": [
+        100.0,
+        100.0
+      ],
+      "thickness_mm": [
+        5.0,
+        20.0
+      ],
+      "alpha_deg": [
+        10.0,
+        80.0
+      ],
+      "beta_deg": [
+        10.0,
+        80.0
+      ],
+      "imperfection_ratio": [
+        0.008,
+        0.008
+      ]
+    },
+    "radius_reference": "middle_surface",
+    "candidate_generation_preferences": {
+      "total_candidates": 2,
+      "llm_candidates": null,
+      "case_transfer_candidates": null,
+      "doe_candidates": null,
+      "source_allocation_mode": "ratio_2_1_1"
+    },
+    "screening_preferences": {
+      "top_k_candidates": 1
+    },
+    "material_system": {
+      "name": "T700/Epoxy",
+      "density_kg_per_m3": 1550,
+      "E1_GPa": 102.0,
+      "E2_GPa": 7.0,
+      "G12_GPa": 3.35,
+      "nu12": 0.16,
+      "Xt_MPa": 1400,
+      "Xc_MPa": 1050,
+      "Yt_MPa": 28,
+      "Yc_MPa": 105,
+      "S_MPa": 75,
+      "material_key": "T700_Epoxy",
+      "is_user_specified": false
+    },
+    "layup_constraints": {
+      "allowed_angles": [
+        0,
+        45,
+        -45,
+        90
+      ],
+      "symmetric": true,
+      "balanced": true,
+      "min_ratio_per_angle": 0.05
+    },
+    "design_targets": {
+      "primary_objective": "最小壳体质量"
+    },
+    "user_input_facts": {
+      "candidate_generation": {
+        "total_candidates": 2,
+        "top_k_candidates": 1
+      },
+      "application": "复合材料外压圆柱耐压壳",
+      "load_conditions": {
+        "type": "external_pressure",
+        "external_pressure_MPa": 25.0
+      },
+      "fixed_geometry": {
+        "length_mm": 500.0,
+        "radius_mm": 100.0,
+        "imperfection_ratio": 0.008
+      }
+    },
+    "analysis_condition_sources": {
+      "imperfection_ratio": "user"
+    }
+  },
+  "run_id": "RUN_A2085760C21B"
+}
