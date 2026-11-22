@@ -43,9 +43,15 @@ class ReportGenAgent(BaseAgent):
         self.llm_config = load_llm_config()
         self.llm_backend: LLMBackend | None = None
         explanation_config = self.llm_config.get("report_explanation", {})
-        self.explanation_max_output_tokens = max(
-            512, int(explanation_config.get("max_output_tokens", 2048) or 2048)
-        )
+        raw_output_tokens = explanation_config.get("max_output_tokens", 2048)
+        if isinstance(raw_output_tokens, bool):
+            raise ValueError("report_explanation.max_output_tokens 必须为正整数")
+        try:
+            self.explanation_max_output_tokens = int(raw_output_tokens)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("report_explanation.max_output_tokens 必须为正整数") from exc
+        if self.explanation_max_output_tokens <= 0:
+            raise ValueError("report_explanation.max_output_tokens 必须为正整数")
         self._last_llm_explanation_used = False
         self._last_llm_explanation_audit = {}
         if auto_llm_enabled():
@@ -93,21 +99,15 @@ class ReportGenAgent(BaseAgent):
             "weight_kg_per_m2": candidate.get("surrogate_weight") or candidate.get("weight_kg_per_m2"),
         }
 
-    def _clip_explanation_text(self, value: Any, limit: int = 320) -> str | None:
-        """限制解释上下文中的自由文本长度，完整原文仍保留在正式报告和审计文件中。"""
-        if value is None:
-            return None
-        text = str(value).strip()
-        if not text:
-            return None
-        return text if len(text) <= limit else text[:limit].rstrip() + "…"
-
     def _compact_explanation_candidate(self, candidate: Dict[str, Any]) -> Dict[str, Any]:
-        """保留方案比较所需字段，避免把运行审计和模型原文重复送入解释模型。"""
-        compact = self._compact_candidate_record(candidate)
-        for key in ("rationale", "screening_summary", "selection_reason"):
-            compact[key] = self._clip_explanation_text(compact.get(key))
-        return compact
+        """只投影预筛比较所需的结构化字段，不传入候选原文和运行日志。"""
+        fields = (
+            "candidate_id", "session_candidate_id", "source", "screening_rank",
+            "screening_selected", "surrogate_ultimate_pressure_MPa",
+            "surrogate_prediction_status", "asme_linear_buckling_pressure_MPa",
+            "rank_score", "weight_kg_per_m2",
+        )
+        return {key: candidate.get(key) for key in fields if candidate.get(key) is not None}
 
     def _candidate_pool_summary(self, candidates: List[Dict]) -> Dict[str, Any]:
         """为解释模型提供候选池统计，不发送未校核候选的逐项明细。"""
@@ -131,44 +131,35 @@ class ReportGenAgent(BaseAgent):
             }
         return {
             "total_count": len(candidates),
-            "source_counts": source_counts,
+            "source_counts": dict(sorted(source_counts.items())),
             "screening_selected_count": len(selected_ids),
-            "screening_selected_ids": selected_ids,
+            "screening_selected_ids": sorted(selected_ids),
             "surrogate_pressure_range_MPa": pressure_range,
         }
 
+    def _stable_value(self, value: Any) -> Any:
+        """递归稳定诊断映射的键顺序，完整保留值，不按位置丢弃字段。"""
+        if isinstance(value, dict):
+            return {str(key): self._stable_value(value[key]) for key in sorted(value, key=str)}
+        if isinstance(value, list):
+            return [self._stable_value(item) for item in value]
+        return value
+
     def _compact_explanation_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
-        """只保留工程评议需要的结果字段，排除运行工件和嵌套诊断。"""
-        text_fields = {
-            "ultimate_pressure_basis", "failure_mode", "verification_scope",
-            "diagnosis_summary", "progressive_damage_model", "riks_termination_reason",
-        }
+        """只投影非事实表中已提供的完整 FEM 诊断，避免与 facts 重复传输。"""
         fields = (
-            "candidate_id", "session_candidate_id", "display_name", "status", "solved_geometry",
-            "material", "layup", "ultimate_pressure_MPa", "verified_capacity",
-            "linear_buckling_pressure_MPa", "ultimate_pressure_basis", "riks_lpf_max",
-            "imperfection_amplitude_mm", "solved_imperfection_ratio", "weight_kg_per_m2", "verdict",
-            "service_pressure_checked_MPa", "service_hashin_index_max", "service_pressure_check_status",
+            "candidate_id", "session_candidate_id", "status", "design_check_status",
+            "capacity_assessment_status", "verified_capacity", "service_pressure_check_status",
             "riks_increment_count", "riks_limit_point_confirmed", "progressive_damage_complete",
             "damage_state_output_complete", "progressive_damage_model", "damage_state_maxima",
-            "service_stress_coverage", "riks_termination_reason", "verification_scope",
-            "design_check_status", "capacity_assessment_status", "diagnosis_summary",
+            "service_stress_coverage", "failure_mode", "verification_scope", "diagnosis_summary",
         )
         compact: Dict[str, Any] = {}
         for key in fields:
             if key not in result:
                 continue
             value = result.get(key)
-            if key in text_fields:
-                compact[key] = self._clip_explanation_text(value)
-            elif key in {"damage_state_maxima", "service_stress_coverage"} and isinstance(value, dict):
-                compact[key] = {
-                    str(name): self._clip_explanation_text(item, limit=96)
-                    if isinstance(item, str) else item
-                    for name, item in list(value.items())[:12]
-                }
-            else:
-                compact[key] = value
+            compact[key] = self._stable_value(value)
         return compact
 
     def _explanation_facts(self, summary: Dict[str, Any]) -> List[Dict[str, Any]]:
@@ -441,7 +432,7 @@ class ReportGenAgent(BaseAgent):
             "screened_candidates": [self._compact_explanation_candidate(candidate)
                                     for candidate in summary.get("screened_candidates", [])],
             "candidate_pool_summary": self._candidate_pool_summary(summary.get("all_candidates", [])),
-            "results": [
+            "result_diagnostics": [
                 self._compact_explanation_result(result)
                 for result in summary.get("results", [])
             ],
@@ -457,8 +448,9 @@ class ReportGenAgent(BaseAgent):
                                                if item.get("imperfection_ratio") is not None}),
             },
             "field_semantics": {
-                "candidate_sets": "candidate_pool_summary 统计全部候选，screened_candidates 为预筛入选候选，results 为实际校核结果；aggregate 只统计 results，未送检候选不在统计母集中。",
+                "candidate_sets": "candidate_pool_summary 统计全部候选，screened_candidates 为预筛入选候选，facts 与 result_diagnostics 共同描述实际校核结果；aggregate 只统计 results，未送检候选不在统计母集中。",
                 "result_assessments": "passed 为设计校核通过，failed 为设计校核不通过，unknown 为求解失败、未判定或结果语义不一致。",
+                "result_diagnostics": "result_diagnostics 只保存未在 facts 中重复出现的完整诊断字段；数值、单位和推荐依据以 facts 为准。",
                 "recommendation": "selected 为按任务目标选出的推荐对象，ranked 为具备完整证据且可比较的方案，excluded 记录未入选原因。",
                 "layup": "symmetric 和 balanced 是逐层核查结果；false 表示属性不满足，null 表示没有记录。",
                 "pressure_checks": "工作压力下检查应力与首层失效；极限压力由含损伤 Riks 分析的已确认极限点确定，并与工作压力比较。",

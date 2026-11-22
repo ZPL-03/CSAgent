@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 import pytest
 
 from core.llm_backend import LLMBackend, LLMCallError
@@ -127,7 +129,6 @@ def test_probe_llm_backends_reports_live_status_without_secrets(monkeypatch) -> 
     ("正文", None, "未完整结束"),
 ])
 def test_llm_backend_rejects_incomplete_answers(monkeypatch, content, finish_reason, expected) -> None:
-    from types import SimpleNamespace
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "0")
     backend = LLMBackend(
         {
@@ -169,3 +170,63 @@ def test_llm_backend_rejects_incomplete_answers(monkeypatch, content, finish_rea
     assert backend.last_call_trace[0]["finish_reason"] == finish_reason
     assert backend.last_call_trace[0]["status"] == "failed"
     assert "reasoning-key" not in str(backend.last_call_trace)
+
+
+def test_llm_backend_rejects_context_overflow_before_http_and_uses_fallback(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "0")
+    backend = LLMBackend({
+        "backends": [
+            {"name": "primary", "base_url": "http://primary.local/v1", "api_key": "p",
+             "model": "primary", "max_tokens": 8, "context_window_tokens": 32},
+            {"name": "fallback", "base_url": "http://fallback.local/v1", "api_key": "f",
+             "model": "fallback", "max_tokens": 8, "context_window_tokens": 1024},
+        ]
+    })
+    calls = []
+
+    class FakeCompletions:
+        def __init__(self, owner):
+            self.owner = owner
+
+        def create(self, **_payload):
+            calls.append(self.owner.base_url)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="ok"), finish_reason="stop")],
+                usage=SimpleNamespace(prompt_tokens=10, completion_tokens=1, total_tokens=11),
+            )
+
+    class FakeOpenAI:
+        def __init__(self, base_url, **_kwargs):
+            self.base_url = base_url
+            self.chat = SimpleNamespace(completions=FakeCompletions(self))
+
+    backend._openai_cls = FakeOpenAI
+    assert backend.chat("系统" * 30, "用户", max_tokens_override=8) == "ok"
+    assert calls == ["http://fallback.local/v1"]
+    assert backend.last_call_trace[0]["error_type"] == "ContextBudgetError"
+    assert backend.last_call_trace[0]["context_budget_status"] == "exceeded"
+    assert backend.last_call_trace[1]["context_budget_status"] == "within_limit"
+    assert backend.last_call_trace[1]["usage"]["total_tokens"] == 11
+
+
+def test_llm_backend_records_incomplete_output_as_explicit_failure(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "0")
+    backend = LLMBackend({
+        "backends": [{"name": "primary", "base_url": "http://primary.local/v1", "api_key": "p",
+                      "model": "primary", "max_tokens": 8, "context_window_tokens": 1024}]
+    })
+
+    class FakeOpenAI:
+        def __init__(self, **_kwargs):
+            self.chat = SimpleNamespace(completions=SimpleNamespace(create=lambda **_payload: SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="{"), finish_reason="length")],
+                usage=SimpleNamespace(prompt_tokens=4, completion_tokens=8, total_tokens=12),
+            )))
+
+    backend._openai_cls = FakeOpenAI
+    with pytest.raises(LLMCallError, match="未完整结束"):
+        backend.chat("system", "user", max_tokens_override=8)
+    trace = backend.last_call_trace[0]
+    assert trace["error_type"] == "IncompleteOutputError"
+    assert trace["finish_reason"] == "length"
+    assert trace["usage"]["completion_tokens"] == 8

@@ -446,30 +446,14 @@ def test_llm_backend_uses_fallback_backend_after_primary_unusable_response(monke
         ("http://primary.local/v1", "primary-model"),
         ("http://fallback.local/v1", "fallback-model"),
     ]
-    assert backend.last_call_trace == [
-        {
-            "backend": "primary",
-            "model": "primary-model",
-            "json_mode": False,
-            "max_tokens": 16,
-            "status": "failed",
-            "finish_reason": None,
-            "content_chars": 0,
-            "error_type": "ValueError",
-            "error": "LLM 后端 primary 返回空文本",
-            "latency_ms": backend.last_call_trace[0]["latency_ms"],
-        },
-        {
-            "backend": "fallback",
-            "model": "fallback-model",
-            "json_mode": False,
-            "max_tokens": 16,
-            "status": "success",
-            "finish_reason": "stop",
-            "content_chars": 11,
-            "latency_ms": backend.last_call_trace[1]["latency_ms"],
-        },
-    ]
+    assert [item["backend"] for item in backend.last_call_trace] == ["primary", "fallback"]
+    assert all(item["context_budget_status"] == "unknown" for item in backend.last_call_trace)
+    assert all(item["estimated_prompt_tokens"] > 0 for item in backend.last_call_trace)
+    assert backend.last_call_trace[0]["status"] == "failed"
+    assert backend.last_call_trace[0]["error_type"] == "ValueError"
+    assert backend.last_call_trace[0]["finish_reason"] is None
+    assert backend.last_call_trace[1]["status"] == "success"
+    assert backend.last_call_trace[1]["finish_reason"] == "stop"
     trace_text = str(backend.last_call_trace)
     assert "primary-key" not in trace_text
     assert "fallback-key" not in trace_text
@@ -1543,17 +1527,48 @@ def test_report_llm_context_preserves_numeric_facts_and_completed_analysis_scope
 
     assert "30.0 MPa" in payload["task"]["load_case"]
     assert payload["task"]["external_pressure_MPa"] == 30.0
-    assert payload["screened_candidates"][0]["length_mm"] == 500.0
-    assert payload["screened_candidates"][0]["layup"] == candidates[0]["layup"]["layup"]
-    assert payload["screened_candidates"][0]["selection_reason"] == candidates[0]["selection_reason"]
-    assert payload["screened_candidates"][0]["symmetric"] is False
-    assert payload["screened_candidates"][0]["balanced"] is True
-    assert payload["results"][0]["session_candidate_id"] == "TMP_1"
-    assert payload["results"][0]["service_hashin_index_max"] == 0.55
-    assert payload["results"][0]["riks_increment_count"] == 221
-    assert payload["results"][0]["riks_limit_point_confirmed"] is False
-    assert payload["results"][0]["ultimate_pressure_MPa"] is None
+    assert payload["screened_candidates"][0]["candidate_id"] == "TMP_1"
+    assert payload["screened_candidates"][0]["surrogate_ultimate_pressure_MPa"] == 41.0
+    assert "selection_reason" not in payload["screened_candidates"][0]
+    assert "layup" not in payload["screened_candidates"][0]
+    assert payload["result_diagnostics"][0]["session_candidate_id"] == "TMP_1"
+    assert payload["result_diagnostics"][0]["riks_increment_count"] == 221
+    assert payload["result_diagnostics"][0]["riks_limit_point_confirmed"] is False
+    assert "ultimate_pressure_MPa" not in payload["result_diagnostics"][0]
+    assert "results" not in payload
     assert payload["field_semantics"]["riks_lpf_max"] == "Riks 路径的最大载荷比例系数。"
+
+
+def test_report_llm_context_keeps_complete_diagnostics_without_character_or_order_truncation(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, results, candidates = _report_sample()
+    results[0].update(
+        progressive_damage_complete=False,
+        damage_state_output_complete=False,
+        damage_state_maxima={f"SDV{index}": index / 10 for index in range(1, 21)},
+        service_stress_coverage={"status": "complete", "incomplete_element_positions": 0},
+        diagnosis_summary="完整诊断文本不应被按字符裁剪。" * 30,
+    )
+    candidates[0]["selection_reason"] = "候选筛选说明不属于报告解释事实输入。" * 30
+    agent = ReportGenAgent()
+    context = agent._build_llm_explanation_payload(
+        agent._build_structured_summary(task, results, candidates)
+    )["context"]
+    diagnostics = context["result_diagnostics"][0]
+    assert set(diagnostics["damage_state_maxima"]) == {f"SDV{index}" for index in range(1, 21)}
+    assert len(diagnostics["diagnosis_summary"]) > 300
+    assert "selection_reason" not in context["screened_candidates"][0]
+    assert "results" not in context
+
+
+def test_report_explanation_budget_does_not_silently_raise_invalid_configuration(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    monkeypatch.setattr(
+        "agents.report_gen.load_llm_config",
+        lambda: {"report_explanation": {"max_output_tokens": 0}},
+    )
+    with pytest.raises(ValueError, match="max_output_tokens"):
+        ReportGenAgent()
 
 
 def test_report_emits_llm_trace_when_engineering_explanation_fails(monkeypatch):

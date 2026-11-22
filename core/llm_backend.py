@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import ipaddress
+import math
 import re
 import time
 from copy import deepcopy
@@ -53,6 +54,7 @@ class BackendRuntime:
     max_tokens: int
     timeout_seconds: int
     json_output_tokens: int
+    context_window_tokens: int | None = None
     proxy_policy: str = "bypass_loopback"
     extra_body: Dict[str, Any] = field(default_factory=dict)
     client: Any = None
@@ -71,18 +73,58 @@ def _runtime_from_config(backend: Dict[str, Any]) -> BackendRuntime | None:
     extra_body = backend.get("extra_body", {})
     if not isinstance(extra_body, dict) or set(extra_body).intersection({"model", "messages", "max_tokens", "temperature", "response_format", "stream"}):
         raise ValueError("extra_body 必须是对象，且不能覆盖模型、消息、输出预算或响应格式")
+    context_window_tokens = backend.get("context_window_tokens")
+    context_window_env = str(backend.get("context_window_tokens_env") or "").strip()
+    if context_window_env:
+        context_window_tokens = os.getenv(context_window_env, context_window_tokens)
+    if context_window_tokens is not None and str(context_window_tokens).strip() != "":
+        try:
+            context_window_tokens = int(context_window_tokens)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"后端 {backend.get('name') or 'openai_compatible'} 的上下文窗口必须为正整数") from exc
+        if context_window_tokens <= 0:
+            raise ValueError(f"后端 {backend.get('name') or 'openai_compatible'} 的上下文窗口必须为正整数")
+    else:
+        context_window_tokens = None
+    max_tokens = int(backend.get("max_tokens", 1800))
+    json_output_tokens = int(backend.get("json_output_tokens", max(max_tokens, 4096)))
+    if max_tokens <= 0 or json_output_tokens <= 0:
+        raise ValueError(f"后端 {backend.get('name') or 'openai_compatible'} 的输出预算必须为正整数")
     return BackendRuntime(
         name=str(backend.get("name") or "openai_compatible"),
         base_url=base_url,
         api_key=api_key,
         model=model,
         temperature=float(backend.get("temperature", 0.2)),
-        max_tokens=int(backend.get("max_tokens", 1800)),
+        max_tokens=max_tokens,
         timeout_seconds=int(backend.get("timeout_seconds", 180)),
-        json_output_tokens=int(backend.get("json_output_tokens", max(int(backend.get("max_tokens", 1800)), 4096))),
+        json_output_tokens=json_output_tokens,
+        context_window_tokens=context_window_tokens,
         proxy_policy=proxy_policy,
         extra_body=deepcopy(extra_body),
     )
+
+
+def estimate_prompt_tokens(messages: List[Dict[str, str]]) -> tuple[int, str]:
+    """返回不依赖供应商 tokenizer 的保守提示词 token 估计。
+
+    领域模型和备用模型可能使用不同 tokenizer。优先使用本地 tiktoken 估计，
+    同时保留按 Unicode 字符数和 UTF-8 字节数计算的保守上界，避免把估计值当成
+    供应商精确计费结果。返回值会用于上下文合同，不用于计费或模型质量评价。
+    """
+    text = "\n".join(str(item.get("content") or "") for item in messages)
+    character_bound = len(text) + 16 * len(messages)
+    byte_bound = math.ceil(len(text.encode("utf-8")) / 4) + 16 * len(messages)
+    tokenizer_bound = 0
+    try:
+        import tiktoken
+
+        encoding = tiktoken.get_encoding("cl100k_base")
+        tokenizer_bound = len(encoding.encode(text, disallowed_special=())) + 16 * len(messages)
+    except Exception:
+        tokenizer_bound = 0
+    estimate = max(1, character_bound, byte_bound, tokenizer_bound)
+    return estimate, "conservative_max(character, utf8_bytes_per_4, cl100k_base)"
 
 
 def backend_trust_env(base_url: str, proxy_policy: str) -> bool:
@@ -169,6 +211,7 @@ class LLMBackend:
         self.max_tokens = runtime.max_tokens
         self.timeout_seconds = runtime.timeout_seconds
         self.json_output_tokens = runtime.json_output_tokens
+        self.context_window_tokens = runtime.context_window_tokens
         self.client = runtime.client
 
     def _client_for(self, runtime: BackendRuntime):
@@ -193,19 +236,31 @@ class LLMBackend:
         excluded_backend_names: set[str] | None = None,
     ) -> str:
         """按配置优先级调用 LLM，失败时自动尝试回退后端。"""
+        if max_tokens_override is not None:
+            if isinstance(max_tokens_override, bool):
+                raise ValueError("LLM 输出预算必须为正整数")
+            try:
+                max_tokens_override = int(max_tokens_override)
+            except (TypeError, ValueError) as exc:
+                raise ValueError("LLM 输出预算必须为正整数") from exc
+            if max_tokens_override <= 0:
+                raise ValueError("LLM 输出预算必须为正整数")
         excluded = set(excluded_backend_names or set())
         trace: List[Dict[str, Any]] = []
         for runtime in self.backends:
             if runtime.name in excluded:
                 continue
+            requested_output_tokens = runtime.max_tokens if max_tokens_override is None else max_tokens_override
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+            estimated_prompt_tokens, estimator = estimate_prompt_tokens(messages)
             request_payload = {
                 "model": runtime.model,
                 "temperature": runtime.temperature,
-                "max_tokens": int(max_tokens_override or runtime.max_tokens),
-                "messages": [
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt},
-                ],
+                "max_tokens": requested_output_tokens,
+                "messages": messages,
             }
             if json_mode:
                 request_payload["response_format"] = {"type": "json_object"}
@@ -216,29 +271,69 @@ class LLMBackend:
                 "backend": runtime.name,
                 "model": runtime.model,
                 "json_mode": bool(json_mode),
-                "max_tokens": int(max_tokens_override or runtime.max_tokens),
+                "max_tokens": requested_output_tokens,
+                "estimated_prompt_tokens": estimated_prompt_tokens,
+                "token_estimator": estimator,
+                "context_window_tokens": runtime.context_window_tokens,
                 "status": "started",
             }
             if "thinking" in runtime.extra_body:
                 attempt["thinking"] = deepcopy(runtime.extra_body["thinking"])
+            if runtime.context_window_tokens is None:
+                attempt["context_budget_status"] = "unknown"
+            elif estimated_prompt_tokens + requested_output_tokens > runtime.context_window_tokens:
+                attempt.update(
+                    status="failed",
+                    error_type="ContextBudgetError",
+                    context_budget_status="exceeded",
+                    error=(
+                        f"提示词估计 {estimated_prompt_tokens} token，加输出预算 "
+                        f"{requested_output_tokens} token，超过上下文窗口 {runtime.context_window_tokens} token"
+                    ),
+                    latency_ms=0.0,
+                )
+                trace.append(attempt)
+                continue
+            else:
+                attempt["context_budget_status"] = "within_limit"
             started_at = time.perf_counter()
             try:
                 client = self._client_for(runtime)
+                response_format_fallback = False
                 try:
                     response = client.chat.completions.create(**request_payload)
                 except Exception as exc:
                     if not json_mode or "response_format" not in str(exc):
                         raise
                     request_payload.pop("response_format", None)
+                    response_format_fallback = True
                     response = client.chat.completions.create(**request_payload)
-                self.active_backend = runtime
-                self._sync_public_attrs(runtime)
                 choice = response.choices[0]
                 message = choice.message
                 content = message.content or ""
                 reasoning_content = getattr(message, "reasoning_content", "") or ""
                 attempt["finish_reason"] = getattr(choice, "finish_reason", None)
                 attempt["content_chars"] = len(content)
+                if response_format_fallback:
+                    attempt["response_format_fallback"] = True
+                usage = getattr(response, "usage", None)
+                if usage is not None:
+                    if hasattr(usage, "model_dump"):
+                        usage = usage.model_dump()
+                    elif hasattr(usage, "dict"):
+                        usage = usage.dict()
+                    elif not isinstance(usage, dict):
+                        usage = {
+                            key: getattr(usage, key)
+                            for key in ("prompt_tokens", "completion_tokens", "total_tokens",
+                                        "prompt_cache_hit_tokens", "prompt_cache_miss_tokens")
+                            if getattr(usage, key, None) is not None
+                        }
+                    if isinstance(usage, dict):
+                        attempt["usage"] = {
+                            str(key): value for key, value in usage.items()
+                            if isinstance(value, (int, float, str, bool)) or value is None
+                        }
                 if reasoning_content:
                     attempt["reasoning_chars"] = len(reasoning_content)
                 if not content.strip():
@@ -250,7 +345,10 @@ class LLMBackend:
                         attempt["error"] = f"LLM 后端 {runtime.name} 返回空文本"
                     raise ValueError(attempt["error"])
                 if attempt["finish_reason"] != "stop":
+                    attempt["error_type"] = "IncompleteOutputError"
                     raise ValueError(f"LLM 回答未完整结束（finish_reason={attempt['finish_reason']}）")
+                self.active_backend = runtime
+                self._sync_public_attrs(runtime)
                 attempt["status"] = "success"
                 attempt["latency_ms"] = round((time.perf_counter() - started_at) * 1000.0, 3)
                 trace.append(attempt)
@@ -259,7 +357,7 @@ class LLMBackend:
             except Exception as exc:
                 attempt.setdefault("content_chars", 0)
                 attempt["status"] = "failed"
-                attempt["error_type"] = type(exc).__name__
+                attempt.setdefault("error_type", type(exc).__name__)
                 attempt["error"] = self._sanitize_trace_error(exc)
                 attempt["latency_ms"] = round((time.perf_counter() - started_at) * 1000.0, 3)
                 trace.append(attempt)

@@ -12,6 +12,7 @@ backends:
     max_tokens: 1800
     timeout_seconds: 180
     json_output_tokens: 4096
+    context_window_tokens: 16384
   - name: configured_fallback
     proxy_policy: bypass_loopback
     extra_body:
@@ -28,6 +29,7 @@ backends:
     max_tokens: 1800
     timeout_seconds: 180
     json_output_tokens: 4096
+    context_window_tokens: 1048576
 
 fallback:
   max_format_retries: 3
