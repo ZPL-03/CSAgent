@@ -42,6 +42,10 @@ class ReportGenAgent(BaseAgent):
         super().__init__(progress_callback=progress_callback)
         self.llm_config = load_llm_config()
         self.llm_backend: LLMBackend | None = None
+        explanation_config = self.llm_config.get("report_explanation", {})
+        self.explanation_max_output_tokens = max(
+            512, int(explanation_config.get("max_output_tokens", 2048) or 2048)
+        )
         self._last_llm_explanation_used = False
         self._last_llm_explanation_audit = {}
         if auto_llm_enabled():
@@ -105,40 +109,100 @@ class ReportGenAgent(BaseAgent):
             compact[key] = self._clip_explanation_text(compact.get(key))
         return compact
 
-    def _compact_pool_candidate(self, candidate: Dict[str, Any]) -> Dict[str, Any]:
-        """保留未入选候选的池级统计，避免解释模型重复读取完整候选明细。"""
-        compact = self._compact_candidate_record(candidate)
+    def _candidate_pool_summary(self, candidates: List[Dict]) -> Dict[str, Any]:
+        """为解释模型提供候选池统计，不发送未校核候选的逐项明细。"""
+        source_counts: Dict[str, int] = {}
+        selected_ids: List[str] = []
+        surrogate_pressures: List[float] = []
+        for candidate in candidates:
+            source = str(candidate.get("source") or "UNKNOWN")
+            source_counts[source] = source_counts.get(source, 0) + 1
+            candidate_id = str(candidate.get("candidate_id") or "").strip()
+            if candidate.get("screening_selected") and candidate_id:
+                selected_ids.append(candidate_id)
+            pressure = candidate.get("surrogate_ultimate_pressure_MPa")
+            if isinstance(pressure, (int, float)) and math.isfinite(float(pressure)):
+                surrogate_pressures.append(float(pressure))
+        pressure_range = None
+        if surrogate_pressures:
+            pressure_range = {
+                "min_MPa": min(surrogate_pressures),
+                "max_MPa": max(surrogate_pressures),
+            }
         return {
-            key: compact.get(key)
-            for key in (
-                "candidate_id", "session_candidate_id", "source", "screening_rank", "screening_selected",
-                "surrogate_ultimate_pressure_MPa", "rank_score", "weight_kg_per_m2",
-            )
+            "total_count": len(candidates),
+            "source_counts": source_counts,
+            "screening_selected_count": len(selected_ids),
+            "screening_selected_ids": selected_ids,
+            "surrogate_pressure_range_MPa": pressure_range,
         }
 
+    def _compact_explanation_result(self, result: Dict[str, Any]) -> Dict[str, Any]:
+        """只保留工程评议需要的结果字段，排除运行工件和嵌套诊断。"""
+        text_fields = {
+            "ultimate_pressure_basis", "failure_mode", "verification_scope",
+            "diagnosis_summary", "progressive_damage_model", "riks_termination_reason",
+        }
+        fields = (
+            "candidate_id", "session_candidate_id", "display_name", "status", "solved_geometry",
+            "material", "layup", "ultimate_pressure_MPa", "verified_capacity",
+            "linear_buckling_pressure_MPa", "ultimate_pressure_basis", "riks_lpf_max",
+            "imperfection_amplitude_mm", "solved_imperfection_ratio", "weight_kg_per_m2", "verdict",
+            "service_pressure_checked_MPa", "service_hashin_index_max", "service_pressure_check_status",
+            "riks_increment_count", "riks_limit_point_confirmed", "progressive_damage_complete",
+            "damage_state_output_complete", "progressive_damage_model", "damage_state_maxima",
+            "service_stress_coverage", "riks_termination_reason", "verification_scope",
+            "design_check_status", "capacity_assessment_status", "diagnosis_summary",
+        )
+        compact: Dict[str, Any] = {}
+        for key in fields:
+            if key not in result:
+                continue
+            value = result.get(key)
+            if key in text_fields:
+                compact[key] = self._clip_explanation_text(value)
+            elif key in {"damage_state_maxima", "service_stress_coverage"} and isinstance(value, dict):
+                compact[key] = {
+                    str(name): self._clip_explanation_text(item, limit=96)
+                    if isinstance(item, str) else item
+                    for name, item in list(value.items())[:12]
+                }
+            else:
+                compact[key] = value
+        return compact
+
     def _explanation_facts(self, summary: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """只向解释模型提供推荐和已校核对象的事实，候选全集仍写入正式报告。"""
+        """只向解释模型提供决策相关事实，候选全集仍写入正式报告。"""
         facts = build_report_facts(summary)
-        relevant_ids = {
+        recommendation = summary.get("recommendation") or {}
+        result_ids = {
             str(row.get("candidate_id"))
             for row in summary.get("results", [])
             if row.get("candidate_id")
         }
-        recommendation = summary.get("recommendation") or {}
-        relevant_ids.update(
-            str(row.get("candidate_id"))
-            for row in recommendation.get("ranked", [])
-            if row.get("candidate_id")
-        )
-        relevant_ids.update(
-            str(row.get("candidate_id"))
-            for row in summary.get("screened_candidates", [])
-            if row.get("candidate_id")
-        )
-        filtered = [
-            fact for fact in facts
-            if fact.get("candidate_id") is None or str(fact.get("candidate_id")) in relevant_ids
-        ]
+        selected_id = str((recommendation.get("selected") or {}).get("candidate_id") or "")
+        global_metrics = {
+            "external_pressure_MPa", "imperfection_ratio", "candidate_count", "result_count",
+            "comparable_count", "analysis_scope", "recommendation_status",
+        }
+        result_metrics = {
+            "design_check", "ultimate_pressure_MPa", "service_pressure_checked_MPa",
+            "service_hashin_index_max", "weight_kg_per_m2", "riks_limit_point_confirmed",
+            "riks_termination_reason", "objective_value", "capacity_margin_percent",
+        }
+        selected_metrics = {
+            "solved_imperfection_ratio", "imperfection_amplitude_mm", "linear_buckling_pressure_MPa",
+            "length_mm", "radius_mm", "radius_reference", "thickness_mm", "material", "layup",
+            "progressive_damage_complete", "damage_state_output_complete", "riks_lpf_max",
+        }
+        filtered = []
+        for fact in facts:
+            candidate_id = str(fact.get("candidate_id") or "")
+            metric = str(fact.get("metric") or "")
+            if not candidate_id and metric in global_metrics:
+                filtered.append(fact)
+            elif candidate_id in result_ids and metric in result_metrics | (selected_metrics if candidate_id == selected_id else set()):
+                filtered.append(fact)
         return filtered or facts
 
     def _candidate_context_maps(self, candidates: List[Dict]) -> tuple[Dict[str, Dict], Dict[str, Dict]]:
@@ -333,6 +397,23 @@ class ReportGenAgent(BaseAgent):
             return default
         return text
 
+    def _explanation_chat(self, system_prompt: str, user_prompt: str, **kwargs: Any) -> str:
+        """统一使用报告解释的输出预算，保证输入和输出不超过模型上下文。"""
+        try:
+            return self.llm_backend.chat(
+                system_prompt,
+                user_prompt,
+                max_tokens_override=self.explanation_max_output_tokens,
+                json_mode=True,
+                **kwargs,
+            )
+        finally:
+            trace = getattr(self.llm_backend, "last_call_trace", [])
+            if trace:
+                self._last_llm_explanation_audit.setdefault("call_traces", []).append(
+                    [dict(item) for item in trace]
+                )
+
     def _build_llm_explanation_payload(self, summary: Dict[str, Any]) -> Dict[str, Any]:
         passed_count = int(summary.get("passed_count") or 0)
         result_count = int(summary.get("result_count") or 0)
@@ -359,16 +440,9 @@ class ReportGenAgent(BaseAgent):
             },
             "screened_candidates": [self._compact_explanation_candidate(candidate)
                                     for candidate in summary.get("screened_candidates", [])],
-            "all_candidates": [self._compact_pool_candidate(candidate)
-                               for candidate in summary.get("all_candidates", [])],
+            "candidate_pool_summary": self._candidate_pool_summary(summary.get("all_candidates", [])),
             "results": [
-                {
-                    key: (self._clip_explanation_text(value) if key in {
-                        "ultimate_pressure_basis", "failure_mode", "verification_scope", "diagnosis_summary",
-                    } else value)
-                    for key, value in result.items()
-                    if key != "design_verdict_basis"
-                }
+                self._compact_explanation_result(result)
                 for result in summary.get("results", [])
             ],
             "aggregate": {"overall": overall, "result_count": result_count, "passed_count": passed_count,
@@ -383,7 +457,7 @@ class ReportGenAgent(BaseAgent):
                                                if item.get("imperfection_ratio") is not None}),
             },
             "field_semantics": {
-                "candidate_sets": "all_candidates 为全部候选，screened_candidates 为预筛入选候选，results 为实际校核结果；aggregate 只统计 results，未送检候选不在统计母集中。",
+                "candidate_sets": "candidate_pool_summary 统计全部候选，screened_candidates 为预筛入选候选，results 为实际校核结果；aggregate 只统计 results，未送检候选不在统计母集中。",
                 "result_assessments": "passed 为设计校核通过，failed 为设计校核不通过，unknown 为求解失败、未判定或结果语义不一致。",
                 "recommendation": "selected 为按任务目标选出的推荐对象，ranked 为具备完整证据且可比较的方案，excluded 记录未入选原因。",
                 "layup": "symmetric 和 balanced 是逐层核查结果；false 表示属性不满足，null 表示没有记录。",
@@ -405,7 +479,8 @@ class ReportGenAgent(BaseAgent):
     def _render_engineering_explanation(self, summary: Dict[str, Any]) -> str:
         """模型失败阻止导出，关闭模型时只展示确定性结论及分析范围。"""
         self._last_llm_explanation_used = False
-        self._last_llm_explanation_audit = {"status": "disabled" if self.llm_backend is None else "pending"}
+        self._last_llm_explanation_audit = {"status": "disabled" if self.llm_backend is None else "pending",
+                                            "call_traces": []}
         if self.llm_backend is None:
             return ""
         payload = self._build_llm_explanation_payload(summary)
@@ -414,9 +489,8 @@ class ReportGenAgent(BaseAgent):
         try:
             while True:
                 options = {"excluded_backend_names": excluded} if excluded else {}
-                answer = self.llm_backend.chat(
-                    REVIEW_PROMPT, json.dumps(payload, ensure_ascii=False, allow_nan=False),
-                    max_tokens_override=4096, json_mode=True, **options,
+                answer = self._explanation_chat(
+                    REVIEW_PROMPT, json.dumps(payload, ensure_ascii=False, allow_nan=False), **options,
                 )
                 self._last_llm_explanation_audit["raw_response"] = answer
                 runtime = getattr(self.llm_backend, "active_backend", None)
@@ -426,8 +500,7 @@ class ReportGenAgent(BaseAgent):
                 self._last_llm_explanation_audit["attempts"] = attempts
                 try:
                     def chat_review(system, user):
-                        return self.llm_backend.chat(system, user, max_tokens_override=4096,
-                                                     json_mode=True, excluded_backend_names=excluded)
+                        return self._explanation_chat(system, user, excluded_backend_names=excluded)
                     review = parse_engineering_review(chat_review, answer, payload, attempt)
                     review = review_engineering_content(
                         chat_review, review, payload, attempt,
