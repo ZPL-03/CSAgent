@@ -52,6 +52,24 @@ def test_report_and_model_share_three_state_counts_and_recommendation(monkeypatc
     assert "- 推荐：TMP_1 / C1" in agent._render_markdown(task, results, [])
 
 
+def test_report_explanation_payload_keeps_retrieved_evidence(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = normalize_task_payload({"load_conditions": {"external_pressure_MPa": 20}})
+    result = _result(1, 10.8)
+    agent = ReportGenAgent()
+    summary = agent._build_structured_summary(task, [result], [])
+    evidence = [{
+        "chunk_id": "SRC_1",
+        "chunk_fingerprint": "fp_1",
+        "record_id": "DOC_1",
+        "document_title": "复合材料外压圆柱壳研究",
+        "text": "外压圆柱壳的铺层和屈曲分析证据。",
+    }]
+    payload = agent._build_llm_explanation_payload(summary, evidence=evidence)
+    assert payload["evidence"][0]["ref"] == "E1"
+    assert payload["evidence"][0]["document_title"] == evidence[0]["document_title"]
+
+
 def test_solver_failure_is_not_a_failed_design_check(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = normalize_task_payload({"load_conditions": {"external_pressure_MPa": 20}})

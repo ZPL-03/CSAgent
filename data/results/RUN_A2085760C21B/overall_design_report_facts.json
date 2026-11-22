@@ -78,9 +78,11 @@
         "length_mm": 500.0,
         "radius_mm": 100.0,
         "thickness_mm": 12.0,
+        "alpha_deg": null,
+        "beta_deg": null,
         "imperfection_ratio": 0.008,
         "layup": "[0/45/-45/90/0/45/-45/90]s",
-        "layup_template": "TASK_ANGLES",
+        "layup_template": null,
         "ply_count": 16,
         "balanced": true,
         "symmetric": true,
@@ -90,7 +92,7 @@
         "screening_rank": 2,
         "screening_selected": false,
         "surrogate_ultimate_pressure_MPa": 27.355,
-        "surrogate_prediction_status": "positive",
+        "surrogate_prediction_status": null,
         "asme_linear_buckling_pressure_MPa": 19.549,
         "rank_score": 25.123,
         "weight_kg_per_m2": 18.6
@@ -336,7 +338,7 @@
       "metric": "surrogate_ultimate_pressure_MPa",
       "value": 27.355,
       "unit": "MPa",
-      "status": "positive",
+      "status": "unknown",
       "label": "代理承载压力估计"
     },
     {
@@ -458,11 +460,25 @@
     "call_traces": [
       [
         {
+          "backend": "domain_finetuned_primary",
+          "model": "csllm",
+          "json_mode": true,
+          "max_tokens": 2048,
+          "estimated_prompt_tokens": 21574,
+          "token_estimator": "conservative_max(character, utf8_bytes_per_4, cl100k_base)",
+          "context_window_tokens": 16384,
+          "status": "failed",
+          "error_type": "ContextBudgetError",
+          "context_budget_status": "exceeded",
+          "error": "提示词估计 21574 token，加输出预算 2048 token，超过上下文窗口 16384 token",
+          "latency_ms": 0.0
+        },
+        {
           "backend": "configured_fallback",
           "model": "deepseek-flash",
           "json_mode": true,
           "max_tokens": 2048,
-          "estimated_prompt_tokens": 10665,
+          "estimated_prompt_tokens": 21574,
           "token_estimator": "conservative_max(character, utf8_bytes_per_4, cl100k_base)",
           "context_window_tokens": 1048576,
           "status": "success",
@@ -471,25 +487,39 @@
           },
           "context_budget_status": "within_limit",
           "finish_reason": "stop",
-          "content_chars": 1140,
+          "content_chars": 1193,
           "usage": {
-            "completion_tokens": 533,
-            "prompt_tokens": 4292,
-            "total_tokens": 4825,
+            "completion_tokens": 582,
+            "prompt_tokens": 7953,
+            "total_tokens": 8535,
             "completion_tokens_details": null,
-            "prompt_cache_hit_tokens": 1024,
-            "prompt_cache_miss_tokens": 3268
+            "prompt_cache_hit_tokens": 7808,
+            "prompt_cache_miss_tokens": 145
           },
-          "latency_ms": 3382.643
+          "latency_ms": 5442.572
         }
       ],
       [
+        {
+          "backend": "domain_finetuned_primary",
+          "model": "csllm",
+          "json_mode": true,
+          "max_tokens": 2048,
+          "estimated_prompt_tokens": 18072,
+          "token_estimator": "conservative_max(character, utf8_bytes_per_4, cl100k_base)",
+          "context_window_tokens": 16384,
+          "status": "failed",
+          "error_type": "ContextBudgetError",
+          "context_budget_status": "exceeded",
+          "error": "提示词估计 18072 token，加输出预算 2048 token，超过上下文窗口 16384 token",
+          "latency_ms": 0.0
+        },
         {
           "backend": "configured_fallback",
           "model": "deepseek-flash",
           "json_mode": true,
           "max_tokens": 2048,
-          "estimated_prompt_tokens": 7023,
+          "estimated_prompt_tokens": 18072,
           "token_estimator": "conservative_max(character, utf8_bytes_per_4, cl100k_base)",
           "context_window_tokens": 1048576,
           "status": "success",
@@ -501,13 +531,13 @@
           "content_chars": 32,
           "usage": {
             "completion_tokens": 11,
-            "prompt_tokens": 2975,
-            "total_tokens": 2986,
+            "prompt_tokens": 6724,
+            "total_tokens": 6735,
             "completion_tokens_details": null,
             "prompt_cache_hit_tokens": 256,
-            "prompt_cache_miss_tokens": 2719
+            "prompt_cache_miss_tokens": 6468
           },
-          "latency_ms": 494.333
+          "latency_ms": 729.711
         }
       ]
     ],
@@ -794,7 +824,233 @@
       "candidate_ids": [
         "C1"
       ],
-      "evidence": [],
+      "evidence": [
+        {
+          "chunk_id": "SRC_d7b3438f5c94e8e4_image_ocr_3991721938c8",
+          "chunk_fingerprint": "3991721938c8fc769aa56d9a0af113cc7a8a42bd",
+          "record_id": "SRC_d7b3438f5c94e8e4",
+          "source_id": "SRC_d7b3438f5c94e8e4",
+          "document_title": "静水压下含缺陷中厚复合材料圆柱耐压壳的极限强度",
+          "title": "静水压下含缺陷中厚复合材料圆柱耐压壳的极限强度",
+          "section_path": [
+            "1.1 GFRP 圆柱壳试验模型"
+          ],
+          "page_start": 0,
+          "page_end": 0,
+          "doi": "",
+          "source_url": "",
+          "year": "",
+          "venue": "pdf",
+          "retrieval_eligible": true,
+          "evidence_kind": "text",
+          "evidence_usage": "reference",
+          "applicability_context": [],
+          "table_evidence": [],
+          "content_quality_version": "3",
+          "content_quality_issues": [],
+          "retrieval_scope": "main",
+          "load_case_tag": "external_pressure",
+          "design_platform_scope": "pressure_hull_pressure_vessel_design",
+          "formula_validity": "none",
+          "table_structure_status": "none",
+          "text": "# 静水压下含缺陷中厚复合材料圆柱耐压壳的极限强度\n## 1.1 GFRP 圆柱壳试验模型\n\nCylindrical shell (GFRP)\nSeal ring (Rubber)\nClosure (Steel)\nNut (Steel)\nScrew (Steel)\nUnit: mm\nφ53\nφ125\nφ—Diameter",
+          "relations": [],
+          "ref": "E1"
+        },
+        {
+          "chunk_id": "SRC_635bb429ad94767e_fulltext_4e858ca3f621",
+          "chunk_fingerprint": "4e858ca3f6219cddd77eb50134d1cc6e6a3ad1db",
+          "record_id": "SRC_635bb429ad94767e",
+          "source_id": "SRC_635bb429ad94767e",
+          "document_title": "Research on Methodology of Optimization Design for Composite Material Pressure Hull of Underwater Vehicle",
+          "title": "Research on Methodology of Optimization Design for Composite Material Pressure Hull of Underwater Vehicle",
+          "section_path": [
+            "2.6.1复合材料圆柱壳性能分析"
+          ],
+          "page_start": 0,
+          "page_end": 0,
+          "doi": "",
+          "source_url": "",
+          "year": "",
+          "venue": "pdf",
+          "retrieval_eligible": true,
+          "evidence_kind": "text",
+          "evidence_usage": "reference",
+          "applicability_context": [],
+          "table_evidence": [],
+          "content_quality_version": "3",
+          "content_quality_issues": [],
+          "retrieval_scope": "main",
+          "load_case_tag": "external_pressure",
+          "design_platform_scope": "pressure_hull_pressure_vessel_design",
+          "formula_validity": "valid",
+          "table_structure_status": "none",
+          "text": "# Research on Methodology of Optimization Design for Composite Material Pressure Hull of Underwater Vehicle\n## 2.6.1复合材料圆柱壳性能分析\n\n圆柱耐压壳是水下航行器常用基本设备,由于复合材料比强度大、比刚度高和可设计性等特点,采用复合材料圆柱壳制造水下航行器耐压壳具有优越性。耐压壳结构长度 $L = 1000 \\mathrm { m m }$,内半径R=150mm,金属内衬材料选用7075铝合金,厚度为$t _ { m } = 1 \\mathrm { m m }$,采用T700/环氧树脂复合材料,为避免拉伸-弯曲耦合影响采用10层对称铺设,各单层材料性质相同,材料性能参数如表2.10所示。圆柱耐压壳层合板厚$t = 25 \\mathrm { m m }$,纤维体积分数 $V _ { f } = 0.6$,铺层角 $[ 0 ^ { \\circ }, 90 ^ { \\circ }, 45 ^ { \\circ }, - 45 ^ { \\circ }, 0 ^ { \\circ } ] _ { \\mathrm { s y m } }$ 中\n\n表2.10复合材料耐压壳材料属性 Table 2.10 The material properties of composite pressure hull",
+          "relations": [
+            {
+              "evidence_kind": "text",
+              "evidence_usage": "reference",
+              "applicability_context": [],
+              "source_type": "Structure",
+              "source": "Cylindrical Shell",
+              "relation": "HAS_PROPERTY",
+              "target": "Stiffness",
+              "target_type": "Property",
+              "record_id": "SRC_635bb429ad94767e",
+              "evidence_chunk_id": "SRC_635bb429ad94767e_fulltext_4e858ca3f621",
+              "evidence_chunk_fingerprint": "4e858ca3f6219cddd77eb50134d1cc6e6a3ad1db",
+              "evidence_source_id": "SRC_635bb429ad94767e",
+              "evidence_document_title": "Research on Methodology of Optimization Design for Composite Material Pressure Hull of Underwater Vehicle",
+              "evidence_source_url": "",
+              "evidence_doi": "",
+              "page_start": 0,
+              "page_end": 0,
+              "section_path": [
+                "2.6.1复合材料圆柱壳性能分析"
+              ]
+            }
+          ],
+          "ref": "E2"
+        },
+        {
+          "chunk_id": "SRC_308584b3e61e6013_fulltext_57986f04af8d",
+          "chunk_fingerprint": "57986f04af8d6988337af957fccb243db4e12abe",
+          "record_id": "SRC_308584b3e61e6013",
+          "source_id": "SRC_308584b3e61e6013",
+          "document_title": "外压载荷下复合材料圆柱壳的缺陷敏感性研究",
+          "title": "外压载荷下复合材料圆柱壳的缺陷敏感性研究",
+          "section_path": [
+            "Imperfection Sensitivity of Composite Cylindrical Shell under External Pressure",
+            "2.1 不含缺陷外压圆柱壳稳定性分析"
+          ],
+          "page_start": 0,
+          "page_end": 0,
+          "doi": "",
+          "source_url": "",
+          "year": "",
+          "venue": "pdf",
+          "retrieval_eligible": true,
+          "evidence_kind": "conditional",
+          "evidence_usage": "source_conditions_only",
+          "applicability_context": [
+            "# 外压载荷下复合材料圆柱壳的缺陷敏感性研究\n## Imperfection Sensitivity of Composite Cylindrical Shell under External Pressure\n### 2.1 不含缺陷外压圆柱壳稳定性分析"
+          ],
+          "table_evidence": [],
+          "content_quality_version": "3",
+          "content_quality_issues": [],
+          "retrieval_scope": "main",
+          "load_case_tag": "external_pressure",
+          "design_platform_scope": "pressure_hull_pressure_vessel_design",
+          "formula_validity": "valid",
+          "table_structure_status": "none",
+          "text": "# 外压载荷下复合材料圆柱壳的缺陷敏感性研究\n## Imperfection Sensitivity of Composite Cylindrical Shell under External Pressure\n### 2.1 不含缺陷外压圆柱壳稳定性分析\n\n本节利用非线性有限元软件 ABAQUS 对准静态外压复合材料圆柱壳失稳过程进行数值模拟。基于参考文献[12],建立了复合材料圆柱壳有限元模型,如图 2.1 所示。模型的几何尺寸半径 R 为 250.0mm,高度 H 为 510.0mm,厚度 T 为 2.0mm。复合材料圆柱壳共16层,每层厚度 t 为0.125mm,纤维铺层顺序为 $\\left[ 0 ^ { \\circ }, + 45 ^ { \\circ }, 90 ^ { \\circ }, - 45 ^ { \\circ } \\right] _ { 2 S }$ 。具体的材料属性如表 2.1 所示。边界条件为模型一端固支约束,另一端将结点刚性耦合到中心参考点上,约束参考点除轴向位移外的其余自由度。载荷为均匀外压,经过加载速度的收敛性分析,确定外压的加载速度为 2.0MPa/s,加载趋于准静态。\n\n图2.1 复合材料圆柱壳有限元模型 Fig. 2.1 Finite element model of composite cylindrical shell\n\n表2.1 材料属性 Tab. 2.1 Material Properties",
+          "relations": [
+            {
+              "evidence_kind": "conditional",
+              "evidence_usage": "source_conditions_only",
+              "applicability_context": [
+                "# 外压载荷下复合材料圆柱壳的缺陷敏感性研究\n## Imperfection Sensitivity of Composite Cylindrical Shell under External Pressure\n### 2.1 不含缺陷外压圆柱壳稳定性分析"
+              ],
+              "source_type": "Structure",
+              "source": "Cylindrical Shell",
+              "relation": "UNDER_LOAD",
+              "target": "External Pressure",
+              "target_type": "LoadCase",
+              "record_id": "SRC_308584b3e61e6013",
+              "evidence_chunk_id": "SRC_308584b3e61e6013_fulltext_57986f04af8d",
+              "evidence_chunk_fingerprint": "57986f04af8d6988337af957fccb243db4e12abe",
+              "evidence_source_id": "SRC_308584b3e61e6013",
+              "evidence_document_title": "外压载荷下复合材料圆柱壳的缺陷敏感性研究",
+              "evidence_source_url": "",
+              "evidence_doi": "",
+              "page_start": 0,
+              "page_end": 0,
+              "section_path": [
+                "Imperfection Sensitivity of Composite Cylindrical Shell under External Pressure",
+                "2.1 不含缺陷外压圆柱壳稳定性分析"
+              ]
+            }
+          ],
+          "ref": "E3"
+        },
+        {
+          "chunk_id": "LIT_f9e56d9e23cc_formula_9a1dcecad9d1",
+          "chunk_fingerprint": "9a1dcecad9d17049eb6a5f58c3650620da2d1b97",
+          "record_id": "LIT_f9e56d9e23cc",
+          "source_id": "SRC_6eae76dd8f01ea81",
+          "document_title": "Multi-objective design optimization of composite submerged cylindrical pressure hull for minimum buoyancy factor and maximum buckling load capacity",
+          "title": "Multi-objective design optimization of composite submerged cylindrical pressure hull for minimum buoyancy factor and maximum buckling load capacity",
+          "section_path": [
+            "2.3. Analytical formulation for buckling of the composite pressure hull"
+          ],
+          "page_start": 0,
+          "page_end": 0,
+          "doi": "10.1016/j.dt.2020.06.017",
+          "source_url": "https://www.semanticscholar.org/paper/0ee96277a23b2f7ac7bfdbfe49294d977f9af639",
+          "year": "2020",
+          "venue": "Defence Technology",
+          "retrieval_eligible": true,
+          "evidence_kind": "definition",
+          "evidence_usage": "reference",
+          "applicability_context": [],
+          "table_evidence": [],
+          "content_quality_version": "3",
+          "content_quality_issues": [],
+          "retrieval_scope": "main",
+          "load_case_tag": "external_pressure",
+          "design_platform_scope": "pressure_hull_pressure_vessel_design",
+          "formula_validity": "valid",
+          "table_structure_status": "none",
+          "text": "# Multi-objective design optimization of composite submerged cylindrical pressure hull for minimum buoyancy factor and maximum buckling load capacity\n## 2.3. Analytical formulation for buckling of the composite pressure hull\n\nThe relationship for critical pressure of the composite cylindrical pressure hull subjected to external hydrostatic pressure is obtained by using the stationary form of Hamilton principle. The stationary form of Hamilton principle is represented by Eq. (23) [16,46,55].\n\n$$\\delta U - \\delta W _ {e} = 0 \\tag {23}$$\n\nThe first variation of the strain energy U, in the absence of ð Þtransvers shear deformation, can be calculated as follows\n\n$$\\delta U = \\int_ {0} ^ {L} \\int_ {0} ^ {2 \\pi} (N _ {x} \\delta \\varepsilon_ {x} ^ {o} + N _ {\\theta} \\delta \\varepsilon_ {\\theta} ^ {o} + N _ {x \\theta} \\delta \\gamma_ {x \\theta} ^ {o} + M _ {x} \\delta k _ {x} + M _ {\\theta} \\delta k _ {\\theta} + M _ {x \\theta} \\delta k _ {x \\theta}) R d \\theta d x \\tag {24}$$\n\nThe work done by the external pressure on cylindrical shell can be calculated with the help of Eq. (25).\n\n$$W _ {e} = P V \\tag {25}$$\n\nwhere V is the change in volume per unit length enclosed by the midsurface of the shell and is given by Eq. (26) [56].\n\nwhere h is equal to 0 and 1 for dead and live pressure respectively. Similarly, G can take the values of 0 and 1 for Donnel's theory and Sander's theory respectively. In the case of dead loading, the applied pressure is considered to be centrally directed i.e. it remains perpendicular to the midsurface of the shell in the undeformed state (original state), and in the case of live pressure, the applied pressure remains perpendicular to the midsurface of the shell in the deformed state [56,57]. Now, using Sander's theory, Eq. (25) for closed cylindrical pressure hull and live pressure can be written as follows.\n\nTable 3 Results of composite failure criteria.",
+          "relations": [
+            {
+              "evidence_kind": "definition",
+              "evidence_usage": "reference",
+              "applicability_context": [],
+              "source_type": "Structure",
+              "source": "Cylindrical Shell",
+              "relation": "UNDER_LOAD",
+              "target": "External Pressure",
+              "target_type": "LoadCase",
+              "record_id": "LIT_f9e56d9e23cc",
+              "evidence_chunk_id": "LIT_f9e56d9e23cc_formula_9a1dcecad9d1",
+              "evidence_chunk_fingerprint": "9a1dcecad9d17049eb6a5f58c3650620da2d1b97",
+              "evidence_source_id": "SRC_6eae76dd8f01ea81",
+              "evidence_document_title": "Multi-objective design optimization of composite submerged cylindrical pressure hull for minimum buoyancy factor and maximum buckling load capacity",
+              "evidence_source_url": "https://www.semanticscholar.org/paper/0ee96277a23b2f7ac7bfdbfe49294d977f9af639",
+              "evidence_doi": "10.1016/j.dt.2020.06.017",
+              "page_start": 0,
+              "page_end": 0,
+              "section_path": [
+                "2.3. Analytical formulation for buckling of the composite pressure hull"
+              ]
+            },
+            {
+              "evidence_kind": "definition",
+              "evidence_usage": "reference",
+              "applicability_context": [],
+              "source_type": "DesignVariable",
+              "source": "Length",
+              "relation": "MENTIONED_IN",
+              "target": "LIT_f9e56d9e23cc",
+              "target_type": "Literature",
+              "record_id": "LIT_f9e56d9e23cc",
+              "evidence_chunk_id": "LIT_f9e56d9e23cc_formula_9a1dcecad9d1",
+              "evidence_chunk_fingerprint": "9a1dcecad9d17049eb6a5f58c3650620da2d1b97",
+              "evidence_source_id": "SRC_6eae76dd8f01ea81",
+              "evidence_document_title": "Multi-objective design optimization of composite submerged cylindrical pressure hull for minimum buoyancy factor and maximum buckling load capacity",
+              "evidence_source_url": "https://www.semanticscholar.org/paper/0ee96277a23b2f7ac7bfdbfe49294d977f9af639",
+              "evidence_doi": "10.1016/j.dt.2020.06.017",
+              "page_start": 0,
+              "page_end": 0,
+              "section_path": [
+                "2.3. Analytical formulation for buckling of the composite pressure hull"
+              ]
+            }
+          ],
+          "ref": "E4"
+        }
+      ],
       "context": {
         "task": {
           "application": "复合材料外压圆柱耐压壳",
@@ -927,11 +1183,59 @@
         ]
       }
     },
-    "raw_response": "{\"recommendation_candidate_id\": \"C1\", \"assessment\": \"推荐 C1 作为当前载荷与边界条件下的设计选择：其工作压力为 {{TASK.external_pressure_MPa}}，含初始几何缺陷的损伤 Riks 分析确认极限承载压力为 {{C1.ultimate_pressure_MPa}}，容量相对工作压力的余量为 {{C1.capacity_margin_percent}}，设计校核状态为 {{C1.design_check}}，且优化目标比较值为 {{C1.objective_value}}，在本次唯一完成校核的候选里同时满足承载门槛与最小壳体质量目标。需要说明的是，该结论只适用于 {{TASK.analysis_scope}} 所限定的逐层圆柱壳模型，不能外推为含封头、法兰或分层等实际结构细节的认证结论。\", \"tradeoffs\": [], \"verification\": [\"当前仅有一个候选完成校核（实际校核数为 {{TASK.result_count}}，满足推荐条件的方案数为 {{TASK.comparable_count}}），因此无法在候选之间做重量与承载余量的取舍比较；在补充第二个候选的同等分析前，不应把 {{C1.weight_kg_per_m2}} 或 {{C1.objective_value}} 视为已证明的最优质量。\", \"极限承载由含场变量刚度退化的 Riks 分析给出，终止原因为 {{C1.riks_termination_reason}}，极限点确认为 {{C1.riks_limit_point_confirmed}}；但 {{TASK.analysis_scope}} 未覆盖封头、法兰与层间分层，需针对这些连接与界面区域补充局部建模或试验核查，否则 {{C1.ultimate_pressure_MPa}} 不能直接支撑整体结构验收判断。\", \"分析采用缺陷比 {{TASK.imperfection_ratio}}（对应实际缺陷幅值 {{C1.imperfection_amplitude_mm}}），该值来自用户指定而非制造验收实测；需结合制造工艺实测缺陷分布核查该缺陷比是否覆盖实际最不利几何偏差，否则 {{C1.capacity_margin_percent}} 的容量余量对制造偏差的适用性无法确认。\", \"工作压力下最大 Hashin 指数为 {{C1.service_hashin_index_max}}，仅表示当前弹性首层失效判据下的数值余量；需通过材料许用值与环境（湿热、老化）折减的核查确认该判据适用性，否则不能据此判断长期服役下的安全裕度。\"]}",
+    "knowledge_retrieval": {
+      "budget_chars": 12000,
+      "used_chars": 10502,
+      "included": [
+        {
+          "chunk_id": "SRC_d7b3438f5c94e8e4_image_ocr_3991721938c8",
+          "chunk_fingerprint": "3991721938c8fc769aa56d9a0af113cc7a8a42bd",
+          "record_id": "SRC_d7b3438f5c94e8e4",
+          "chars": 943,
+          "relations": 0
+        },
+        {
+          "chunk_id": "SRC_635bb429ad94767e_fulltext_4e858ca3f621",
+          "chunk_fingerprint": "4e858ca3f6219cddd77eb50134d1cc6e6a3ad1db",
+          "record_id": "SRC_635bb429ad94767e",
+          "chars": 2222,
+          "relations": 1
+        },
+        {
+          "chunk_id": "SRC_308584b3e61e6013_fulltext_57986f04af8d",
+          "chunk_fingerprint": "57986f04af8d6988337af957fccb243db4e12abe",
+          "record_id": "SRC_308584b3e61e6013",
+          "chars": 2463,
+          "relations": 1
+        },
+        {
+          "chunk_id": "LIT_f9e56d9e23cc_formula_9a1dcecad9d1",
+          "chunk_fingerprint": "9a1dcecad9d17049eb6a5f58c3650620da2d1b97",
+          "record_id": "LIT_f9e56d9e23cc",
+          "chars": 4868,
+          "relations": 2
+        }
+      ],
+      "excluded": [
+        {
+          "chunk_id": "LIT_bb78dfbe911b_fulltext_86adc76a4bf8",
+          "chunk_fingerprint": "86adc76a4bf8cb5f430ab5d7b7c84835c576fa44",
+          "record_id": "LIT_bb78dfbe911b",
+          "reason": "context_budget"
+        }
+      ],
+      "status": "ready",
+      "query": "复合材料外压圆柱耐压壳 composite pressure hull external pressure shell buckling\n应用：复合材料外压圆柱耐压壳\n工况：外部静水压力：p=25.0 MPa\n边界：两端固支\n壳体：CYLINDRICAL\n材料：T700/Epoxy\n几何：L=[500.0, 500.0], R=[100.0, 100.0], t=[5.0, 20.0], Ir=[0.008, 0.008]\n目标：P_ult >= 25.0 MPa，最小壳体质量",
+      "retrieved_chunk_count": 5,
+      "retrieved_relation_count": 8,
+      "builtin_generated_at": "2026-11-20T16:38:22.769812+00:00",
+      "builtin_source_package_sha256": "94b6a62e0cf98739227d41d6d70022d6985e97f3274944a3491932c73a0301c5"
+    },
+    "raw_response": "{\"recommendation_candidate_id\": \"C1\", \"assessment\": \"在{{TASK.external_pressure_MPa}}的外压工况下，C1 的含损伤 Riks 分析已确认后峰极限点，极限承载压力为{{C1.ultimate_pressure_MPa}}，相对工作压力具有{{C1.capacity_margin_percent}}的容量余量，且工作压力下最大 Hashin 指数仅{{C1.service_hashin_index_max}}，设计校核状态为{{C1.design_check}}。按最小壳体质量目标，其目标比较值为{{C1.objective_value}}，面密度{{C1.weight_kg_per_m2}}，在当前唯一完成校核的候选中最轻，因此推荐 C1。需要说明的是，该结论仅适用于当前载荷、边界与求解模型，且分析范围限于{{TASK.analysis_scope}}，未覆盖封头、法兰与层间分层。\", \"tradeoffs\": [], \"verification\": [\"当前仅{{TASK.result_count}}个候选完成校核，满足推荐条件的方案数为{{TASK.comparable_count}}，无法进行方案间性能比较；需补充其余候选的同等含损伤 Riks 分析，才能判断 C1 是否在质量与承载之间取得最优取舍。\", \"极限压力由含场变量刚度退化的 Riks 分析给出，终止原因为{{C1.riks_termination_reason}}，极限点确认状态为{{C1.riks_limit_point_confirmed}}；应核查峰后路径是否足以支撑该极限值，否则容量余量{{C1.capacity_margin_percent}}可能被高估，直接影响减重空间判断。\", \"分析采用缺陷比{{TASK.imperfection_ratio}}、实际缺陷幅值{{C1.imperfection_amplitude_mm}}，但未做缺陷敏感性对照；需在相同求解模型下比较不同缺陷幅值下的极限压力，以确认当前余量对几何偏差的稳健性，避免把较小计算余量误判为对缺陷更敏感。\", \"线性屈曲压力{{C1.linear_buckling_pressure_MPa}}仅为弹性特征值，不能作为非线性极限承载；应结合首个正特征值的模态分类，明确失稳形态后再判断是否需要局部加强，否则无法确定承载瓶颈位置。\", \"求解几何为长度{{C1.length_mm}}、中面半径{{C1.radius_mm}}、厚度{{C1.thickness_mm}}，材料{{C1.material}}，铺层{{C1.layup}}；需核对这些输入与设计图一致，并确认未建模的封头与法兰连接不会改变壳体的边界约束与承载路径。\"]}",
     "attempts": [
       {
         "backend": "configured_fallback",
-        "raw_response": "{\"recommendation_candidate_id\": \"C1\", \"assessment\": \"推荐 C1 作为当前载荷与边界条件下的设计选择：其工作压力为 {{TASK.external_pressure_MPa}}，含初始几何缺陷的损伤 Riks 分析确认极限承载压力为 {{C1.ultimate_pressure_MPa}}，容量相对工作压力的余量为 {{C1.capacity_margin_percent}}，设计校核状态为 {{C1.design_check}}，且优化目标比较值为 {{C1.objective_value}}，在本次唯一完成校核的候选里同时满足承载门槛与最小壳体质量目标。需要说明的是，该结论只适用于 {{TASK.analysis_scope}} 所限定的逐层圆柱壳模型，不能外推为含封头、法兰或分层等实际结构细节的认证结论。\", \"tradeoffs\": [], \"verification\": [\"当前仅有一个候选完成校核（实际校核数为 {{TASK.result_count}}，满足推荐条件的方案数为 {{TASK.comparable_count}}），因此无法在候选之间做重量与承载余量的取舍比较；在补充第二个候选的同等分析前，不应把 {{C1.weight_kg_per_m2}} 或 {{C1.objective_value}} 视为已证明的最优质量。\", \"极限承载由含场变量刚度退化的 Riks 分析给出，终止原因为 {{C1.riks_termination_reason}}，极限点确认为 {{C1.riks_limit_point_confirmed}}；但 {{TASK.analysis_scope}} 未覆盖封头、法兰与层间分层，需针对这些连接与界面区域补充局部建模或试验核查，否则 {{C1.ultimate_pressure_MPa}} 不能直接支撑整体结构验收判断。\", \"分析采用缺陷比 {{TASK.imperfection_ratio}}（对应实际缺陷幅值 {{C1.imperfection_amplitude_mm}}），该值来自用户指定而非制造验收实测；需结合制造工艺实测缺陷分布核查该缺陷比是否覆盖实际最不利几何偏差，否则 {{C1.capacity_margin_percent}} 的容量余量对制造偏差的适用性无法确认。\", \"工作压力下最大 Hashin 指数为 {{C1.service_hashin_index_max}}，仅表示当前弹性首层失效判据下的数值余量；需通过材料许用值与环境（湿热、老化）折减的核查确认该判据适用性，否则不能据此判断长期服役下的安全裕度。\"]}",
+        "raw_response": "{\"recommendation_candidate_id\": \"C1\", \"assessment\": \"在{{TASK.external_pressure_MPa}}的外压工况下，C1 的含损伤 Riks 分析已确认后峰极限点，极限承载压力为{{C1.ultimate_pressure_MPa}}，相对工作压力具有{{C1.capacity_margin_percent}}的容量余量，且工作压力下最大 Hashin 指数仅{{C1.service_hashin_index_max}}，设计校核状态为{{C1.design_check}}。按最小壳体质量目标，其目标比较值为{{C1.objective_value}}，面密度{{C1.weight_kg_per_m2}}，在当前唯一完成校核的候选中最轻，因此推荐 C1。需要说明的是，该结论仅适用于当前载荷、边界与求解模型，且分析范围限于{{TASK.analysis_scope}}，未覆盖封头、法兰与层间分层。\", \"tradeoffs\": [], \"verification\": [\"当前仅{{TASK.result_count}}个候选完成校核，满足推荐条件的方案数为{{TASK.comparable_count}}，无法进行方案间性能比较；需补充其余候选的同等含损伤 Riks 分析，才能判断 C1 是否在质量与承载之间取得最优取舍。\", \"极限压力由含场变量刚度退化的 Riks 分析给出，终止原因为{{C1.riks_termination_reason}}，极限点确认状态为{{C1.riks_limit_point_confirmed}}；应核查峰后路径是否足以支撑该极限值，否则容量余量{{C1.capacity_margin_percent}}可能被高估，直接影响减重空间判断。\", \"分析采用缺陷比{{TASK.imperfection_ratio}}、实际缺陷幅值{{C1.imperfection_amplitude_mm}}，但未做缺陷敏感性对照；需在相同求解模型下比较不同缺陷幅值下的极限压力，以确认当前余量对几何偏差的稳健性，避免把较小计算余量误判为对缺陷更敏感。\", \"线性屈曲压力{{C1.linear_buckling_pressure_MPa}}仅为弹性特征值，不能作为非线性极限承载；应结合首个正特征值的模态分类，明确失稳形态后再判断是否需要局部加强，否则无法确定承载瓶颈位置。\", \"求解几何为长度{{C1.length_mm}}、中面半径{{C1.radius_mm}}、厚度{{C1.thickness_mm}}，材料{{C1.material}}，铺层{{C1.layup}}；需核对这些输入与设计图一致，并确认未建模的封头与法兰连接不会改变壳体的边界约束与承载路径。\"]}",
         "content_checks": [
           {
             "raw_response": "{\"accepted\": true, \"issues\": []}",
@@ -944,42 +1248,48 @@
     ],
     "review": {
       "recommendation_candidate_id": "C1",
-      "assessment": "推荐 C1 作为当前载荷与边界条件下的设计选择：其工作压力为 {{TASK.external_pressure_MPa}}，含初始几何缺陷的损伤 Riks 分析确认极限承载压力为 {{C1.ultimate_pressure_MPa}}，容量相对工作压力的余量为 {{C1.capacity_margin_percent}}，设计校核状态为 {{C1.design_check}}，且优化目标比较值为 {{C1.objective_value}}，在本次唯一完成校核的候选里同时满足承载门槛与最小壳体质量目标。需要说明的是，该结论只适用于 {{TASK.analysis_scope}} 所限定的逐层圆柱壳模型，不能外推为含封头、法兰或分层等实际结构细节的认证结论。",
+      "assessment": "在{{TASK.external_pressure_MPa}}的外压工况下，C1 的含损伤 Riks 分析已确认后峰极限点，极限承载压力为{{C1.ultimate_pressure_MPa}}，相对工作压力具有{{C1.capacity_margin_percent}}的容量余量，且工作压力下最大 Hashin 指数仅{{C1.service_hashin_index_max}}，设计校核状态为{{C1.design_check}}。按最小壳体质量目标，其目标比较值为{{C1.objective_value}}，面密度{{C1.weight_kg_per_m2}}，在当前唯一完成校核的候选中最轻，因此推荐 C1。需要说明的是，该结论仅适用于当前载荷、边界与求解模型，且分析范围限于{{TASK.analysis_scope}}，未覆盖封头、法兰与层间分层。",
       "tradeoffs": [],
       "verification": [
-        "当前仅有一个候选完成校核（实际校核数为 {{TASK.result_count}}，满足推荐条件的方案数为 {{TASK.comparable_count}}），因此无法在候选之间做重量与承载余量的取舍比较；在补充第二个候选的同等分析前，不应把 {{C1.weight_kg_per_m2}} 或 {{C1.objective_value}} 视为已证明的最优质量。",
-        "极限承载由含场变量刚度退化的 Riks 分析给出，终止原因为 {{C1.riks_termination_reason}}，极限点确认为 {{C1.riks_limit_point_confirmed}}；但 {{TASK.analysis_scope}} 未覆盖封头、法兰与层间分层，需针对这些连接与界面区域补充局部建模或试验核查，否则 {{C1.ultimate_pressure_MPa}} 不能直接支撑整体结构验收判断。",
-        "分析采用缺陷比 {{TASK.imperfection_ratio}}（对应实际缺陷幅值 {{C1.imperfection_amplitude_mm}}），该值来自用户指定而非制造验收实测；需结合制造工艺实测缺陷分布核查该缺陷比是否覆盖实际最不利几何偏差，否则 {{C1.capacity_margin_percent}} 的容量余量对制造偏差的适用性无法确认。",
-        "工作压力下最大 Hashin 指数为 {{C1.service_hashin_index_max}}，仅表示当前弹性首层失效判据下的数值余量；需通过材料许用值与环境（湿热、老化）折减的核查确认该判据适用性，否则不能据此判断长期服役下的安全裕度。"
+        "当前仅{{TASK.result_count}}个候选完成校核，满足推荐条件的方案数为{{TASK.comparable_count}}，无法进行方案间性能比较；需补充其余候选的同等含损伤 Riks 分析，才能判断 C1 是否在质量与承载之间取得最优取舍。",
+        "极限压力由含场变量刚度退化的 Riks 分析给出，终止原因为{{C1.riks_termination_reason}}，极限点确认状态为{{C1.riks_limit_point_confirmed}}；应核查峰后路径是否足以支撑该极限值，否则容量余量{{C1.capacity_margin_percent}}可能被高估，直接影响减重空间判断。",
+        "分析采用缺陷比{{TASK.imperfection_ratio}}、实际缺陷幅值{{C1.imperfection_amplitude_mm}}，但未做缺陷敏感性对照；需在相同求解模型下比较不同缺陷幅值下的极限压力，以确认当前余量对几何偏差的稳健性，避免把较小计算余量误判为对缺陷更敏感。",
+        "线性屈曲压力{{C1.linear_buckling_pressure_MPa}}仅为弹性特征值，不能作为非线性极限承载；应结合首个正特征值的模态分类，明确失稳形态后再判断是否需要局部加强，否则无法确定承载瓶颈位置。",
+        "求解几何为长度{{C1.length_mm}}、中面半径{{C1.radius_mm}}、厚度{{C1.thickness_mm}}，材料{{C1.material}}，铺层{{C1.layup}}；需核对这些输入与设计图一致，并确认未建模的封头与法兰连接不会改变壳体的边界约束与承载路径。"
       ],
       "paragraph_refs": [
         [
           "TASK.external_pressure_MPa",
           "C1.ultimate_pressure_MPa",
           "C1.capacity_margin_percent",
+          "C1.service_hashin_index_max",
           "C1.design_check",
           "C1.objective_value",
+          "C1.weight_kg_per_m2",
           "TASK.analysis_scope"
         ],
         [
           "TASK.result_count",
-          "TASK.comparable_count",
-          "C1.weight_kg_per_m2",
-          "C1.objective_value"
+          "TASK.comparable_count"
         ],
         [
           "C1.riks_termination_reason",
           "C1.riks_limit_point_confirmed",
-          "TASK.analysis_scope",
-          "C1.ultimate_pressure_MPa"
-        ],
-        [
-          "TASK.imperfection_ratio",
-          "C1.imperfection_amplitude_mm",
           "C1.capacity_margin_percent"
         ],
         [
-          "C1.service_hashin_index_max"
+          "TASK.imperfection_ratio",
+          "C1.imperfection_amplitude_mm"
+        ],
+        [
+          "C1.linear_buckling_pressure_MPa"
+        ],
+        [
+          "C1.length_mm",
+          "C1.radius_mm",
+          "C1.thickness_mm",
+          "C1.material",
+          "C1.layup"
         ]
       ]
     }

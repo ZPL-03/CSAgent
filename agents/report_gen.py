@@ -42,6 +42,7 @@ class ReportGenAgent(BaseAgent):
         super().__init__(progress_callback=progress_callback)
         self.llm_config = load_llm_config()
         self.llm_backend: LLMBackend | None = None
+        self.knowledge_base = None
         explanation_config = self.llm_config.get("report_explanation", {})
         raw_output_tokens = explanation_config.get("max_output_tokens", 2048)
         if isinstance(raw_output_tokens, bool):
@@ -54,6 +55,7 @@ class ReportGenAgent(BaseAgent):
             raise ValueError("report_explanation.max_output_tokens 必须为正整数")
         self._last_llm_explanation_used = False
         self._last_llm_explanation_audit = {}
+        self._last_knowledge_retrieval_audit = {"status": "disabled"}
         if auto_llm_enabled():
             self.llm_backend = LLMBackend(self.llm_config)
 
@@ -415,7 +417,44 @@ class ReportGenAgent(BaseAgent):
                     [dict(item) for item in trace]
                 )
 
-    def _build_llm_explanation_payload(self, summary: Dict[str, Any]) -> Dict[str, Any]:
+    def _retrieve_report_evidence(self, task: Dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """检索报告可引用的文献证据，保留完整过滤审计，不改变数值事实。"""
+        if self.llm_backend is None:
+            return [], {"status": "disabled"}
+        from core.domain_knowledge import DomainKnowledgeBase
+        from core.retrieval_evidence import render_evidence
+
+        try:
+            if self.knowledge_base is None:
+                self.knowledge_base = DomainKnowledgeBase()
+            retrieved = self.knowledge_base.retrieve(
+                task,
+                top_k=self.knowledge_base.top_k,
+                kg_top_k=self.knowledge_base.kg_top_k,
+            )
+            rendered, audit = render_evidence(
+                retrieved["chunks"], retrieved["relations"], self.knowledge_base.max_context_chars,
+            )
+            manifest = {}
+            if self.knowledge_base.builtin_manifest_path.exists():
+                manifest = json.loads(self.knowledge_base.builtin_manifest_path.read_text(encoding="utf-8"))
+            evidence = [json.loads(item) for item in rendered]
+            audit = {
+                **audit,
+                "status": "ready" if evidence else "filtered",
+                "query": retrieved.get("query", ""),
+                "retrieved_chunk_count": len(retrieved.get("chunks", [])),
+                "retrieved_relation_count": len(retrieved.get("relations", [])),
+                "builtin_generated_at": manifest.get("generated_at"),
+                "builtin_source_package_sha256": manifest.get("source_package_sha256"),
+            }
+            return evidence, audit
+        except Exception as exc:
+            return [], {"status": "failed", "error": str(exc)}
+
+    def _build_llm_explanation_payload(
+        self, summary: Dict[str, Any], evidence: list[dict[str, Any]] | None = None,
+    ) -> Dict[str, Any]:
         passed_count = int(summary.get("passed_count") or 0)
         result_count = int(summary.get("result_count") or 0)
         failed_count = int(summary.get("failed_count") or 0)
@@ -475,18 +514,23 @@ class ReportGenAgent(BaseAgent):
         best = (summary.get("recommendation") or {}).get("selected")
         required = ([(best["candidate_id"], "ultimate_pressure_MPa"), (best["candidate_id"], "objective_value"),
                      (None, "external_pressure_MPa")] if best else [(None, "recommendation_status")])
-        return prepare_review_payload(self._explanation_facts(summary), summary["recommendation"], format_fact_value,
-                                      context=context, required_metrics=required)
+        return prepare_review_payload(
+            self._explanation_facts(summary), summary["recommendation"], format_fact_value,
+            context=context, evidence=evidence or (), required_metrics=required,
+        )
 
-    def _render_engineering_explanation(self, summary: Dict[str, Any]) -> str:
+    def _render_engineering_explanation(
+        self, summary: Dict[str, Any], evidence: list[dict[str, Any]] | None = None,
+    ) -> str:
         """模型失败阻止导出，关闭模型时只展示确定性结论及分析范围。"""
         self._last_llm_explanation_used = False
         self._last_llm_explanation_audit = {"status": "disabled" if self.llm_backend is None else "pending",
                                             "call_traces": []}
         if self.llm_backend is None:
             return ""
-        payload = self._build_llm_explanation_payload(summary)
+        payload = self._build_llm_explanation_payload(summary, evidence=evidence)
         self._last_llm_explanation_audit["input"] = payload
+        self._last_llm_explanation_audit["knowledge_retrieval"] = dict(self._last_knowledge_retrieval_audit)
         attempts, excluded = [], set()
         try:
             while True:
@@ -534,7 +578,14 @@ class ReportGenAgent(BaseAgent):
         self._last_llm_explanation_audit.update(status="accepted", review=review)
         return render_engineering_review(review, payload)
 
-    def _render_markdown(self, task: Dict, results: List[Dict], candidates: List[Dict], summary: Dict | None = None) -> str:
+    def _render_markdown(
+        self,
+        task: Dict,
+        results: List[Dict],
+        candidates: List[Dict],
+        summary: Dict | None = None,
+        evidence: list[dict[str, Any]] | None = None,
+    ) -> str:
         task_payload = task_payload_from_request(task)
         summary = summary if summary is not None else self._build_structured_summary(task, results, candidates)
         working_pressure = float(task_payload["load_conditions"]["external_pressure_MPa"])
@@ -648,7 +699,7 @@ class ReportGenAgent(BaseAgent):
             lines.extend(["", "余量按“确认容量 / 工作压力 - 1”计算，不是规范安全系数。比较范围只包含本任务完成完整校核的方案。"])
         for row in recommendation["excluded"]:
             lines.append(f"- {row['candidate_id']} 未参与推荐：{'；'.join(row['reasons'])}。")
-        lines.extend(["", self._render_engineering_explanation(summary)])
+        lines.extend(["", self._render_engineering_explanation(summary, evidence=evidence)])
         return "\n".join(lines)
 
     def _reportlab(self):
@@ -863,7 +914,8 @@ class ReportGenAgent(BaseAgent):
         facts_path = output_dir / f"{stem}_facts.json"
         self._last_llm_explanation_used = False
         summary = self._build_structured_summary(task, results, candidates)
-        markdown_text = self._render_markdown(task, results, candidates, summary)
+        report_evidence, self._last_knowledge_retrieval_audit = self._retrieve_report_evidence(task)
+        markdown_text = self._render_markdown(task, results, candidates, summary, report_evidence)
         audit = {"summary": summary, "facts": build_report_facts(summary),
                  "llm_explanation_used": self._last_llm_explanation_used,
                  "llm_explanation_audit": self._last_llm_explanation_audit}

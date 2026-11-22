@@ -1,6 +1,6 @@
 {
   "package": "csllm",
-  "generated_at": "2026-11-19T15:54:55.137856+00:00",
+  "generated_at": "2026-11-20T16:38:22.769812+00:00",
   "source_files": {
     "rag_chunks": "dataset/processed/rag/rag_chunks.jsonl",
     "rag_retrieval_index": "dataset/processed/rag/retrieval_index.sqlite",
@@ -111,13 +111,13 @@
     {
       "path": "rag/rag_chunks.compact.jsonl.gz",
       "bytes": 88088965,
-      "sha256": "b2ea960854e0587e8b2619db6e29fed34f11855f99134e8bb74fe354008f5261",
+      "sha256": "e21ffcd5550e369e2eaebfa65bee2342adcf80cb913b2020be4d9f6d8263bb31",
       "records": 155599
     },
     {
       "path": "kg/relations.compact.jsonl.gz",
       "bytes": 21879014,
-      "sha256": "3653b82b08aa5471126d710e3fc184c8306c3660c02816830c952505a2deaed5",
+      "sha256": "ccc7b96333ff6d62156622f88d7609c902813ae2f98df005a277799d3a58b1f4",
       "records": 234200
     },
     {
@@ -135,7 +135,7 @@
     {
       "path": "provenance/source_metadata.compact.jsonl.gz",
       "bytes": 257322,
-      "sha256": "92ceb6631d2ec9a1bae60d30c7ff5b0031e0f975bdc0c48911f99edfcdb6a25d",
+      "sha256": "83822180bacf52e82dc1ef7838e95a46cdc1256cbc3502f06c76ad2c627d3c1c",
       "records": 1931
     },
     {
@@ -165,15 +165,15 @@
     {
       "path": "provenance/source_manifest.json",
       "bytes": 4862,
-      "sha256": "385175cc1caec01671499af1bb75cf253ddfe155b11ba6949e16bfa843541bc8",
+      "sha256": "94b6a62e0cf98739227d41d6d70022d6985e97f3274944a3491932c73a0301c5",
       "records": null
     },
     {
       "path": "provenance/file_manifest.jsonl",
       "bytes": 1481,
-      "sha256": "ff3dcbacb67bff4c54c4895df755765a91667dcaf0de3eb11b6f8054786c8a9f",
+      "sha256": "bf7abd822a48b30b68eadd529a568da58edb09f43979f38845a31e6163c0ee42",
       "records": 10
     }
   ],
-  "source_package_sha256": "385175cc1caec01671499af1bb75cf253ddfe155b11ba6949e16bfa843541bc8"
+  "source_package_sha256": "94b6a62e0cf98739227d41d6d70022d6985e97f3274944a3491932c73a0301c5"
 }
