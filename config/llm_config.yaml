@@ -31,3 +31,8 @@ backends:
 
 fallback:
   max_format_retries: 3
+
+candidate_generation:
+  max_candidates_per_request: 4
+  estimated_tokens_per_candidate: 500
+  prompt_token_reserve: 1600

@@ -49,8 +49,16 @@ class ReportGenAgent(BaseAgent):
 
     def _compact_candidate_record(self, candidate: Dict[str, Any]) -> Dict[str, Any]:
         geometry = active_geometry(candidate)
-        layup = dict(candidate.get("layup") or {})
-        material = dict(candidate.get("material_system") or {})
+        if not geometry:
+            geometry = {
+                key: candidate.get(key)
+                for key in ("length_mm", "radius_mm", "thickness_mm", "alpha_deg", "beta_deg", "imperfection_ratio")
+                if candidate.get(key) is not None
+            }
+        raw_layup = candidate.get("layup") or {}
+        layup = dict(raw_layup) if isinstance(raw_layup, dict) else {"layup": str(raw_layup)}
+        raw_material = candidate.get("material_system") or candidate.get("material") or {}
+        material = dict(raw_material) if isinstance(raw_material, dict) else {"name": str(raw_material)}
         return {
             "candidate_id": candidate.get("candidate_id"),
             "session_candidate_id": candidate.get("session_candidate_id") or candidate.get("candidate_id"),
@@ -66,9 +74,9 @@ class ReportGenAgent(BaseAgent):
             "imperfection_ratio": geometry.get("imperfection_ratio"),
             "layup": layup.get("layup"),
             "layup_template": layup.get("template_name"),
-            "ply_count": layup.get("ply_count"),
-            "balanced": layup.get("balanced"),
-            "symmetric": layup.get("symmetric"),
+            "ply_count": layup.get("ply_count", candidate.get("ply_count")),
+            "balanced": layup.get("balanced", candidate.get("balanced")),
+            "symmetric": layup.get("symmetric", candidate.get("symmetric")),
             "rationale": candidate.get("rationale"),
             "screening_summary": candidate.get("screening_summary"),
             "selection_reason": candidate.get("selection_reason"),
@@ -80,6 +88,58 @@ class ReportGenAgent(BaseAgent):
             "rank_score": candidate.get("rank_score"),
             "weight_kg_per_m2": candidate.get("surrogate_weight") or candidate.get("weight_kg_per_m2"),
         }
+
+    def _clip_explanation_text(self, value: Any, limit: int = 320) -> str | None:
+        """限制解释上下文中的自由文本长度，完整原文仍保留在正式报告和审计文件中。"""
+        if value is None:
+            return None
+        text = str(value).strip()
+        if not text:
+            return None
+        return text if len(text) <= limit else text[:limit].rstrip() + "…"
+
+    def _compact_explanation_candidate(self, candidate: Dict[str, Any]) -> Dict[str, Any]:
+        """保留方案比较所需字段，避免把运行审计和模型原文重复送入解释模型。"""
+        compact = self._compact_candidate_record(candidate)
+        for key in ("rationale", "screening_summary", "selection_reason"):
+            compact[key] = self._clip_explanation_text(compact.get(key))
+        return compact
+
+    def _compact_pool_candidate(self, candidate: Dict[str, Any]) -> Dict[str, Any]:
+        """保留未入选候选的池级统计，避免解释模型重复读取完整候选明细。"""
+        compact = self._compact_candidate_record(candidate)
+        return {
+            key: compact.get(key)
+            for key in (
+                "candidate_id", "session_candidate_id", "source", "screening_rank", "screening_selected",
+                "surrogate_ultimate_pressure_MPa", "rank_score", "weight_kg_per_m2",
+            )
+        }
+
+    def _explanation_facts(self, summary: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """只向解释模型提供推荐和已校核对象的事实，候选全集仍写入正式报告。"""
+        facts = build_report_facts(summary)
+        relevant_ids = {
+            str(row.get("candidate_id"))
+            for row in summary.get("results", [])
+            if row.get("candidate_id")
+        }
+        recommendation = summary.get("recommendation") or {}
+        relevant_ids.update(
+            str(row.get("candidate_id"))
+            for row in recommendation.get("ranked", [])
+            if row.get("candidate_id")
+        )
+        relevant_ids.update(
+            str(row.get("candidate_id"))
+            for row in summary.get("screened_candidates", [])
+            if row.get("candidate_id")
+        )
+        filtered = [
+            fact for fact in facts
+            if fact.get("candidate_id") is None or str(fact.get("candidate_id")) in relevant_ids
+        ]
+        return filtered or facts
 
     def _candidate_context_maps(self, candidates: List[Dict]) -> tuple[Dict[str, Dict], Dict[str, Dict]]:
         by_candidate_id = {
@@ -297,10 +357,20 @@ class ReportGenAgent(BaseAgent):
                 "boundary_conditions": summary.get("boundary_conditions"),
                 "primary_objective": summary.get("primary_objective"),
             },
-            "screened_candidates": [dict(candidate) for candidate in summary.get("screened_candidates", [])],
-            "all_candidates": [dict(candidate) for candidate in summary.get("all_candidates", [])],
-            "results": [{key: value for key, value in result.items() if key != "design_verdict_basis"}
-                        for result in summary.get("results", [])],
+            "screened_candidates": [self._compact_explanation_candidate(candidate)
+                                    for candidate in summary.get("screened_candidates", [])],
+            "all_candidates": [self._compact_pool_candidate(candidate)
+                               for candidate in summary.get("all_candidates", [])],
+            "results": [
+                {
+                    key: (self._clip_explanation_text(value) if key in {
+                        "ultimate_pressure_basis", "failure_mode", "verification_scope", "diagnosis_summary",
+                    } else value)
+                    for key, value in result.items()
+                    if key != "design_verdict_basis"
+                }
+                for result in summary.get("results", [])
+            ],
             "aggregate": {"overall": overall, "result_count": result_count, "passed_count": passed_count,
                           "failed_count": failed_count, "unknown_count": unknown_count,
                           "population": "有限元结果记录"},
@@ -329,7 +399,7 @@ class ReportGenAgent(BaseAgent):
         best = (summary.get("recommendation") or {}).get("selected")
         required = ([(best["candidate_id"], "ultimate_pressure_MPa"), (best["candidate_id"], "objective_value"),
                      (None, "external_pressure_MPa")] if best else [(None, "recommendation_status")])
-        return prepare_review_payload(build_report_facts(summary), summary["recommendation"], format_fact_value,
+        return prepare_review_payload(self._explanation_facts(summary), summary["recommendation"], format_fact_value,
                                       context=context, required_metrics=required)
 
     def _render_engineering_explanation(self, summary: Dict[str, Any]) -> str:

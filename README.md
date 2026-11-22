@@ -42,7 +42,9 @@ CSAgent 多智能体智能设计平台面向复合材料外压圆柱耐压壳智
 
 ## LLM 后端
 
-`config/llm_config.yaml` 按顺序配置领域主模型和通用回退模型。领域主模型从本地 `.env` 读取 `LLM_PRIMARY_URL`、`LLM_PRIMARY_API_KEY` 和 `LLM_PRIMARY_MODEL_NAME`；通用回退模型读取 `URL`、`API_KEY` 和 `MODEL_NAME`。缺少完整参数的后端不会参与调用；主模型请求失败时按配置顺序尝试回退模型，并在运行事件中记录后端名称、模型、状态、耗时、`finish_reason` 和脱敏错误摘要。`.env` 不进入 Git，配置状态和审计输出不显示 URL、密钥、系统提示词或用户提示词正文。
+`config/llm_config.yaml` 按顺序配置领域主模型和通用回退模型。领域主模型从本地 `.env` 读取 `LLM_PRIMARY_URL`、`LLM_PRIMARY_API_KEY` 和 `LLM_PRIMARY_MODEL_NAME`；通用回退模型读取 `URL`、`API_KEY` 和 `MODEL_NAME`。缺少完整参数的后端不会参与调用；主模型请求或输出契约失败时按配置顺序尝试回退模型，并在运行事件中记录后端名称、模型、状态、耗时、`finish_reason` 和脱敏错误摘要。`.env` 不进入 Git，配置状态和审计输出不显示 URL、密钥、系统提示词或用户提示词正文。
+
+候选生成按 `candidate_generation` 配置的单次请求规模分批执行。每批候选都经过自然语言解析、结构归一化、参数域规则和 Schema 校验；不合规或重复的提案不进入候选池，缺少的数量由其他有效来源和 DOE 补足，审计记录实际来源数量。报告解释只接收与推荐和有限元校核相关的压缩事实，解释输出必须通过事实引用契约；主模型输出不符合契约时按后端顺序重试，全部后端均不合规时停止报告发布。
 
 ## GUI 工作台
 

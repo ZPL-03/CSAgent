@@ -210,12 +210,10 @@ def parse_engineering_review(chat, text, payload, audit):
     try:
         return validate_engineering_review(text, payload)
     except ValueError as exc:
-        if not TOKEN.search(text):
-            raise
         audit["contract_issue"] = str(exc)
         repaired = chat(REVIEW_PROMPT, json.dumps({"evidence": payload, "draft_response": text,
                         "validation_error": str(exc),
-                        "instruction": "仅针对具体错误重新输出完整四字段 JSON。保留事实引用，不补写无依据内容，不额外添加字段。"},
+                        "instruction": "仅针对具体错误重新输出完整四字段 JSON。每个段落必须包含输入 facts.ref 或 evidence.ref 的双大括号事实标记；保留事实引用，不补写无依据内容，不额外添加字段。"},
                         ensure_ascii=False, allow_nan=False))
         audit["contract_repair_response"] = repaired
         return validate_engineering_review(repaired, payload)

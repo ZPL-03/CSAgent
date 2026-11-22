@@ -1610,7 +1610,7 @@ def test_report_emits_llm_trace_when_engineering_explanation_fails(monkeypatch):
     assert "deepseek-flash" in str(trace_payload["trace"])
 
 
-def test_report_rejects_unsupported_explanation_without_rewrite(monkeypatch):
+def test_report_retries_invalid_explanation_contract(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task, results, candidates = _report_sample()
     agent = ReportGenAgent()
@@ -1631,7 +1631,7 @@ def test_report_rejects_unsupported_explanation_without_rewrite(monkeypatch):
     with pytest.raises(ValueError):
         agent._render_markdown(task, results, candidates)
 
-    assert backend.calls == 1
+    assert backend.calls == 2
     assert agent._last_llm_explanation_used is False
 
 
