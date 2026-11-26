@@ -128,13 +128,12 @@ def partition_count(total: int, buckets: int) -> List[int]:
     return [base + (1 if index < remainder else 0) for index in range(buckets)]
 
 
-def build_candidates(task: Dict, count: int, start_index: int, strict_solver_window: bool) -> List[Dict]:
+def build_candidates(task: Dict, count: int, start_index: int) -> List[Dict]:
     sampler = DOESampler()
     return sampler.sample_candidates(
         task=task,
         n_samples=count,
         start_index=start_index,
-        strict_solver_window=strict_solver_window,
         batch_multiplier=1,
         id_factory=format_temp_candidate_id,
     )
@@ -152,7 +151,7 @@ def solve_candidate(task: Dict, candidate: Dict) -> Tuple[Dict, Dict]:
     return payload, result
 
 
-def run_task_batch(task: Dict, count: int, workers: int, strict_solver_window: bool) -> List[Dict]:
+def run_task_batch(task: Dict, count: int, workers: int) -> List[Dict]:
     if count <= 0:
         return []
 
@@ -160,7 +159,6 @@ def run_task_batch(task: Dict, count: int, workers: int, strict_solver_window: b
         task=task,
         count=count,
         start_index=1,
-        strict_solver_window=strict_solver_window,
     )
     for candidate, candidate_id in zip(candidates, reserve_candidate_ids(len(candidates))):
         candidate["session_candidate_id"] = candidate["candidate_id"]
@@ -232,7 +230,6 @@ def main() -> int:
     parser.add_argument("--count", type=int, default=30)
     parser.add_argument("--task-count", type=int, default=3)
     parser.add_argument("--workers", type=int, default=1)
-    parser.add_argument("--full-range", action="store_true")
     parser.add_argument("--pressures", type=str, default="")
     parser.add_argument("--reset", action="store_true")
     parser.add_argument("--record-task", action="store_true", help="为批量建库写入 TASK_N 追溯记录")
@@ -244,7 +241,6 @@ def main() -> int:
     pressures = parse_pressures(args.pressures or None, args.task_count)
     specs = task_specs(args.task_count, pressures)
     bucket_sizes = partition_count(args.count, len(specs))
-    strict_solver_window = not args.full_range
 
     all_records: List[Dict] = []
     for (material_key, pressure), bucket_count in zip(specs, bucket_sizes):
@@ -260,7 +256,6 @@ def main() -> int:
             task=task,
             count=bucket_count,
             workers=args.workers,
-            strict_solver_window=strict_solver_window,
         )
         all_records.extend(task_records)
 

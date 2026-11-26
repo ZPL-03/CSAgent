@@ -511,7 +511,7 @@ class ReleaseAudit:
         def build_runtime_session() -> PipelineSession:
             instruction = "请设计复合材料耐压圆柱壳，工作压力 30 MPa，长度 500 mm，半径 100 mm，生成 6 个候选，初筛保留 3 个候选"
             task = TaskParser().parse_instruction(instruction)
-            candidates = DOESampler().sample_candidates(task, n_samples=6, start_index=1, strict_solver_window=True)
+            candidates = DOESampler().sample_candidates(task, n_samples=6, start_index=1)
             screened = ScreenerAgent().run({"task": task, "candidates": candidates})
             return PipelineSession(
                 task=task,

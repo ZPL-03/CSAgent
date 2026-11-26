@@ -85,7 +85,7 @@ class ConversationFlowController:
             source_text = " / ".join(f"{key}={value}" for key, value in sorted(source_counter.items())) or "-"
             return (
                 f"候选池已生成 {payload.get('candidate_count', '-')} 个有效方案，来源拆分为 {source_text}。"
-                "下一步将对完整候选池计算 ASME RD-1172、PBIPF 公式、面密度和综合得分，初筛结果只决定默认 FEM 队列，不删除其他方案。"
+                "代理预筛只为几何覆盖范围内的方案估算压力并按有效得分排序，未入选方案仍可人工送检。"
             )
         if stage == "screening_summary":
             return (
@@ -239,16 +239,15 @@ class ConversationFlowController:
         )
         return state
 
-    def continue_after_confirmation(self, state: ConversationState, approved: bool) -> ConversationState:
-        if state.workflow_run_id:
-            return self._continue_with_workflow_runtime(state, approved)
-        raise ValueError("会话缺少运行编号，无法继续；请恢复已保存的运行。")
-
-    def _continue_with_workflow_runtime(self, state: ConversationState, approved: bool) -> ConversationState:
-        if state.task is None:
-            return state
+    def continue_after_confirmation(
+        self, state: ConversationState, approved: bool, *, fem_candidate_ids: list[str] | None = None,
+    ) -> ConversationState:
+        if not state.workflow_run_id:
+            raise ValueError("会话缺少运行编号，无法继续；请恢复已保存的运行。")
         confirmation = state.pending_confirmation
-        workflow_state = self._runtime().continue_after_confirmation(state.workflow_run_id, approved)
+        workflow_state = self._runtime().continue_after_confirmation(
+            state.workflow_run_id, approved, fem_candidate_ids=fem_candidate_ids,
+        )
         state.workflow_run_id = workflow_state["run_id"]
         state.task = workflow_state.get("task", state.task)
         state.candidates = workflow_state.get("candidates", state.candidates)
@@ -312,10 +311,14 @@ class ConversationFlowController:
         fem_targets = state.evaluated_candidates
         preview_reasons = [candidate.get("selection_reason") for candidate in fem_targets[:3] if candidate.get("selection_reason")]
         detail_suffix = f" 重点入选原因：{' | '.join(preview_reasons)}" if preview_reasons else ""
+        message = (
+            f"是否进行有限元校核？当前待校核样本 {len(fem_targets)} 个。{detail_suffix}"
+            if fem_targets else "没有默认送检方案。请在候选池选中方案后点击“校核所选”，也可暂停。"
+        )
         self._emit(
             "confirmation_requested",
-            f"是否进行有限元校核？当前待校核样本 {len(fem_targets)} 个。{detail_suffix}",
-            {"confirmation_id": "fem_evaluation", "default": True, "candidate_count": len(fem_targets)},
+            message,
+            {"confirmation_id": "fem_evaluation", "default": bool(fem_targets), "candidate_count": len(fem_targets)},
         )
         return state
 

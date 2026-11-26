@@ -2,59 +2,31 @@
 
 from __future__ import annotations
 
-import math
 from typing import Any, Dict, List
 
-from abaqus.cylindrical_geometry import radius_reference, shell_radii
+from abaqus.cylindrical_geometry import positive_number, radius_reference, shell_radii
+from core.config_loader import validate_imperfection_ratio
 from core.layup_parameters import TEMPLATE_ANGLE_FIELDS, uses_task_angles
 from core.pressure_hull_profile import (
-    load_param_ranges_for_type,
     normalize_layup,
-    resolve_hull_type,
-    rule_check_param_keys,
-    solver_safe_window_keys,
+    required_geometry_params,
     sequence_is_balanced,
     sequence_is_symmetric,
 )
-from core.task_contract import candidate_constraints, normalize_boundary_conditions, normalize_load_conditions, task_geometry_bounds
+from core.task_contract import candidate_constraints, normalize_boundary_conditions, normalize_load_conditions
 
 
 class RuleChecker:
-    """执行参数域内的几何、缺陷和铺层约束校验。"""
+    """校验可建模几何和任务的尺寸、工况及物理铺层约束。"""
 
     MIN_PLY_COUNT = 16
-
-    def _check_range(
-        self,
-        key: str,
-        value: float,
-        errors: List[str],
-        details: Dict[str, bool],
-        type_ranges: Dict[str, Dict[str, float]],
-    ) -> None:
-        rule = type_ranges.get(key, {})
-        if not math.isfinite(value):
-            errors.append(f"{key} 必须是有限数值")
-            details[f"{key}_ok"] = False
-            return
-        if rule.get("min") is not None and value < float(rule["min"]):
-            errors.append(f"{key} 小于参数下限 {rule['min']}")
-            details[f"{key}_ok"] = False
-            return
-        if rule.get("max") is not None and value > float(rule["max"]):
-            errors.append(f"{key} 大于参数上限 {rule['max']}")
-            details[f"{key}_ok"] = False
-            return
-        details[f"{key}_ok"] = True
 
     def run(
         self,
         candidate: Dict[str, Any],
-        strict_solver_window: bool = False,
-        hull_type: str | None = None,
         task: Dict[str, Any] | None = None,
     ) -> Dict[str, Any]:
-        geometry = candidate.get("geometry", {})
+        geometry = candidate.get("geometry") or {}
         errors: List[str] = []
         suggestions: List[str] = []
         details: Dict[str, bool] = {}
@@ -70,15 +42,9 @@ class RuleChecker:
             errors.append(f"铺层无效：{exc}")
             layup = {}
 
-        htype = resolve_hull_type(hull_type or candidate.get("hull_type"))
-        type_ranges = load_param_ranges_for_type(htype)
         active_task = task if task is not None else candidate.get("task_constraints")
         constraints = candidate_constraints(active_task) if active_task is not None else None
         if constraints is not None:
-            try:
-                type_ranges = task_geometry_bounds(constraints, htype)
-            except ValueError as exc:
-                errors.append(str(exc))
             details["task_context_ok"] = True
             comparisons = {
                 "hull_type": (candidate.get("hull_type"), constraints["hull_type"]),
@@ -90,7 +56,7 @@ class RuleChecker:
                 if key in candidate and actual != expected:
                     errors.append(f"候选 {key} 与任务不一致")
                     details["task_context_ok"] = False
-            if radius_reference(geometry) != constraints["radius_reference"]:
+            if details["radius_reference_ok"] and radius_reference(geometry) != constraints["radius_reference"]:
                 errors.append("候选半径基准与任务不一致")
             material = constraints["material_system"]
             if material.get("is_user_specified") and any(
@@ -98,30 +64,26 @@ class RuleChecker:
                 for key, value in material.items() if key != "is_user_specified"
             ):
                 errors.append("候选材料与任务固定材料不一致")
-        for key in rule_check_param_keys(htype):
-            if uses_task_angles(candidate.get("layup")) and key in TEMPLATE_ANGLE_FIELDS:
+        # 默认搜索范围只随任务生效，不用于限制独立的建模输入。
+        envelope = constraints["geometry_envelope"] if constraints is not None else {}
+        for key in required_geometry_params(candidate.get("hull_type")):
+            is_template_angle = key in TEMPLATE_ANGLE_FIELDS
+            if is_template_angle and uses_task_angles(candidate.get("layup")):
                 continue
-            self._check_range(key, float(geometry.get(key, 0.0)), errors, details, type_ranges)
-
-        length = float(geometry.get("length_mm", 0.0))
-        radius = float(geometry.get("radius_mm", 1.0))
-        thickness = float(geometry.get("thickness_mm", 0.0))
-        imperfection = float(geometry.get("imperfection_ratio", 0.0))
-        slenderness = length / max(radius, 1e-9)
-        thickness_ratio = thickness / max(radius, 1e-9)
-
-        details["slenderness_ok"] = 1.5 <= slenderness <= 10.0
-        details["thickness_radius_ratio_ok"] = 0.025 <= thickness_ratio <= 0.26
-        details["imperfection_positive_ok"] = imperfection > 0.0
-        if not details["slenderness_ok"]:
-            errors.append("壳体长径比 L/R 超出当前圆柱耐压壳适用区间")
-            suggestions.append("将 L/R 控制在 1.5-10.0 范围内")
-        if not details["thickness_radius_ratio_ok"]:
-            errors.append("厚径比 t/R 超出当前代理模型适用区间")
-            suggestions.append("将厚度和半径调整到当前样本范围内")
-        if not details["imperfection_positive_ok"]:
-            errors.append("初始缺陷比必须为正值")
-            suggestions.append("设置 0.001-0.01 的初始缺陷比")
+            try:
+                value = (validate_imperfection_ratio(geometry.get(key)) if key == "imperfection_ratio"
+                         else positive_number(geometry.get(key), key))
+                if is_template_angle and value > 90:
+                    raise ValueError(f"{key} 不得超过 90 度")
+                if key in envelope:
+                    low, high = envelope[key]
+                    if not low <= value <= high:
+                        raise ValueError(f"候选 {key}={value:g} 与任务不一致：要求 {low:g} 至 {high:g}")
+            except ValueError as exc:
+                errors.append(str(exc))
+                details[f"{key}_ok"] = False
+            else:
+                details[f"{key}_ok"] = True
 
         angles = [float(angle) for angle in layup.get("angles_deg", [])]
         details["layup_defined"] = bool(angles)
@@ -153,22 +115,6 @@ class RuleChecker:
         if not details["angle_range_ok"]:
             errors.append("铺层角超出 ±90° 范围")
             suggestions.append("将铺层角控制在 0-90° 的工程可制造区间")
-
-        if strict_solver_window:
-            for detail_key, (lower, upper) in solver_safe_window_keys(htype).items():
-                geometry_key = detail_key.replace("solver_", "").replace("_ok", "")
-                geometry_key = {
-                    "length": "length_mm",
-                    "radius": "radius_mm",
-                    "thickness": "thickness_mm",
-                    "imperfection": "imperfection_ratio",
-                }.get(geometry_key, geometry_key)
-                value = float(geometry.get(geometry_key, 0.0))
-                ok = lower <= value <= upper
-                details[detail_key] = ok
-                if not ok:
-                    errors.append(f"{geometry_key} 超出当前真实求解安全区 {lower}-{upper}")
-                    suggestions.append("回到当前参数范围后重新生成候选")
 
         return {
             "is_valid": not errors,

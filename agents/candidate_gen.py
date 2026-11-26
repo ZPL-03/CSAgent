@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 from typing import Any, Dict, List
 
+from abaqus.cylindrical_geometry import shell_radii
 from agents.base import BaseAgent
 from core.case_retriever import CaseRetriever
 from core.config_loader import load_app_config, load_llm_config, load_material_db
@@ -26,7 +27,6 @@ from core.task_contract import (
     requested_candidate_pool_size,
     task_imperfection_ratio,
     task_payload_from_request,
-    task_geometry_bounds,
 )
 
 
@@ -196,7 +196,7 @@ class CandidateGenAgent(BaseAgent):
         user_facts = dict(task_payload.get("user_input_facts") or {})
         fact_lines = self._user_fact_lines(user_facts)
         fact_text = "\n".join(f"- {line}" for line in fact_lines)
-        constraint_text = "\n".join(f"- {line}" for line in self._candidate_field_constraint_lines(hull_type, task))
+        constraint_text = "\n".join(f"- {line}" for line in self._candidate_field_constraint_lines(task_payload))
         layup_constraints = dict(task_payload.get("layup_constraints") or {})
         allowed_angles = list(layup_constraints.get("allowed_angles") or [])
         min_ply_count = int(self.rule_checker.MIN_PLY_COUNT)
@@ -225,7 +225,7 @@ class CandidateGenAgent(BaseAgent):
             "你是 csllm 领域微调模型中的复合材料耐压壳候选方案生成助手。"
             "输入是系统整理的工程任务书，不是原始用户自然语言，也不是 JSON 任务契约。"
             "请按自然语言工程回答风格输出，候选方案表是主体，表外说明保持简洁。"
-            "候选方案必须用 Markdown 表格表达，列名中直接写出编号、材料、长度、半径或内径、厚度、完整铺层形式、缺陷比和推荐理由。"
+            "候选方案必须用 Markdown 表格表达，列名中直接写出编号、材料、长度、半径、厚度、完整铺层形式、缺陷比和推荐理由。"
             "铺层使用完整数值层序表达，不另列未参与层序定义的 alpha、beta 参数。"
             "表格中的推荐理由必须用一句话同时包含结构性能依据和制造/缺陷风险依据，不要只写泛化结论。"
             "只能把“用户已给信息”中列出的内容写成用户事实；用户没有给出的工况、材料、几何、目标或边界，不要当成用户事实写入回答。"
@@ -253,23 +253,23 @@ class CandidateGenAgent(BaseAgent):
         )
         return system_prompt, user_prompt
 
-    def _candidate_field_constraint_lines(self, hull_type: str, task: Dict[str, Any]) -> List[str]:
-        ranges = task_geometry_bounds(task, hull_type)
-
-        def range_text(key: str) -> str:
-            value = ranges.get(key) or {}
-            return f"{float(value.get('min', 0.0)):g}-{float(value.get('max', 0.0)):g}"
+    def _candidate_field_constraint_lines(self, task: Dict[str, Any]) -> List[str]:
+        envelope = task["geometry_envelope"]
+        radius_label = {"inner": "内半径", "middle_surface": "中面半径", "outer": "外半径"}[task["radius_reference"]]
+        geometry_lines = []
+        for key, label in (("length_mm", "长度 L"), ("radius_mm", radius_label), ("thickness_mm", "厚度 t")):
+            low, high = envelope[key]
+            geometry_lines.append(f"{label}固定为 {low:g} mm" if low == high else f"{label}在 {low:g} 至 {high:g} mm 内取值")
+        defect = envelope["imperfection_ratio"][0]
 
         material_names = "、".join(str(item.get("name")) for item in self.material_catalog if item.get("name"))
         return [
             f"材料必须从项目材料库选择：{material_names}",
-            f"长度 L(mm) 必须为数值；参考尺寸只表示设计中心，候选值仍需在 {range_text('length_mm')} 内提出；只有固定几何约束才必须沿用",
-            f"半径 R(mm) 必须为数值；参考尺寸只表示设计中心，候选值仍需在 {range_text('radius_mm')} 内提出；只有固定几何约束才必须沿用",
-            f"厚度 t(mm) 必须为数值；参考尺寸只表示设计中心，候选值仍需在 {range_text('thickness_mm')} 内提出；只有固定几何约束才必须沿用",
-            f"初始几何缺陷比：任务采用 {task_imperfection_ratio(task):g}（{task_imperfection_ratio(task) * 1000:g}‰），所有候选使用同一数值",
+            *geometry_lines,
+            f"初始几何缺陷比：任务采用 {defect:g}（{defect * 1000:g}‰），所有候选使用同一数值",
             "铺层形式用数值角度、重复组和中面对称记号表达；每个允许角度都必须达到 min_ratio_per_angle，不得省略 0 度等必需方向",
             f"展开后的物理层数不得少于 {self.rule_checker.MIN_PLY_COUNT} 层",
-            f"物理铺层约束：{self._task_payload(task)['layup_constraints']}；symmetric=true 时必须逐层镜像，可使用 [...]s；允许角度集合不等于实际使用角度",
+            f"物理铺层约束：{task['layup_constraints']}；symmetric=true 时必须逐层镜像，可使用 [...]s；允许角度集合不等于实际使用角度",
         ]
 
     def _split_markdown_row(self, line: str) -> List[str]:
@@ -568,6 +568,12 @@ class CandidateGenAgent(BaseAgent):
                 f"{source} 候选缺少必要几何字段：{', '.join(missing_geometry)}"
             )
         geometry = normalize_geometry(hull_type, raw.get("geometry"))
+        radius_low, radius_high = task_payload["geometry_envelope"]["radius_mm"]
+        if source == "CASE_TRANSFER" and radius_low != radius_high and geometry["radius_reference"] != task_payload["radius_reference"]:
+            try:
+                geometry["radius_mm"] = shell_radii(geometry)[task_payload["radius_reference"]]
+            except ValueError as exc:
+                raise SchemaValidationError(f"案例半径无法换算：{exc}") from exc
         for key, bounds in task_payload["geometry_envelope"].items():
             if bounds[0] == bounds[1]:
                 geometry[key] = bounds[0]
@@ -614,12 +620,7 @@ class CandidateGenAgent(BaseAgent):
             "design_targets": task_payload["design_targets"],
             "task_constraints": candidate_constraints(task),
         }
-        candidate["rule_check"] = self.rule_checker.run(
-            candidate,
-            strict_solver_window=True,
-            hull_type=hull_type,
-            task=task,
-        )
+        candidate["rule_check"] = self.rule_checker.run(candidate)
         validate_or_raise("candidate.schema.json", candidate)
         return candidate
 
@@ -1052,7 +1053,6 @@ class CandidateGenAgent(BaseAgent):
         )
         next_index += len(transfer_candidates)
 
-        hull_type = task_payload_from_request(task).get("hull_type", "CYLINDRICAL")
         doe_candidates: List[Dict[str, Any]] = []
         doe_added = 0
         doe_duplicates = 0
@@ -1063,8 +1063,6 @@ class CandidateGenAgent(BaseAgent):
                 task,
                 n_samples=requested,
                 start_index=next_index,
-                strict_solver_window=True,
-                hull_type=hull_type,
                 id_factory=format_temp_candidate_id,
             )
             next_index += len(batch)

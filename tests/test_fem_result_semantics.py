@@ -234,18 +234,22 @@ def test_legacy_calibration_without_validation_status_is_not_applied(tmp_path):
     assert calibration["uncertainty_MPa"] is None
 
 
-def test_scale_calibration_is_applied_only_after_leave_one_out_improvement(tmp_path):
-    models = tmp_path / "models"
-    manager = SurrogateModelManager(models_dir=models, case_dir=tmp_path / "cases")
-    predictions = [10.0, 20.0, 30.0, 40.0]
-    targets = [20.0, 40.0, 60.0, 80.0]
-    records = [
+def _calibration_records(targets):
+    return [
         {
-            "design": {"prediction_index": index},
+            "design": {"prediction_index": index,
+                       "geometry": {"length_mm": 500, "radius_mm": 150, "thickness_mm": 10, "imperfection_ratio": 0.008}},
             "abaqus_results": {"status": "success", "ultimate_pressure_MPa": target},
         }
         for index, target in enumerate(targets)
     ]
+
+
+def test_scale_calibration_is_applied_only_after_leave_one_out_improvement(tmp_path):
+    manager = SurrogateModelManager(models_dir=tmp_path / "models", case_dir=tmp_path / "cases")
+    predictions = [10.0, 20.0, 30.0, 40.0]
+    records = _calibration_records([20.0, 40.0, 60.0, 80.0, 85.0])
+    records[-1]["design"]["geometry"]["radius_mm"] = 200
     manager.formula_prediction = lambda design, apply_calibration=False: SimpleNamespace(
         ultimate_pressure_MPa=predictions[design["prediction_index"]]
     )
@@ -253,6 +257,7 @@ def test_scale_calibration_is_applied_only_after_leave_one_out_improvement(tmp_p
     summary = manager.train_from_records(records)
 
     assert summary["calibration_status"] == "accepted"
+    assert summary["training_size"] == len(predictions)
     assert summary["bias_MPa"] == 0.0
     assert summary["scale"] == 2.0
     assert manager._load_calibration()["scale"] == 2.0
@@ -262,13 +267,7 @@ def test_unstable_scale_calibration_is_rejected(tmp_path):
     manager = SurrogateModelManager(models_dir=tmp_path / "models", case_dir=tmp_path / "cases")
     predictions = [14.969, 36.764, 42.902, 12.743, 33.693, 148.628, 121.99, 67.428]
     targets = [12.739613, 64.254111, 55.094194, 12.895442, 30.550128, 324.205742, 297.759563, 440.474224]
-    records = [
-        {
-            "design": {"prediction_index": index},
-            "abaqus_results": {"status": "success", "ultimate_pressure_MPa": target},
-        }
-        for index, target in enumerate(targets)
-    ]
+    records = _calibration_records(targets)
     manager.formula_prediction = lambda design, apply_calibration=False: SimpleNamespace(
         ultimate_pressure_MPa=predictions[design["prediction_index"]]
     )

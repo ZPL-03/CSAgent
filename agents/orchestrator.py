@@ -25,7 +25,6 @@ from core.task_contract import (
     requested_screen_top_k,
     summarize_task,
     task_payload_from_request,
-    task_imperfection_ratio,
     candidate_constraints,
 )
 from core.task_parser import TaskParser
@@ -107,9 +106,6 @@ class OrchestratorAgent(BaseAgent):
 
     @staticmethod
     def _validate_analysis_conditions(task: Dict, candidate: Dict) -> None:
-        expected = task_imperfection_ratio(task)
-        if (candidate.get("geometry") or {}).get("imperfection_ratio") != expected:
-            raise ValueError(f"候选初始几何缺陷比与任务不一致，应为 {expected:g}。")
         check = RuleChecker().run(candidate, task=task)
         if not check["is_valid"]:
             raise ValueError("候选与任务不一致：" + "；".join(check["errors"]))
@@ -195,8 +191,6 @@ class OrchestratorAgent(BaseAgent):
         return updated
 
     def screen_candidates(self, task: Dict, candidates: List[Dict]) -> List[Dict]:
-        for candidate in candidates:
-            self._validate_analysis_conditions(task, candidate)
         score_formula = self.screener.score_formula_text
         requested_top_k = requested_screen_top_k(task)
         if requested_top_k is None:
@@ -222,16 +216,15 @@ class OrchestratorAgent(BaseAgent):
         ranked_candidates = [self._attach_task_context(task, candidate) for candidate in self.screener.rank_candidates(task, candidates)]
         screened = [candidate for candidate in ranked_candidates if candidate.get("screening_selected")]
         self.last_ranked_candidates = ranked_candidates
-        self.screener.emit(
-            f"已完成 {len(candidates)} 个候选的批量评分，请求保留 Top-{effective_top_k}，实际返回 {len(screened)} 个。"
-        )
+        outside_count = sum(candidate.get("surrogate_prediction_status") == "outside_geometry_domain" for candidate in ranked_candidates)
         self.emit_event(
             "screening_completed",
-            f"代理模型初筛完成，请求 Top-{requested_top_k}，实际输出 {len(screened)} 个。",
+            f"代理模型初筛完成，{outside_count} 个超出几何覆盖范围，默认送检 {len(screened)} 个（目标 Top-{requested_top_k}）。",
             {
                 **self._task_event_context(task),
                 "input_count": len(candidates),
                 "output_count": len(screened),
+                "outside_geometry_count": outside_count,
                 "score_formula": score_formula,
                 "requested_top_k_candidates": requested_top_k,
                 "effective_top_k_candidates": effective_top_k,
@@ -352,6 +345,8 @@ class OrchestratorAgent(BaseAgent):
         task = self.parse_instruction(user_instruction, overrides=overrides)
         candidates = self.generate_candidates(task)
         top_candidates = self.screen_candidates(task, candidates)
+        if not top_candidates:
+            raise ValueError("没有默认送检方案，请通过交互流程选定有限元校核候选。")
 
         fem_candidates = self.prepare_candidates_for_fem(task, top_candidates)
         results = [self.evaluate_prepared_candidate(task, candidate) for candidate in fem_candidates]

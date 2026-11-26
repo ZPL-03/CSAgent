@@ -13,6 +13,7 @@ import pytest
 from agents.candidate_gen import CandidateGenAgent
 from agents.orchestrator import OrchestratorAgent
 from agents.report_gen import ReportGenAgent
+from agents.screener import ScreenerAgent
 from core.doe_sampler import DOESampler
 from core.fem_input_contract import attach_design_revision, validate_fem_input
 from core.llm_backend import LLMBackend, backend_trust_env
@@ -82,7 +83,7 @@ def test_task_mutation_is_blocked_before_fem_id_reservation_and_before_solver(mo
     promoted = attach_design_revision(promoted)
     assert any("task_constraints" in error for error in validate_fem_input(promoted))
     monkeypatch.setattr(module, "reserve_candidate_ids", lambda *_: pytest.fail("不能分配编号"))
-    for action in (orchestrator.prepare_candidates_for_fem, orchestrator.screen_candidates):
+    for action in (orchestrator.prepare_candidates_for_fem, ScreenerAgent().rank_candidates):
         with pytest.raises(ValueError, match="任务不一致"):
             action(current, [promoted])
     with pytest.raises(ValueError, match="任务不一致"):

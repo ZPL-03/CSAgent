@@ -10,14 +10,12 @@ from core.config_loader import load_app_config, load_material_db, load_param_ran
 from core.id_utils import format_candidate_id
 from core.pressure_hull_profile import (
     layup_pattern,
-    normalize_geometry,
     normalize_layup,
     required_geometry_params,
-    resolve_hull_type,
 )
 from core.rule_checker import RuleChecker
 from core.layup_parameters import TEMPLATE_ANGLE_FIELDS, active_geometry, active_layup
-from core.task_contract import candidate_constraints, task_geometry_bounds, task_payload_from_request
+from core.task_contract import candidate_constraints, task_payload_from_request
 
 
 class DOESampler:
@@ -70,15 +68,6 @@ class DOESampler:
             return dict(self._task_payload(task).get("material_system", {}))
         return dict(options[(max(ordinal_index, 1) - 1) % len(options)])
 
-    def _feature_bounds(
-        self,
-        task: Dict[str, Any],
-        htype: str,
-        feature_order: List[str],
-    ) -> Dict[str, Dict[str, float]]:
-        bounds = task_geometry_bounds(task, htype)
-        return {feature: bounds[feature] for feature in feature_order}
-
     def _lhs(self, dimensions: int, samples: int, seed_offset: int = 0) -> np.ndarray:
         rng = np.random.default_rng(self.random_seed + seed_offset)
         result = np.zeros((samples, dimensions))
@@ -103,10 +92,10 @@ class DOESampler:
         template_name = str(template.get("name") or "BASE_90_AB")
         pattern = str(template.get("pattern") or layup_pattern(geometry["alpha_deg"], geometry["beta_deg"], template_name))
         text = (
-            pattern.replace("alpha", str(round(float(geometry["alpha_deg"]), 3)))
-            .replace("beta", str(round(float(geometry["beta_deg"]), 3)))
-            .replace("α", str(round(float(geometry["alpha_deg"]), 3)))
-            .replace("β", str(round(float(geometry["beta_deg"]), 3)))
+            pattern.replace("alpha", str(geometry["alpha_deg"]))
+            .replace("beta", str(geometry["beta_deg"]))
+            .replace("α", str(geometry["alpha_deg"]))
+            .replace("β", str(geometry["beta_deg"]))
         )
         if constraints["symmetric"]:
             text += "s"
@@ -121,47 +110,41 @@ class DOESampler:
         task: Dict[str, Any],
         n_samples: int,
         start_index: int = 1,
-        strict_solver_window: bool = False,
-        hull_type: str | None = None,
         id_factory=None,
-        batch_multiplier: int | None = None,
+        batch_multiplier: int = 8,
     ) -> List[Dict[str, Any]]:
         valid_candidates: List[Dict[str, Any]] = []
         generation_round = 0
         candidate_id_factory = id_factory or format_candidate_id
-        htype = resolve_hull_type(hull_type)
+        task_payload = self._task_payload(task)
+        htype = task_payload["hull_type"]
         feature_order = required_geometry_params(htype)
-        if self._task_payload(task)["layup_constraints"]["allowed_angles"]:
+        if task_payload["layup_constraints"]["allowed_angles"]:
             feature_order = [key for key in feature_order if key not in TEMPLATE_ANGLE_FIELDS]
-        type_ranges = self._feature_bounds(task, htype, feature_order)
+        bounds = task_payload["geometry_envelope"]
+        batch_multiplier = max(int(batch_multiplier), 1)
 
         while len(valid_candidates) < n_samples and generation_round < 12:
-            active_batch_multiplier = max(int(batch_multiplier), 1) if batch_multiplier is not None else (8 if strict_solver_window else 3)
             remaining = n_samples - len(valid_candidates)
             lhs_values = self._lhs(
                 len(feature_order),
-                max(remaining * active_batch_multiplier, remaining),
+                remaining * batch_multiplier,
                 seed_offset=generation_round,
             )
             rng = np.random.default_rng(self.random_seed + 1000 + generation_round)
 
             for row in lhs_values:
-                geometry: Dict[str, float] = {}
+                geometry = {"radius_reference": task_payload["radius_reference"]}
                 for idx, feature in enumerate(feature_order):
-                    bounds = type_ranges.get(feature) or {"min": 0.0, "max": 1.0}
-                    value = float(bounds["min"]) + row[idx] * (float(bounds["max"]) - float(bounds["min"]))
-                    geometry[feature] = float(bounds["min"]) if bounds["min"] == bounds["max"] else round(float(value), 3)
-                geometry = normalize_geometry(htype, geometry)
-                for key, bounds in type_ranges.items():
-                    if bounds["min"] == bounds["max"]:
-                        geometry[key] = bounds["min"]
+                    low, high = bounds[feature]
+                    value = low + float(row[idx]) * (high - low)
+                    rounded = round(value, 3)
+                    geometry[feature] = rounded if low <= rounded <= high else value
 
-                layup = active_layup(self._layup_payload(rng, geometry, task))
+                layup = active_layup(self._layup_payload(rng, geometry, task_payload))
                 geometry = active_geometry({"geometry": geometry, "layup": layup})
                 candidate_index = start_index + len(valid_candidates)
-                material_system = self._select_material(task, candidate_index)
-                task_payload = self._task_payload(task)
-                geometry["radius_reference"] = task_payload["radius_reference"]
+                material_system = self._select_material(task_payload, candidate_index)
                 candidate_id = candidate_id_factory(candidate_index)
                 candidate = {
                     "candidate_id": candidate_id,
@@ -186,14 +169,9 @@ class DOESampler:
                     "load_conditions": task_payload["load_conditions"],
                     "boundary_conditions": task_payload["boundary_conditions"],
                     "design_targets": task_payload["design_targets"],
-                    "task_constraints": candidate_constraints(task),
+                    "task_constraints": candidate_constraints(task_payload),
                 }
-                rule_check = self.rule_checker.run(
-                    candidate,
-                    strict_solver_window=strict_solver_window,
-                    hull_type=htype,
-                    task=task,
-                )
+                rule_check = self.rule_checker.run(candidate)
                 candidate["rule_check"] = rule_check
                 if rule_check["is_valid"]:
                     valid_candidates.append(candidate)

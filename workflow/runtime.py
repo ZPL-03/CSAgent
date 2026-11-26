@@ -175,6 +175,8 @@ class DesignWorkflowRuntime:
             raise RuntimeError("仿真队列缺少当前工作流运行编号")
         task = {**payload["task"], "run_id": self._active_run_id}
         candidates = list(payload.get("candidates") or [])
+        if not candidates:
+            raise ValueError("有限元校核需要至少一个待校核候选。")
         results = []
         if hasattr(self.orchestrator, "prepare_candidates_for_fem"):
             fem_designs = self.orchestrator.prepare_candidates_for_fem(task, candidates)
@@ -617,14 +619,30 @@ class DesignWorkflowRuntime:
 
         return self.event_store.load_snapshot(run_id)
 
-    def continue_after_confirmation(self, state_or_run_id: DesignWorkflowState | str, approved: bool) -> DesignWorkflowState:
-        """根据当前等待的人工确认继续推进工作流。"""
+    def continue_after_confirmation(
+        self, state_or_run_id: DesignWorkflowState | str, approved: bool, *, fem_candidate_ids: list[str] | None = None,
+    ) -> DesignWorkflowState:
+        """按人工确认推进；手动送检只从当前候选池按编号选择。"""
 
         state = self.resume(state_or_run_id) if isinstance(state_or_run_id, str) else dict(state_or_run_id)
         confirmation = state.get("pending_confirmation")
+        if fem_candidate_ids is not None and (confirmation != "fem_evaluation" or not approved):
+            raise ValueError("仅在确认有限元校核时可以指定送检候选。")
+        confirmation_payload = {"confirmation_id": confirmation, "approved": bool(approved)}
         if confirmation == "screen_candidates":
             state["screen_approved"] = bool(approved)
         elif confirmation == "fem_evaluation":
+            if fem_candidate_ids is not None:
+                pool = {candidate["candidate_id"]: candidate for candidate in state["candidates"]}
+                if (len(fem_candidate_ids) != len(set(fem_candidate_ids))
+                        or any(candidate_id not in pool for candidate_id in fem_candidate_ids)):
+                    raise ValueError("送检编号必须来自当前候选池且不得重复。")
+                state["evaluated_candidates"] = [pool[candidate_id] for candidate_id in fem_candidate_ids]
+            if approved:
+                targets = state.get("evaluated_candidates", [])
+                if not targets:
+                    raise ValueError("没有默认送检方案，请从候选池选择至少一个方案进行有限元校核。")
+                confirmation_payload["candidate_ids"] = [candidate["candidate_id"] for candidate in targets]
             state["fem_approved"] = bool(approved)
         elif confirmation == "export_report":
             state["report_approved"] = bool(approved)
@@ -636,6 +654,6 @@ class DesignWorkflowRuntime:
             "human_confirmation",
             "HumanOperator",
             f"人工确认：{confirmation}={approved}",
-            {"confirmation_id": confirmation, "approved": bool(approved)},
+            confirmation_payload,
         )
         return self._invoke(state)

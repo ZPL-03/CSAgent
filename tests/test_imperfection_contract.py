@@ -165,18 +165,26 @@ def test_condition_source_survives_normalization_and_default_config_change(monke
 def test_conflicting_candidate_is_rejected_before_screening_or_fem_numbering(monkeypatch):
     import agents.orchestrator as module
 
-    task = {"geometry_envelope": {"imperfection_ratio": 0.005}}
+    from agents.screener import ScreenerAgent
+
+    task = {"geometry_envelope": {"imperfection_ratio": 0.005}, "screening_preferences": {"top_k_candidates": 1}}
     candidate = {"geometry": {"imperfection_ratio": 0.008}}
     orchestrator = object.__new__(OrchestratorAgent)
     monkeypatch.setattr(module, "reserve_candidate_ids", lambda *_: pytest.fail("分析条件未通过"))
     with pytest.raises(ValueError, match="任务不一致"):
         orchestrator.prepare_candidates_for_fem(task, [candidate])
     with pytest.raises(ValueError, match="任务不一致"):
-        orchestrator.screen_candidates(task, [candidate])
+        ScreenerAgent().rank_candidates(task, [candidate])
 
 
-def test_doe_does_not_replace_out_of_range_fixed_geometry(monkeypatch):
+def test_fixed_geometry_is_preserved_in_llm_prompt_and_doe(monkeypatch):
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
-    task = TaskParser().parse_instruction("外压12MPa，长度1000mm，生成4个方案，预筛保留1个")
-    with pytest.raises(ValueError, match="length_mm.*无交集"):
-        CandidateGenAgent().doe_sampler.sample_candidates(task, 1)
+    task = TaskParser().parse_instruction("外压12MPa，长度1000mm，内半径210mm，生成4个方案，预筛保留1个")
+    agent = CandidateGenAgent()
+    _, prompt = agent._build_prompt(task, desired_count=4)
+    assert "长度 L固定为 1000 mm" in prompt
+    assert "内半径固定为 210 mm" in prompt
+    candidates = agent.doe_sampler.sample_candidates(task, 4)
+    assert len(candidates) == 4
+    assert {(item["geometry"]["length_mm"], item["geometry"]["radius_mm"]) for item in candidates} == {(1000, 210)}
+    assert all(item["geometry"]["radius_reference"] == "inner" for item in candidates)

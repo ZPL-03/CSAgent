@@ -8,7 +8,7 @@ import math
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, Iterable, List, Sequence
+from typing import Any, Dict, List, Sequence
 
 from core.config_loader import load_param_ranges
 from abaqus.cylindrical_geometry import positive_number, shell_radii
@@ -110,7 +110,7 @@ def _validate_regression_report(pbipf: Dict[str, Any]) -> Dict[str, Any]:
     if not path.is_relative_to(root) or not path.is_file():
         raise ValueError("压力回归缺少项目内验证报告")
     report = json.loads(path.read_text(encoding="utf-8"))
-    if report.get("schema_version") != 3 or report.get("hash_format") != "utf8_lf" or report.get("status") != "evaluated" or report.get("model_type") != "linear" or pbipf.get("model_type") != "linear":
+    if report.get("schema_version") != 4 or report.get("hash_format") != "utf8_lf" or report.get("status") != "evaluated" or report.get("model_type") != "linear" or pbipf.get("model_type") != "linear":
         raise ValueError("压力回归报告或模型类型不一致")
     scope = {
         "model_id": pbipf.get("model_id"),
@@ -139,6 +139,15 @@ def _validate_regression_report(pbipf: Dict[str, Any]) -> Dict[str, Any]:
     }
     if model != expected:
         raise ValueError("压力回归参数与验证报告不一致")
+    bounds = report.get("deployment_geometry_bounds")
+    if not isinstance(bounds, dict) or set(bounds) != {"length_mm", "inner_radius_mm", "thickness_mm", "imperfection_ratio"}:
+        raise ValueError("压力回归报告缺少应用评估几何覆盖范围")
+    for field, interval in bounds.items():
+        if not isinstance(interval, list) or len(interval) != 2:
+            raise ValueError(f"压力回归几何覆盖范围 {field} 需要两个端点")
+        low, high = (_finite_number(value, field) for value in interval)
+        if low < 0 or low > high:
+            raise ValueError(f"压力回归几何覆盖范围 {field} 无效")
     required = {"core/pressure_regression.py", "core/pressure_hull_profile.py", "abaqus/cylindrical_geometry.py", "core/surrogate_model.py",
                 "core/surrogate_dataset.py", "core/io_utils.py", "scripts/fit_pressure_surrogate.py"}
     hashes = report.get("code_hashes", {})
@@ -387,12 +396,42 @@ class SurrogateModelManager:
         records: List[Dict[str, Any]] = []
         for path in sorted(self.case_dir.glob("CASE_*.json")):
             record = read_json(path)
-            if record_to_training_sample(record) is not None:
+            result = record.get("abaqus_results", {})
+            if (result.get("status") == "success" and _ultimate_pressure_from_results(result) is not None
+                    and not self.geometry_domain_violations(record["design"]["geometry"])):
                 records.append(record)
         return records
 
+    def geometry_domain_violations(self, geometry: Dict[str, Any]) -> Dict[str, Dict[str, float]]:
+        """以应用评估数据的内半径口径判断覆盖范围。"""
+        return self._geometry_range_violations({
+            "length_mm": positive_number(geometry.get("length_mm"), "length_mm"),
+            "inner_radius_mm": shell_radii(geometry)["inner"],
+            "thickness_mm": positive_number(geometry.get("thickness_mm"), "thickness_mm"),
+            "imperfection_ratio": _finite_number(geometry.get("imperfection_ratio"), "imperfection_ratio"),
+        })
+
+    def _geometry_range_violations(self, values: Dict[str, float]) -> Dict[str, Dict[str, float]]:
+        violations = {}
+        for key, (low, high) in self.validation_report["deployment_geometry_bounds"].items():
+            value = values[key]
+            # 半径基准换算在覆盖边界上只容许浮点舍入误差。
+            if not (low <= value <= high or math.isclose(value, low, rel_tol=1e-12) or math.isclose(value, high, rel_tol=1e-12)):
+                violations[key] = {"value": value, "min": low, "max": high}
+        return violations
+
+    @staticmethod
+    def _require_geometry_coverage(violations: Dict[str, Dict[str, float]]) -> None:
+        if violations:
+            raise ValueError(f"超出代理模型几何覆盖范围：{', '.join(violations)}")
+
     def formula_prediction(self, candidate: Dict[str, Any], apply_calibration: bool = True) -> FormulaPrediction:
+        """计算覆盖范围内的单个候选的压力估计。"""
         hull_type = validate_surrogate_scope(candidate)
+        self._require_geometry_coverage(self.geometry_domain_violations(candidate.get("geometry", {})))
+        return self._formula_prediction(candidate, hull_type, apply_calibration)
+
+    def _formula_prediction(self, candidate: Dict[str, Any], hull_type: str, apply_calibration: bool) -> FormulaPrediction:
         geometry = dict(candidate.get("geometry", {}))
         material = dict(candidate.get("material_system", {}))
         layup = normalize_layup(candidate.get("layup", {}), geometry)
@@ -467,13 +506,16 @@ class SurrogateModelManager:
             pressure = _ultimate_pressure_from_results(record.get("abaqus_results", {}))
             if pressure is None:
                 continue
-            prediction = self.formula_prediction(record.get("design", {}), apply_calibration=False).ultimate_pressure_MPa
+            design = record.get("design", {})
+            if self.geometry_domain_violations(design.get("geometry", {})):
+                continue
+            prediction = self.formula_prediction(design, apply_calibration=False).ultimate_pressure_MPa
             if prediction <= 0:
                 raise ValueError(f"案例 {record.get('case_id')} 的线性估计非正，不能进行正比例校准")
             predictions.append(float(prediction))
             targets.append(float(pressure))
         if len(targets) < 3:
-            raise RuntimeError("代理模型校准至少需要 3 条成功耐压壳案例")
+            raise RuntimeError("代理模型校准至少需要 3 条处于几何覆盖范围内的成功案例")
 
         candidate_scale = _fit_positive_scale(predictions, targets)
         baseline_metrics = _error_metrics(targets, predictions)
@@ -514,6 +556,8 @@ class SurrogateModelManager:
             if len(row) != SURROGATE_INPUT_DIMENSION:
                 raise ValueError(f"代理模型 {SURROGATE_MODEL_ID} 需要 {SURROGATE_INPUT_DIMENSION} 项特征，实际为 {len(row)} 项")
             values = {name: _finite_number(value, name) for name, value in zip(FEATURE_ORDER, row)}
+            # 特征向量的 radius_mm 已按内半径口径组装。
+            self._require_geometry_coverage(self._geometry_range_violations({**values, "inner_radius_mm": values["radius_mm"]}))
             descriptors = _pbipf_descriptors(
                 coefficients,
                 q_value=values["asme_linear_buckling_pressure_MPa"],
@@ -531,13 +575,15 @@ class SurrogateModelManager:
             predictions.append(pressure)
         return predictions
 
-    def predict_candidates(self, candidates: Iterable[Dict[str, Any]], task: Dict[str, Any] | None = None) -> List[float]:
-        return [self.formula_prediction(candidate).ultimate_pressure_MPa for candidate in candidates]
-
     def predict_candidate_payload(self, candidate: Dict[str, Any]) -> Dict[str, Any]:
-        payload = self.formula_prediction(candidate).to_dict()
+        hull_type = validate_surrogate_scope(candidate)
+        geometry = candidate.get("geometry", {})
+        violations = self.geometry_domain_violations(geometry)
+        # 域外候选不调用 ASME 或回归公式，面密度仍按几何和材料计算。
+        payload = ({"prediction_status": "outside_geometry_domain", "outside_geometry_fields": violations}
+                   if violations else self._formula_prediction(candidate, hull_type, apply_calibration=True).to_dict())
         payload["areal_density_kg_per_m2"] = estimate_areal_density_kg_per_m2(
-            candidate.get("geometry", {}),
+            geometry,
             candidate.get("material_system", {}),
         )
         return payload

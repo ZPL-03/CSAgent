@@ -8,17 +8,11 @@ import math
 import re
 from typing import Any, Dict, Iterable
 
-from core.config_loader import default_imperfection_ratio, validate_imperfection_ratio
+from abaqus.cylindrical_geometry import radius_reference, shell_radii
+from core.config_loader import default_imperfection_ratio, load_param_ranges, validate_imperfection_ratio
 
 
 DEFAULT_ALLOWED_ANGLES = [0, 45, -45, 90]
-DEFAULT_GEOMETRY_ENVELOPE = {
-    "length_mm": [300.0, 800.0],
-    "radius_mm": [80.0, 180.0],
-    "thickness_mm": [5.0, 20.0],
-    "alpha_deg": [10.0, 80.0],
-    "beta_deg": [10.0, 80.0],
-}
 DEFAULT_DESIGN_TARGETS = {
     "primary_objective": "最小壳体质量",
 }
@@ -242,11 +236,9 @@ def boundary_condition_code(boundary_conditions: Any) -> float:
 
 
 def normalize_geometry_envelope(envelope: Dict[str, Any] | None) -> Dict[str, Any]:
-    data = deepcopy(DEFAULT_GEOMETRY_ENVELOPE)
-    default_defect = default_imperfection_ratio()
-    data["imperfection_ratio"] = [default_defect, default_defect]
-    if not isinstance(envelope, dict):
-        return data
+    """显式尺寸和区间定义任务搜索范围，配置仅提供缺省范围。"""
+    defaults = load_param_ranges()["geometry_search_defaults"]
+    values = {}
     aliases = {
         "L": "length_mm",
         "length": "length_mm",
@@ -262,24 +254,35 @@ def normalize_geometry_envelope(envelope: Dict[str, Any] | None) -> Dict[str, An
         "Ir": "imperfection_ratio",
         "imperfection": "imperfection_ratio",
     }
-    specified_defect = None
-    for raw_key, value in envelope.items():
+    for raw_key, value in (envelope or {}).items():
         key = aliases.get(str(raw_key), str(raw_key))
         if key == "imperfection_ratio":
-            values = list(value) if isinstance(value, (list, tuple)) else [value, value]
-            if len(values) != 2:
+            endpoints = list(value) if isinstance(value, (list, tuple)) else [value, value]
+            if len(endpoints) != 2:
                 raise ValueError("初始几何缺陷比需要一个固定值，不作为搜索变量。")
-            values = [validate_imperfection_ratio(item) for item in values]
-            if values[0] != values[1]:
+            bounds = [validate_imperfection_ratio(item) for item in endpoints]
+            if bounds[0] != bounds[1]:
                 raise ValueError("初始几何缺陷比需要一个固定值，不作为搜索变量。")
-            if specified_defect is not None and values[0] != specified_defect:
-                raise ValueError("初始几何缺陷比字段与别名取值冲突。")
-            specified_defect = values[0]
-            data[key] = values
+        elif key in defaults:
+            bounds = _normalize_range(value, f"geometry_envelope.{key}")
+        else:
             continue
-        if key in data:
-            data[key] = _normalize_range(value, f"geometry_envelope.{key}")
-    return data
+        if key in values and values[key] != bounds:
+            label = "初始几何缺陷比" if key == "imperfection_ratio" else key
+            raise ValueError(f"{label} 字段与别名取值冲突。")
+        values[key] = bounds
+    for key, default in defaults.items():
+        if key not in values:
+            values[key] = _normalize_range([default["min"], default["max"]], f"geometry_envelope.{key}")
+        low, high = values[key]
+        if low <= 0:
+            raise ValueError(f"任务的 {key} 必须为正数。")
+        if key in {"alpha_deg", "beta_deg"} and high > 90:
+            raise ValueError(f"任务的 {key} 不得超过 90 度。")
+    if "imperfection_ratio" not in values:
+        defect = default_imperfection_ratio()
+        values["imperfection_ratio"] = [defect, defect]
+    return values
 
 
 def normalize_screening_preferences(preferences: Dict[str, Any] | None) -> Dict[str, Any]:
@@ -330,9 +333,10 @@ def normalize_task_payload(
     normalized["boundary_conditions"] = normalize_boundary_conditions(normalized.get("boundary_conditions"))
     envelope = dict(normalized.get("geometry_envelope") or {})
     fixed_facts = (normalized.get("user_input_facts") or {}).get("fixed_geometry") or {}
+    search_defaults = load_param_ranges()["geometry_search_defaults"]
     # 固定几何是任务约束，不把它当作采样中心或截断到全局范围。
     for key, value in fixed_facts.items():
-        if key not in DEFAULT_GEOMETRY_ENVELOPE:
+        if key not in search_defaults:
             continue
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value):
             raise ValueError(f"固定几何 {key} 必须是有限数值。")
@@ -357,9 +361,14 @@ def normalize_task_payload(
     if condition_sources["imperfection_ratio"] not in {"user", "task", "default"}:
         raise ValueError("初始几何缺陷比来源应为 user、task 或 default。")
     normalized["analysis_condition_sources"] = condition_sources
-    from abaqus.cylindrical_geometry import radius_reference
-
     normalized["radius_reference"] = radius_reference(normalized)
+    bounds = normalized["geometry_envelope"]
+    # 半径最大且厚度最小时仍无正内半径，包络中不存在可建模的圆柱壳。
+    try:
+        shell_radii({"radius_mm": bounds["radius_mm"][1], "thickness_mm": bounds["thickness_mm"][0],
+                     "radius_reference": normalized["radius_reference"]})
+    except ValueError as exc:
+        raise ValueError("任务半径与厚度范围不能形成有效的圆柱壳。") from exc
     normalized["candidate_generation_preferences"] = normalize_candidate_generation_preferences(
         normalized.get("candidate_generation_preferences")
     )
@@ -423,23 +432,6 @@ def candidate_constraints(task: Dict[str, Any]) -> Dict[str, Any]:
         "hull_type", "geometry_envelope", "radius_reference", "layup_constraints",
         "load_conditions", "boundary_conditions", "design_targets", "material_system",
     )})
-
-
-def task_geometry_bounds(task: Dict[str, Any], hull_type: str | None = None) -> Dict[str, Dict[str, float]]:
-    """返回任务与当前模型支持域的交集；域外固定参数终止任务，不替换数值。"""
-    from core.pressure_hull_profile import load_param_ranges_for_type
-
-    payload = task_payload_from_request(task)
-    bounds = {}
-    for key, domain in load_param_ranges_for_type(hull_type or payload["hull_type"]).items():
-        low, high = payload["geometry_envelope"][key]
-        if not all(math.isfinite(value) for value in (low, high)):
-            raise ValueError(f"任务的 {key} 必须为有限数值。")
-        low, high = max(low, domain["min"]), min(high, domain["max"])
-        if low > high:
-            raise ValueError(f"任务的 {key} 与模型适用范围无交集，不能预筛或求解。")
-        bounds[key] = {"min": low, "max": high}
-    return bounds
 
 
 def describe_imperfection_source(task: Dict[str, Any] | None) -> str:

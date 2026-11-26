@@ -7,7 +7,6 @@ from typing import Dict, List
 from agents.base import BaseAgent
 from core.config_loader import load_app_config
 from core.display import format_number
-from core.pressure_hull_profile import estimate_areal_density_kg_per_m2
 from core.surrogate_model import SurrogateModelManager
 from core.rule_checker import RuleChecker
 from core.task_contract import effective_screen_top_k
@@ -31,39 +30,34 @@ class ScreenerAgent(BaseAgent):
             f"- {self.weight_penalty:.2f} × 面密度"
         )
 
-    def _estimate_weight(self, candidate: Dict) -> float:
-        return estimate_areal_density_kg_per_m2(
-            candidate.get("geometry", {}),
-            candidate.get("material_system", {}),
-        )
-
     def rank_candidates(self, task: Dict, candidates: List[Dict]) -> List[Dict]:
-        """返回全量候选，仅让正值估计参与排名和默认 Top-K。"""
+        """返回全量候选，仅让几何覆盖范围内的正值估计参与排名和默认 Top-K。"""
         requested_top_k = effective_screen_top_k(task, len(candidates))
         if requested_top_k <= 0:
             raise ValueError("代理模型初筛缺少有效 Top-K 数量或候选池为空。")
 
         enriched: List[Dict] = []
+        checker = RuleChecker()
         for candidate in candidates:
-            check = RuleChecker().run(candidate, task=task)
+            check = checker.run(candidate, task=task)
             if not check["is_valid"]:
                 raise ValueError("预筛候选与任务不一致：" + "；".join(check["errors"]))
             updated = dict(candidate)
             prediction = self.model_manager.predict_candidate_payload(candidate)
-            ultimate_pressure = float(prediction["ultimate_pressure_MPa"])
-            areal_density = self._estimate_weight(candidate)
-            updated["surrogate_ultimate_pressure_MPa"] = round(ultimate_pressure, 3)
-            updated["surrogate_PBIPF_MPa"] = round(float(prediction["PBIPF_MPa"]), 3)
-            updated["surrogate_uncertainty_MPa"] = prediction["uncertainty_MPa"]
-            updated["surrogate_calibration_status"] = prediction["calibration_status"]
+            for field, key in (
+                ("surrogate_ultimate_pressure_MPa", "ultimate_pressure_MPa"),
+                ("surrogate_PBIPF_MPa", "PBIPF_MPa"),
+                ("asme_linear_buckling_pressure_MPa", "asme_linear_buckling_pressure_MPa"),
+            ):
+                value = prediction.get(key)
+                updated[field] = round(value, 3) if value is not None else None
+            updated["surrogate_uncertainty_MPa"] = prediction.get("uncertainty_MPa")
+            updated["surrogate_calibration_status"] = prediction.get("calibration_status")
             updated["surrogate_prediction_status"] = prediction["prediction_status"]
             eligible = prediction["prediction_status"] == "positive"
-            updated["asme_linear_buckling_pressure_MPa"] = round(
-                float(prediction["asme_linear_buckling_pressure_MPa"]), 3
-            )
-            updated["linear_buckling_feature_Q"] = prediction["linear_buckling_feature_Q"]
+            updated["linear_buckling_feature_Q"] = prediction.get("linear_buckling_feature_Q")
             updated["linear_buckling_source"] = prediction.get("linear_buckling_source")
-            updated["surrogate_weight"] = round(float(areal_density), 3)
+            updated["surrogate_weight"] = round(prediction["areal_density_kg_per_m2"], 3)
             updated["rank_score"] = round(
                 float(
                     self.pressure_weight * updated["surrogate_ultimate_pressure_MPa"]
@@ -77,6 +71,16 @@ class ScreenerAgent(BaseAgent):
                 "weight_component": round(self.weight_penalty * updated["surrogate_weight"], 4),
                 "surrogate_detail": prediction,
             }
+            if prediction["prediction_status"] == "outside_geometry_domain":
+                labels = {"length_mm": "长度 (mm)", "inner_radius_mm": "内半径 (mm)",
+                          "thickness_mm": "厚度 (mm)", "imperfection_ratio": "初始缺陷比"}
+                mismatches = "；".join(
+                    f"{labels[key]} {bounds['value']:g} 不在 {bounds['min']:g} 至 {bounds['max']:g} 内"
+                    for key, bounds in prediction["outside_geometry_fields"].items()
+                )
+                updated["screening_summary"] = f"超出代理模型几何覆盖范围：{mismatches}。未计算代理压力或排名，可人工选择有限元校核。"
+                enriched.append(updated)
+                continue
             validation_error = prediction["uncertainty_MPa"]
             validation_text = f"{format_number(validation_error)} MPa" if validation_error is not None else "未提供"
             updated["screening_summary"] = (
@@ -123,6 +127,6 @@ class ScreenerAgent(BaseAgent):
         ranked = self.rank_candidates(task, candidates)
         selected = [candidate for candidate in ranked if candidate.get("screening_selected")]
         self.emit(
-            f"已完成 {len(candidates)} 个候选的批量评分，请求保留 Top-{requested_top_k}，实际返回 {len(selected)} 个。"
+            f"代理初筛检查 {len(candidates)} 个候选，请求保留 Top-{requested_top_k}，实际入选 {len(selected)} 个。"
         )
         return selected

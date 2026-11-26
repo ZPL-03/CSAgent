@@ -193,6 +193,41 @@ def test_nonpositive_estimate_is_audited_and_not_selected(tmp_path):
     assert agent.run({"task": task, "candidates": [invalid]}) == []
 
 
+def test_screening_ranks_only_candidates_within_inner_radius_coverage(tmp_path, monkeypatch):
+    from core.doe_sampler import DOESampler
+
+    task = {"geometry_envelope": {"length_mm": 500, "radius_mm": [190, 191], "thickness_mm": 20},
+            "screening_preferences": {"top_k_candidates": 2}}
+    boundary, outside = DOESampler().sample_candidates(task, 2)
+    boundary["geometry"]["radius_mm"] = 190
+    outside["geometry"]["radius_mm"] = 191
+    agent = ScreenerAgent()
+    manager = agent.model_manager = surrogate.SurrogateModelManager(models_dir=tmp_path)
+    formula = manager._formula_prediction
+    predicted = []
+
+    def record_formula(candidate, *args, **kwargs):
+        predicted.append(candidate["candidate_id"])
+        return formula(candidate, *args, **kwargs)
+
+    monkeypatch.setattr(manager, "_formula_prediction", record_formula)
+    ranked, unranked = agent.rank_candidates(task, [outside, boundary])
+
+    assert predicted == [boundary["candidate_id"]]
+    assert ranked["screening_rank"] == 1 and ranked["screening_selected"] is True
+    assert unranked["surrogate_prediction_status"] == "outside_geometry_domain"
+    assert unranked["surrogate_ultimate_pressure_MPa"] is None
+    assert unranked["rank_score"] is None and unranked["screening_rank"] is None
+    assert unranked["screening_selected"] is False
+    assert unranked["screening_breakdown"]["surrogate_detail"]["outside_geometry_fields"] == {
+        "inner_radius_mm": {"value": 181.0, "min": 80.0, "max": 180.0},
+    }
+    with pytest.raises(ValueError, match="inner_radius_mm"):
+        manager.formula_prediction(outside)
+    with pytest.raises(ValueError, match="inner_radius_mm"):
+        manager.predict([surrogate.candidate_to_features(outside)])
+
+
 def test_prediction_uses_accepted_validation_error_without_historical_floor(tmp_path):
     manager = surrogate.SurrogateModelManager(models_dir=tmp_path)
     payload = dict(calibration_status="accepted", scale=1.5, bias_MPa=0.0, uncertainty_MPa=0.125,

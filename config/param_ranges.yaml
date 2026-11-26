@@ -1,4 +1,4 @@
-geometry:
+geometry_search_defaults:
   length_mm:
     min: 300
     max: 800
@@ -14,12 +14,11 @@ geometry:
   beta_deg:
     min: 10
     max: 80
-  imperfection_ratio:
-    min: 0.001
-    max: 0.01
-
 analysis_assumptions:
   imperfection_ratio: 0.008
+  imperfection_ratio_bounds:
+    min: 0.001
+    max: 0.01
 
 load:
   external_pressure_MPa:

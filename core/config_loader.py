@@ -60,9 +60,9 @@ def validate_imperfection_ratio(value: Any) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ValueError("初始几何缺陷比必须是有限数值，单位为比例。")
     value = float(value)
-    bounds = load_param_ranges()["geometry"]["imperfection_ratio"]
+    bounds = load_param_ranges()["analysis_assumptions"]["imperfection_ratio_bounds"]
     if not math.isfinite(value) or not float(bounds["min"]) <= value <= float(bounds["max"]):
-        raise ValueError(f"初始几何缺陷比需要位于 {bounds['min']:g}-{bounds['max']:g} 的模型适用范围。")
+        raise ValueError(f"初始几何缺陷比需要位于 {bounds['min']:g}-{bounds['max']:g} 的分析设置范围。")
     return value
 
 

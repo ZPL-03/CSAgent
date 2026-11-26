@@ -70,8 +70,15 @@ def main() -> None:
     deployment_x, groups, feature_audit = runtime_features(deployment)
     deployed_prediction = model.predict(deployment_x)
     deployment_target = deployment.ultimate_pressure_MPa.to_numpy()
+    # 几何覆盖范围以应用评估数据为准，不读取候选搜索配置。
+    deployment_geometry = {
+        "length_mm": deployment.length_mm,
+        "inner_radius_mm": deployment.inner_radius_mm,
+        "thickness_mm": deployment.thickness_mm,
+        "imperfection_ratio": deployment.imperfection_permille / 1000,
+    }
     report = {
-        "schema_version": 3, "status": "evaluated", "hash_format": "utf8_lf", "model_type": "linear", "model": model.to_dict(),
+        "schema_version": 4, "status": "evaluated", "hash_format": "utf8_lf", "model_type": "linear", "model": model.to_dict(),
         "descriptor_contract": {
             "training_q_source": "finite_element_eigenvalue", "prediction_q_source": "ASME_RD_1172",
             "asme_radius_reference": "outer", "descriptor_radius_reference": "inner",
@@ -87,6 +94,7 @@ def main() -> None:
             "metrics": screening_metrics(deployment_target, deployed_prediction),
             "materials": {str(material): screening_metrics(group.ultimate_pressure_MPa.to_numpy(), deployed_prediction[group.index.to_numpy()])
                           for material, group in deployment.groupby("material")}},
+        "deployment_geometry_bounds": {key: [float(values.min()), float(values.max())] for key, values in deployment_geometry.items()},
         "training_feature_min": x[training].min(axis=0).tolist(), "training_feature_max": x[training].max(axis=0).tolist(),
         "deployment_outside_feature_range_count": int(np.sum(np.any((deployment_x < x[training].min(axis=0)) | (deployment_x > x[training].max(axis=0)), axis=1))),
         "stiffness_max_abs_error": feature_audit["stiffness_max_abs_error"],

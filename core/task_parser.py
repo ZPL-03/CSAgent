@@ -9,7 +9,6 @@ from core.config_loader import default_imperfection_ratio, load_material_db, val
 from core.id_utils import next_task_id
 from core.schema_validator import validate_or_raise
 from core.task_contract import (
-    DEFAULT_GEOMETRY_ENVELOPE,
     DEFAULT_LAYUP_CONSTRAINTS,
     build_task_request_record,
     describe_boundary_conditions,
@@ -162,21 +161,22 @@ class TaskParser:
             r"(?:\s*(?:为|是|=|:|：|固定|保持|限定|锁定|指定|严格采用|必须|等于|不变|"
             r"参考|建议|中心|基准|附近|左右|约|大约|around|about|reference))*"
         )
+        number = r"([+-]?(?:[0-9]+(?:\.[0-9]+)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?)"
         return {
             "length_mm": [
-                rf"(?:长度|壳长|筒长|length|L){connector}\s*([0-9]+(?:\.[0-9]+)?)\s*mm",
+                rf"(?:长度|壳长|筒长|length|L){connector}\s*{number}\s*mm",
             ],
             "radius_mm": [
-                rf"(?:半径|壳半径|内半径|radius|R){connector}\s*([0-9]+(?:\.[0-9]+)?)\s*mm",
+                rf"(?:半径|radius|R){connector}\s*{number}\s*mm",
             ],
             "thickness_mm": [
-                rf"(?:厚度|壁厚|壳厚|thickness|t){connector}\s*([0-9]+(?:\.[0-9]+)?)\s*mm",
+                rf"(?:厚度|壁厚|壳厚|thickness|t){connector}\s*{number}\s*mm",
             ],
             "alpha_deg": [
-                rf"(?:alpha|α|铺层角\s*α|角度\s*α){connector}\s*([0-9]+(?:\.[0-9]+)?)",
+                rf"(?:alpha|α){connector}\s*{number}",
             ],
             "beta_deg": [
-                rf"(?:beta|β|铺层角\s*β|角度\s*β){connector}\s*([0-9]+(?:\.[0-9]+)?)",
+                rf"(?:beta|β){connector}\s*{number}",
             ],
         }
 
@@ -295,7 +295,7 @@ class TaskParser:
         return fixed
 
     def _extract_geometry_envelope(self, text: str) -> Dict[str, Any]:
-        geometry = dict(DEFAULT_GEOMETRY_ENVELOPE)
+        geometry = {}
         values = self._extract_geometry_values(text)
         fixed_values = self._extract_fixed_geometry_values(text, values)
         for key, value in values.items():

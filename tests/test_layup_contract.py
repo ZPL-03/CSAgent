@@ -84,7 +84,7 @@ def test_candidate_normalization_does_not_repair_a_rejected_proposal(monkeypatch
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = TaskParser().parse_instruction("外压 10 MPa，生成4个候选，预筛1个")
     agent = CandidateGenAgent()
-    raw = agent.doe_sampler.sample_candidates(task, 1, strict_solver_window=True)[0]
+    raw = agent.doe_sampler.sample_candidates(task, 1)[0]
     raw["layup"] = {"layup": "[40_12/-40_4]"}
     candidate = agent._normalize_candidate(task, raw, 1, "LLM")
     assert candidate["layup"]["angles_deg"] == [40] * 12 + [-40] * 4

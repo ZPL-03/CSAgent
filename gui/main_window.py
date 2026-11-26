@@ -85,7 +85,7 @@ class PipelineSession:
 
     @property
     def current_candidates(self) -> list[dict]:
-        if self.evaluated_candidates:
+        if self.evaluated_candidates or self.stage in {"screened", "awaiting_fem_confirmation", "paused_before_fem"}:
             return self.evaluated_candidates
         if self.screened_candidates:
             return self.screened_candidates
@@ -164,7 +164,9 @@ class PipelineWorker(QObject):
 
             if self.action == "conversation_continue":
                 state = self.payload["state"]
-                updated = controller.continue_after_confirmation(state, bool(self.payload["approved"]))
+                updated = controller.continue_after_confirmation(
+                    state, bool(self.payload["approved"]), fem_candidate_ids=self.payload.get("fem_candidate_ids"),
+                )
                 self.finished.emit(self.action, {"state": updated})
                 return
 
@@ -2493,11 +2495,12 @@ class MainWindow(QMainWindow):
         has_pending_display = bool(self._pending_candidates(self.session.display_candidates)) if has_candidates else False
         report_ready = bool(self.session.task and has_results)
 
-        is_confirmation = self.session.pending_confirmation in {"screen_candidates", "fem_evaluation", "export_report"}
-        self.confirm_yes_button.setEnabled(is_confirmation)
+        gate = self.session.pending_confirmation
+        is_confirmation = gate in {"screen_candidates", "fem_evaluation", "export_report"}
+        self.confirm_yes_button.setEnabled(is_confirmation and (gate != "fem_evaluation" or has_pending_current))
         self.confirm_no_button.setEnabled(is_confirmation)
         self.screen_button.setEnabled(has_candidates and self.session.pending_confirmation is None)
-        self.evaluate_selected_button.setEnabled(has_pending_display and self.session.pending_confirmation is None)
+        self.evaluate_selected_button.setEnabled(has_pending_display and gate in {None, "fem_evaluation"})
         self.evaluate_all_button.setEnabled(has_pending_current and self.session.pending_confirmation is None)
         self.report_button.setEnabled(report_ready and self.session.pending_confirmation is None)
         self.reset_button.setEnabled(True)
@@ -3384,14 +3387,16 @@ class MainWindow(QMainWindow):
             writer.writerows(rows)
         return json_path, csv_path
 
-    def _respond_confirmation(self, approved: bool) -> None:
+    def _respond_confirmation(self, approved: bool, *, fem_candidate_ids: list[str] | None = None) -> None:
         if self.session.pending_confirmation not in {"screen_candidates", "fem_evaluation", "export_report"}:
             return
         label = self.locale.text("user.continue") if approved else self.locale.text("user.pause")
+        if fem_candidate_ids is not None:
+            label = self.locale.text("button.evaluate_selected")
         self.chat_widget.add_message("USER", label)
         self._run_action(
             "conversation_continue",
-            {"state": self.session.to_flow_state(), "approved": approved},
+            {"state": self.session.to_flow_state(), "approved": approved, "fem_candidate_ids": fem_candidate_ids},
             "正在推进对话流程",
         )
 
@@ -3441,6 +3446,9 @@ class MainWindow(QMainWindow):
         selected = self._pending_candidates(self._selected_candidates_for_evaluation())
         if not selected:
             self.chat_widget.add_message("SYSTEM", self.locale.text("message.selected_done"))
+            return
+        if self.session.pending_confirmation == "fem_evaluation":
+            self._respond_confirmation(True, fem_candidate_ids=[candidate["candidate_id"] for candidate in selected])
             return
         self._run_action(
             "evaluate",

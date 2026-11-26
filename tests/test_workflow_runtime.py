@@ -335,6 +335,30 @@ def test_workflow_runtime_completes_full_approved_path(tmp_path):
     assert runs[0]["status"] == "completed"
 
 
+def test_manual_fem_selection_from_pool_without_default_targets(monkeypatch, tmp_path):
+    store = WorkflowEventStore(tmp_path / "workflow.sqlite3")
+    orchestrator = FakeOrchestrator()
+    monkeypatch.setattr(orchestrator, "screen_candidates", lambda _task, _candidates: [])
+    runtime = DesignWorkflowRuntime(orchestrator=orchestrator, event_store=store)
+    state = runtime.start("生成 2 个候选，初筛保留 1 个候选")
+    run_id = state["run_id"]
+    state = runtime.continue_after_confirmation(run_id, True)
+
+    assert state["pending_confirmation"] == "fem_evaluation"
+    assert state["evaluated_candidates"] == []
+    for ids in (None, [], ["TMP_2", "TMP_2"], ["TMP_2", "TMP_9"]):
+        with pytest.raises(ValueError):
+            runtime.continue_after_confirmation(run_id, True, fem_candidate_ids=ids)
+        assert runtime.resume(run_id) == state
+        assert runtime.simulation_queue.list_jobs(run_id) == []
+
+    completed = runtime.continue_after_confirmation(run_id, True, fem_candidate_ids=["TMP_2"])
+    assert completed["pending_confirmation"] == "export_report"
+    assert completed["screened_candidates"] == []
+    assert [item["session_candidate_id"] for item in completed["results"]] == ["TMP_2"]
+    assert [item["session_candidate_id"] for item in runtime.simulation_queue.list_jobs(run_id)] == ["TMP_2"]
+
+
 def test_workflow_runtime_batch_fem_uses_unique_formal_candidate_ids(monkeypatch, tmp_path):
     import agents.orchestrator as orchestrator_module
     from agents.fem_agent import FEMAgent
@@ -369,7 +393,6 @@ def test_workflow_runtime_batch_fem_uses_unique_formal_candidate_ids(monkeypatch
         task,
         n_samples=3,
         start_index=1,
-        strict_solver_window=True,
         id_factory=format_temp_candidate_id,
     )
     for candidate, candidate_id, source in zip(

@@ -4,10 +4,8 @@ from __future__ import annotations
 
 import math
 import re
-from functools import lru_cache
 from typing import Any, Dict, List
 
-from core.config_loader import load_param_ranges as _load_param_ranges_raw
 from core.config_loader import default_imperfection_ratio
 from abaqus.cylindrical_geometry import positive_number, radius_reference, shell_radii
 
@@ -161,36 +159,8 @@ def normalize_geometry(hull_type: str, raw_geom: Dict[str, Any] | None) -> Dict[
     return normalized
 
 
-@lru_cache(maxsize=8)
-def load_param_ranges_for_type(hull_type: str = "CYLINDRICAL") -> Dict[str, Dict[str, float]]:
-    """读取耐压壳设计变量范围。"""
-    _ = resolve_hull_type(hull_type)
-    ranges = _load_param_ranges_raw()
-    geometry_ranges = ranges.get("geometry", {})
-    merged: Dict[str, Dict[str, float]] = {}
-    for key in ALL_GEOMETRY_PARAMS:
-        value = geometry_ranges.get(key, {})
-        if isinstance(value, dict) and "min" in value and "max" in value:
-            merged[key] = {"min": float(value["min"]), "max": float(value["max"])}
-    return merged
-
-
 def geometry_to_feature_vector(geometry: Dict[str, Any]) -> List[float]:
     return [float(geometry.get(key, 0.0)) for key in CANONICAL_GEOMETRY_ORDER]
-
-
-def rule_check_param_keys(hull_type: str = "CYLINDRICAL") -> List[str]:
-    return required_geometry_params(hull_type)
-
-
-def solver_safe_window_keys(hull_type: str = "CYLINDRICAL") -> Dict[str, tuple[float, float]]:
-    _ = resolve_hull_type(hull_type)
-    return {
-        "solver_length_ok": (300.0, 800.0),
-        "solver_radius_ok": (80.0, 180.0),
-        "solver_thickness_ok": (5.0, 20.0),
-        "solver_imperfection_ok": (0.001, 0.01),
-    }
 
 
 def layup_pattern(alpha_deg: float, beta_deg: float, template_name: str = "BASE_90_AB") -> str:

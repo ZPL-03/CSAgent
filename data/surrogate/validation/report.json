@@ -1,5 +1,5 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "status": "evaluated",
   "hash_format": "utf8_lf",
   "model_type": "linear",
@@ -129,6 +129,24 @@
       }
     }
   },
+  "deployment_geometry_bounds": {
+    "length_mm": [
+      300.0,
+      800.0
+    ],
+    "inner_radius_mm": [
+      80.0,
+      180.0
+    ],
+    "thickness_mm": [
+      5.0,
+      20.0
+    ],
+    "imperfection_ratio": [
+      0.001,
+      0.01
+    ]
+  },
   "training_feature_min": [
     -0.004224585,
     3.418554223,
@@ -148,12 +166,12 @@
     "data/surrogate/dataset_metadata.json": "bd361ed8049f735600a666e62296c9a6507357fec1c0846b6c404ec4683b0ef4"
   },
   "code_hashes": {
-    "scripts/fit_pressure_surrogate.py": "a2730617844e167726e523e47370548bac2e00d0909601b7d2c94863a28cd2f1",
+    "scripts/fit_pressure_surrogate.py": "4db553f1072834550b276bc3fb12545b27b19e399c2c0836bdc27821e0c0329d",
     "core/surrogate_dataset.py": "6bd7beff8cef1c048d40636609a94914ec716d8c7b906b7ef4ab8b2f7ba573d1",
     "core/pressure_regression.py": "6b7a3d47650ddbaa17a075face662986aebeddca7db3c0e16e227ec086a0c71f",
-    "core/surrogate_model.py": "c72ca937944235f12e35474dda5a125b9e879bd002e9cb2bf6e2b9437a7007cb",
+    "core/surrogate_model.py": "ff8830ca1403cf3086d1d48fb41492e351578933977cad599e7a334b781947a9",
     "core/io_utils.py": "9aca114cfdc50dee9ef2c3748f6e7c5647f3e9eba4f1f34b8de26f131839d39a",
-    "core/pressure_hull_profile.py": "77409b5d8a23cddcd8a3ef2796ec7bc6d1d78fcfabc048fc2c8153733b638548",
+    "core/pressure_hull_profile.py": "81e0b77f5336a944751ec145c37be92719a4748aacd43c549f8ee8762e5e74dc",
     "abaqus/cylindrical_geometry.py": "53036cc812958dac3c04d738678e913ea3b07e4b726664ef66ced6ac0076eef4"
   },
   "prediction_hashes": {

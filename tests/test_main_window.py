@@ -496,6 +496,36 @@ def test_workbench_non_destructive_buttons_execute_connected_actions(monkeypatch
         app.processEvents()
 
 
+def test_fem_confirmation_with_no_defaults_allows_only_explicit_candidates(monkeypatch) -> None:
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    app = _app()
+    window = MainWindow()
+    calls = []
+    try:
+        monkeypatch.setattr(window, "_run_action", lambda action, payload, _status: calls.append((action, payload)))
+        candidates = [dict(_candidate(f"TMP_{index}"), screening_selected=False,
+                           surrogate_prediction_status="outside_geometry_domain") for index in (1, 2)]
+        window.session = PipelineSession(
+            task=TaskParser().parse_instruction("外压30 MPa，半径200 mm，生成2个候选，初筛保留1个"),
+            candidates=candidates, workflow_run_id="RUN_MANUAL", stage="awaiting_fem_confirmation",
+            pending_confirmation="fem_evaluation",
+        )
+        window.workbench_candidate_widget.update_candidates(candidates)
+        window._update_button_states()
+        assert not window.confirm_yes_button.isEnabled()
+        assert window.confirm_no_button.isEnabled()
+        assert not window.evaluate_all_button.isEnabled()
+        window.workbench_candidate_widget.table.selectRow(1)
+        window.evaluate_selected_button.click()
+        action, payload = calls.pop()
+        assert action == "conversation_continue"
+        assert payload["approved"] is True and payload["fem_candidate_ids"] == ["TMP_2"]
+        assert not calls
+    finally:
+        window.close()
+        app.processEvents()
+
+
 def test_primary_workflow_buttons_click_through_to_pipeline(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     app = _app()

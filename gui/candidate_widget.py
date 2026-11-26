@@ -290,7 +290,10 @@ class CandidateWidget(QWidget):
             screening_selected = candidate.get("screening_selected")
             status_value = result.get("status", "未校核") if result else "未校核"
             if screening_selected is False and not result:
-                status_value = "预筛非正" if candidate.get("surrogate_prediction_status") == "nonpositive" else "未入选Top-K"
+                status_value = {
+                    "outside_geometry_domain": "超出代理范围",
+                    "nonpositive": "预筛非正",
+                }.get(candidate.get("surrogate_prediction_status"), "未入选Top-K")
             values = [
                 candidate.get("display_name", candidate.get("candidate_id", "")),
                 generation_label,
@@ -407,6 +410,8 @@ class CandidateWidget(QWidget):
             f"面密度={_format_number(candidate.get('surrogate_weight'))} kg/m^2，"
             f"评分={_format_number(candidate.get('rank_score'))}<br>"
             f"线性屈曲压力来源：{candidate.get('linear_buckling_source') or '-'}</p>"
+            + (f"<p><b>筛选结果：</b>{escape(candidate['selection_reason'])}</p>" if candidate.get("selection_reason") else "")
+            +
             "<h4>几何设计参数</h4><ul>"
             f"{geometry_items}</ul>"
             "<h4>分析条件</h4>"

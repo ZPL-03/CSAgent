@@ -114,11 +114,14 @@ class ReportGenAgent(BaseAgent):
     def _candidate_pool_summary(self, candidates: List[Dict]) -> Dict[str, Any]:
         """为解释模型提供候选池统计，不发送未校核候选的逐项明细。"""
         source_counts: Dict[str, int] = {}
+        prediction_counts: Dict[str, int] = {}
         selected_ids: List[str] = []
         surrogate_pressures: List[float] = []
         for candidate in candidates:
             source = str(candidate.get("source") or "UNKNOWN")
             source_counts[source] = source_counts.get(source, 0) + 1
+            status = candidate.get("surrogate_prediction_status") or "not_evaluated"
+            prediction_counts[status] = prediction_counts.get(status, 0) + 1
             candidate_id = str(candidate.get("candidate_id") or "").strip()
             if candidate.get("screening_selected") and candidate_id:
                 selected_ids.append(candidate_id)
@@ -134,6 +137,7 @@ class ReportGenAgent(BaseAgent):
         return {
             "total_count": len(candidates),
             "source_counts": dict(sorted(source_counts.items())),
+            "surrogate_prediction_counts": prediction_counts,
             "screening_selected_count": len(selected_ids),
             "screening_selected_ids": sorted(selected_ids),
             "surrogate_pressure_range_MPa": pressure_range,
@@ -630,8 +634,11 @@ class ReportGenAgent(BaseAgent):
             ])
         lines.extend(["", "## 代理预筛方案与筛选理由", ""])
         screened = [item for item in candidates if item.get("screening_rank") is not None]
-        if not screened:
+        unranked = [item for item in candidates if item.get("surrogate_prediction_status") in {"outside_geometry_domain", "nonpositive"}]
+        if not screened and not unranked:
             lines.append("- 未执行代理预筛或未提供预筛记录。")
+        elif not screened:
+            lines.append("- 无可排名的方案，未生成默认送检队列。")
         for candidate in sorted(screened, key=lambda item: item["screening_rank"]):
             lines.extend([
                 "", f"### 排名 {candidate['screening_rank']}：{candidate.get('session_candidate_id') or candidate.get('candidate_id')}",
@@ -642,6 +649,9 @@ class ReportGenAgent(BaseAgent):
                 f"- 筛选依据：{candidate.get('screening_summary') or '-'}",
                 f"- 入选或未入选原因：{candidate.get('selection_reason') or '-'}",
             ])
+        for candidate in unranked:
+            candidate_id = candidate.get("session_candidate_id") or candidate.get("candidate_id")
+            lines.append(f"- {candidate_id}：{candidate['screening_summary']}")
         lines.extend(["", "## 有限元校核结果", ""])
         if not results:
             lines.append("- 当前没有有限元结果，不能作出最终通过或推荐结论。")

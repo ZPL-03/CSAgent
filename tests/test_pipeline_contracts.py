@@ -147,10 +147,15 @@ def test_task_contract_rejects_unknown_explicit_boundary_type(boundary):
         normalize_task_payload({"boundary_conditions": {"type": boundary}})
 
 
-@pytest.mark.parametrize("value", ["abc", True, None, float("nan"), [300], [300, 500, 800], [300, "abc"]])
+@pytest.mark.parametrize("value", ["abc", True, None, -1, 0, float("nan"), [300], [300, 500, 800], [300, "abc"]])
 def test_task_contract_rejects_invalid_explicit_geometry(value):
     with pytest.raises(ValueError):
         normalize_task_payload({"geometry_envelope": {"length_mm": value}})
+
+
+def test_task_geometry_must_admit_a_positive_inner_radius():
+    with pytest.raises(ValueError, match="任务半径与厚度范围不能形成有效的圆柱壳"):
+        TaskParser().parse_instruction("工作压力30 MPa，外半径20 mm，壁厚20 mm")
 
 
 def test_task_contract_preserves_defaults_aliases_and_range_endpoints():
@@ -228,7 +233,7 @@ def test_designs_use_task_imperfection_without_rewriting_case_source(monkeypatch
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = TaskParser().parse_instruction("工作压力 12 MPa，长度 500 mm，半径 100 mm，生成4个方案，预筛1个" + specified)
     agent = CandidateGenAgent()
-    source = agent.doe_sampler.sample_candidates(task, 1, strict_solver_window=True)[0]
+    source = agent.doe_sampler.sample_candidates(task, 1)[0]
     source["geometry"]["imperfection_ratio"] = 0.003
     original = deepcopy(source)
     migrated = agent._normalize_candidate(task, source, 1, "CASE_TRANSFER")
@@ -576,8 +581,6 @@ def test_candidate_generation_uses_three_initial_sources(monkeypatch):
             task_payload,
             n_samples=desired_count,
             start_index=start_index,
-            strict_solver_window=True,
-            hull_type="CYLINDRICAL",
             id_factory=format_temp_candidate_id,
         )
         for candidate in candidates:
@@ -612,8 +615,6 @@ def test_candidate_generation_changes_actual_source_counts_when_transfer_cases_a
             task_payload,
             n_samples=actual_count,
             start_index=start_index,
-            strict_solver_window=True,
-            hull_type="CYLINDRICAL",
             id_factory=format_temp_candidate_id,
         )
         for candidate in candidates:
@@ -871,7 +872,6 @@ def test_candidate_schema_requires_non_empty_display_name(monkeypatch):
         task,
         n_samples=1,
         start_index=1,
-        strict_solver_window=True,
         id_factory=format_temp_candidate_id,
     )[0]
 
@@ -896,7 +896,6 @@ def test_orchestrator_promotes_candidate_to_formal_identity_without_persistent_i
         task,
         n_samples=1,
         start_index=1,
-        strict_solver_window=True,
         id_factory=format_temp_candidate_id,
     )[0]
     candidate["persistent_candidate_id"] = "C999"
@@ -924,7 +923,6 @@ def test_orchestrator_reserves_unique_formal_ids_for_fem_batch(monkeypatch):
         task,
         n_samples=3,
         start_index=1,
-        strict_solver_window=True,
         id_factory=format_temp_candidate_id,
     )
     for candidate, candidate_id in zip(base_candidates, ["TMP_10", "TMP_4", "TMP_9"]):
@@ -989,7 +987,6 @@ def test_orchestrator_run_uses_batch_fem_promotion(monkeypatch):
         task,
         n_samples=3,
         start_index=1,
-        strict_solver_window=True,
         id_factory=format_temp_candidate_id,
     )
     for candidate, candidate_id, source in zip(
@@ -1406,6 +1403,21 @@ def test_report_generates_one_complete_design_document(monkeypatch, tmp_path):
     assert "候选 TMP_2" in text and extra["rationale"] in text
     assert "排名低于本轮保留数量" in text
     assert "当前没有同时具备完整通过证据" in text
+
+
+def test_report_distinguishes_outside_geometry_from_unscreened_candidates(monkeypatch):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task, _, candidates = _report_sample()
+    candidates[0].update(
+        screening_rank=None, screening_selected=False, rank_score=None,
+        surrogate_prediction_status="outside_geometry_domain", surrogate_ultimate_pressure_MPa=None,
+        asme_linear_buckling_pressure_MPa=None, screening_summary="超出代理模型几何覆盖范围。",
+    )
+    text = ReportGenAgent()._render_markdown(task, [], candidates)
+    assert "无可排名的方案，未生成默认送检队列" in text
+    assert "TMP_1：超出代理模型几何覆盖范围" in text
+    assert "未执行代理预筛" not in text
+    assert "当前没有有限元结果，不能作出最终通过或推荐结论" in text
 
 
 def test_report_summarizes_provenance_without_internal_layup_dump(monkeypatch):
