@@ -16,7 +16,8 @@ def _result(index, thickness):
         "status": "success", "verdict": "通过", "ultimate_pressure_MPa": 30,
         "riks_limit_point_confirmed": True, "progressive_damage_complete": True,
         "damage_state_output_complete": True, "weight_kg_per_m2": 15.5,
-        "service_pressure_check_status": "passed", "service_stress_coverage": coverage,
+        "service_pressure_check_status": "passed", "service_pressure_checked_MPa": 20.0,
+        "service_stress_coverage": coverage,
         "solved_design": {"geometry": {"thickness_mm": thickness}},
     }
 
@@ -40,7 +41,7 @@ def test_report_and_model_share_three_state_counts_and_recommendation(monkeypatc
     monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
     task = normalize_task_payload({"load_conditions": {"external_pressure_MPa": 20},
                                    "design_targets": {"primary_objective": "最小厚度"}})
-    results = [_result(1, 10.8), {**_result(2, 10.4), "verdict": "不通过"},
+    results = [_result(1, 10.8), {**_result(2, 10.4), "verdict": "不通过", "ultimate_pressure_MPa": 18.0},
                {"candidate_id": "C3", "status": "failed", "verdict": None}]
     agent = ReportGenAgent()
     summary = agent._build_structured_summary(task, results, [])
@@ -82,6 +83,43 @@ def test_solver_failure_is_not_a_failed_design_check(monkeypatch):
     assert payload["context"]["aggregate"]["unknown_count"] == 2
     assert payload["recommendation"]["selected"] is None
     assert summary["result_assessments"][1]["semantic_errors"]
+
+
+@pytest.mark.parametrize("overrides,expected", [
+    ({}, "failed"),
+    ({"service_pressure_check_status": "passed", "verdict": "通过"}, "unknown"),
+    ({"service_pressure_checked_MPa": None}, "unknown"),
+    ({"service_pressure_checked_MPa": 25.0}, "unknown"),
+    ({"service_stress_coverage": {"status": "incomplete"}}, "unknown"),
+    ({"verdict": "通过"}, "unknown"),
+    ({"status": "failed"}, "unknown"),
+])
+def test_report_distinguishes_service_failure_from_unconfirmed_capacity(monkeypatch, overrides, expected):
+    monkeypatch.setenv("CSDM_cph_DISABLE_LLM_AUTO", "1")
+    task = normalize_task_payload({"load_conditions": {"external_pressure_MPa": 20}})
+    result = _result(1, 10.8)
+    result.update(verdict="不通过", service_pressure_check_status="failed", ultimate_pressure_MPa=None,
+                  riks_limit_point_confirmed=None, progressive_damage_complete=False, damage_state_output_complete=None)
+    result.update(overrides)
+    if result["service_pressure_check_status"] == "failed":
+        result["capacity_assessment_status"] = "not_run_service_check_failed"
+    agent = ReportGenAgent()
+    summary = agent._build_structured_summary(task, [result], [])
+    payload = agent._build_llm_explanation_payload(summary)
+    assert (summary["passed_count"], summary["failed_count"], summary["unknown_count"]) == (
+        0, int(expected == "failed"), int(expected == "unknown"),
+    )
+    assert next(row["value"] for row in payload["facts"] if row["ref"] == "C1.design_check") == expected
+    assert not summary["results"][0]["verified_capacity"]
+    assert summary["recommendation"]["selected"] is None
+    text = agent._render_markdown(task, [result], [], summary)
+    if expected == "failed":
+        assert "- 结论：不通过" in text
+        assert "- 容量与工作压力比较：未执行容量分析" in text
+        assert summary["recommendation"]["excluded"][0]["reasons"] == ["工作压力校核不通过"]
+    else:
+        assert "- 结论：未判定" in text
+        assert summary["result_assessments"][0]["semantic_errors"]
 
 
 def test_case_write_receives_actual_solved_design():

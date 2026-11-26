@@ -18,6 +18,7 @@ METRICS = {
     "linear_buckling_pressure_MPa": ("线性屈曲压力", "MPa"),
     "surrogate_ultimate_pressure_MPa": ("代理承载压力估计", "MPa"),
     "service_pressure_checked_MPa": ("工作校核压力", "MPa"),
+    "service_pressure_check_status": ("工作压力校核状态", None),
     "service_hashin_index_max": ("工作压力最大 Hashin 指数", "1"),
     "weight_kg_per_m2": ("面密度", "kg/m^2"),
     "symmetric": ("中面对称", None),
@@ -39,7 +40,8 @@ METRICS = {
     "material": ("实际求解材料", None),
     "layup": ("实际求解铺层", None),
 }
-ANALYSIS_SCOPE = "逐层圆柱壳、初始几何缺陷、弹性首层失效与含损伤 Riks；未建模封头、法兰、层间分层及制造过程，未提供试验认证。"
+ANALYSIS_SCOPE = "考虑初始几何缺陷的逐层圆柱壳子模型；不含封头、法兰、层间分层及制造过程，不提供试验认证。"
+DESIGN_CHECK_LABELS = {"passed": "通过", "failed": "不通过", "unknown": "未判定", "not_run": "未求解"}
 
 
 def build_report_facts(summary: dict) -> list[dict]:
@@ -71,7 +73,7 @@ def build_report_facts(summary: dict) -> list[dict]:
         state = assessments.get(cid, "unknown")
         add(cid, "design_check", state, state)
         for metric in ("solved_imperfection_ratio", "imperfection_amplitude_mm", "ultimate_pressure_MPa",
-                       "linear_buckling_pressure_MPa", "service_pressure_checked_MPa",
+                       "linear_buckling_pressure_MPa", "service_pressure_checked_MPa", "service_pressure_check_status",
                        "service_hashin_index_max", "weight_kg_per_m2",
                        "riks_limit_point_confirmed", "riks_termination_reason"):
             value = row.get(metric)
@@ -127,7 +129,7 @@ def format_fact_value(fact: dict) -> str:
     """显示值保留当前单位；显示舍入不参与判定或数值比较。"""
     value = fact["value"]
     if fact["metric"] == "analysis_scope":
-        return "含初始几何缺陷的圆柱壳损伤容量分析"
+        return "含初始几何缺陷的复合材料圆柱壳子模型"
     if fact["metric"] == "radius_reference":
         return {"inner": "内半径", "middle_surface": "中面半径", "outer": "外半径"}[value]
     if fact["metric"] == "riks_termination_reason" and value is not None:
@@ -143,8 +145,7 @@ def format_fact_value(fact: dict) -> str:
                    else format_number(value, 3) if fact["metric"].endswith("hashin_index_max")
                    else format_parameter(fact["metric"], value))
     else:
-        display = {"passed": "通过", "failed": "不通过", "unknown": "未判定",
-                   "not_run": "未求解"}.get(str(value), str(value))
+        display = DESIGN_CHECK_LABELS.get(str(value), str(value))
     # 数量的量词由句子承担，物理量的单位由事实显示值承担。
     unit = ("" if fact["unit"] == "个" else "（无量纲）" if fact["unit"] == "1"
             else " " + fact["unit"] if fact["unit"] else "")

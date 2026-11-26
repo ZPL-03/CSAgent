@@ -1468,11 +1468,10 @@ def test_final_recommendation_obeys_objective_and_requires_complete_evidence(mon
             "riks_limit_point_confirmed": True, "progressive_damage_complete": True,
             "damage_state_output_complete": True,
             "verification_scope": "composite_cylindrical_shell_submodel",
+            "service_pressure_checked_MPa": 30.0, "service_pressure_check_status": "passed",
+            "service_stress_coverage": {"status": "complete", "checked_element_positions": 8,
+                                        "expected_section_points": 8, "incomplete_element_positions": 0},
         }
-        for stage in ("service", "target"):
-            result[f"{stage}_pressure_check_status"] = "passed"
-            result[f"{stage}_stress_coverage"] = {"status": "complete", "checked_element_positions": 8,
-                                                 "expected_section_points": 8, "incomplete_element_positions": 0}
         results.append(result)
     agent = ReportGenAgent()
     report = agent.run({"task": task, "candidates": candidates, "results": results,
@@ -1491,14 +1490,15 @@ def test_recommendation_compares_confirmed_capacity_with_working_pressure(monkey
     result = results[0]
     result.update(status="success", ultimate_pressure_MPa=capacity, riks_limit_point_confirmed=True,
                   progressive_damage_complete=True, damage_state_output_complete=True,
+                  verdict="通过" if accepted else "不通过", service_pressure_checked_MPa=30.0,
                   verification_scope="composite_cylindrical_shell_submodel")
-    for stage in ("service",):
-        result[f"{stage}_pressure_check_status"] = "passed"
-        result[f"{stage}_stress_coverage"] = {"status": "complete", "checked_element_positions": 8,
-                                             "expected_section_points": 8, "incomplete_element_positions": 0}
+    result["service_pressure_check_status"] = "passed"
+    result["service_stress_coverage"] = {"status": "complete", "checked_element_positions": 8,
+                                         "expected_section_points": 8, "incomplete_element_positions": 0}
     agent = ReportGenAgent()
-    comparison = agent._build_structured_summary(task, results, candidates)["recommendation"]
-    assert bool(comparison["selected"]) is accepted
+    summary = agent._build_structured_summary(task, results, candidates)
+    assert summary["result_assessments"][0]["state"] == ("passed" if accepted else "failed")
+    assert bool(summary["recommendation"]["selected"]) is accepted
     result["riks_limit_point_confirmed"] = False
     assert agent._build_structured_summary(task, results, candidates)["recommendation"]["selected"] is None
 

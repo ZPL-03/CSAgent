@@ -122,8 +122,8 @@ def required_fem_artifact_fields(results: Dict[str, Any]) -> Tuple[str, ...]:
     return tuple(field for field in FEM_ARTIFACT_FIELDS if field in required)
 
 
-def complete_case_result_errors(results: Dict[str, Any]) -> Tuple[str, ...]:
-    """返回完整设计案例所缺少的求解证据，不把阶段结果当作完整案例。"""
+def service_pressure_check_errors(results: Dict[str, Any]) -> Tuple[str, ...]:
+    """核对工作压力校核结果及全部铺层应力证据。"""
     errors = list(result_semantic_errors(results))
     if not is_successful_result(results):
         errors.append("求解链路未成功完成")
@@ -135,6 +135,12 @@ def complete_case_result_errors(results: Dict[str, Any]) -> Tuple[str, ...]:
         errors.append("工作压力缺少全部铺层应力覆盖证据")
     if results.get("service_pressure_check_status") not in {"passed", "failed"}:
         errors.append("工作压力校核未完成")
+    return tuple(errors)
+
+
+def complete_case_result_errors(results: Dict[str, Any]) -> Tuple[str, ...]:
+    """返回完整设计案例所缺少的求解证据，不把阶段结果当作完整案例。"""
+    errors = list(service_pressure_check_errors(results))
     if results.get("riks_limit_point_confirmed") is not True or verified_capacity_pressure(results) is None:
         errors.append("损伤后屈曲路径未确认极限点")
     if results.get("progressive_damage_complete") is not True or results.get("damage_state_output_complete") is not True:

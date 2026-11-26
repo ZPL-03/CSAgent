@@ -15,12 +15,12 @@ from agents.base import BaseAgent
 from core.config_loader import load_llm_config
 from core.display import format_number, format_parameter
 from core.layup_parameters import active_geometry, uses_task_angles
-from core.report_facts import build_report_facts, format_fact_value
+from core.report_facts import DESIGN_CHECK_LABELS, build_report_facts, format_fact_value
 from core.report_review import (
     REVIEW_PROMPT, parse_engineering_review, prepare_review_payload, render_engineering_review, review_engineering_content,
 )
 from core.fem_result_semantics import (
-    complete_case_result_errors, is_passed_design_check, is_successful_result,
+    complete_case_result_errors, service_pressure_check_errors,
     verified_capacity_pressure,
 )
 from core.io_utils import write_json, write_text
@@ -155,7 +155,7 @@ class ReportGenAgent(BaseAgent):
         """只投影非事实表中已提供的完整 FEM 诊断，避免与 facts 重复传输。"""
         fields = (
             "candidate_id", "session_candidate_id", "status", "design_check_status",
-            "capacity_assessment_status", "verified_capacity", "service_pressure_check_status",
+            "capacity_assessment_status",
             "riks_increment_count", "riks_limit_point_confirmed", "progressive_damage_complete",
             "damage_state_output_complete", "progressive_damage_model", "damage_state_maxima",
             "service_stress_coverage", "failure_mode", "verification_scope", "diagnosis_summary",
@@ -183,7 +183,7 @@ class ReportGenAgent(BaseAgent):
             "comparable_count", "analysis_scope", "recommendation_status",
         }
         result_metrics = {
-            "design_check", "ultimate_pressure_MPa", "service_pressure_checked_MPa",
+            "design_check", "ultimate_pressure_MPa", "service_pressure_checked_MPa", "service_pressure_check_status",
             "service_hashin_index_max", "weight_kg_per_m2", "riks_limit_point_confirmed",
             "riks_termination_reason", "objective_value", "capacity_margin_percent",
         }
@@ -235,41 +235,39 @@ class ReportGenAgent(BaseAgent):
             enriched_results.append(enriched)
         return enriched_results
 
+    @staticmethod
+    def _assess_design_result(result: Dict, working_pressure: float) -> tuple[Dict, float | None]:
+        """按工作压力和容量证据判定；工作压力不通过时无需容量结果。"""
+        service_failed = result.get("service_pressure_check_status") == "failed"
+        check = service_pressure_check_errors if service_failed else complete_case_result_errors
+        errors = list(check(result))
+        checked_pressure = result.get("service_pressure_checked_MPa")
+        if isinstance(checked_pressure, bool) or checked_pressure != working_pressure:
+            errors.append("缺少与任务工作压力一致的校核证据")
+        capacity = verified_capacity_pressure(result) if not service_failed and not errors else None
+        state = "unknown"
+        if not errors:
+            expected = "passed" if capacity is not None and capacity >= working_pressure else "failed"
+            if result.get("verdict") == DESIGN_CHECK_LABELS[expected]:
+                state = expected
+            else:
+                errors.append("设计判定与工作压力校核或确认容量不一致")
+        return {
+            "candidate_id": result.get("candidate_id"), "session_candidate_id": result.get("session_candidate_id"),
+            "state": state, "semantic_errors": errors,
+        }, capacity
+
     def _build_structured_summary(self, task: Dict, results: List[Dict], candidates: List[Dict]) -> Dict:
         task_payload = task_payload_from_request(task)
         design_targets = dict(task_payload.get("design_targets", {}))
-        assessments = []
-        for result in results:
-            # 总体设计判定需要完整求解证据，阶段 verdict 不代表全流程通过。
-            errors = complete_case_result_errors(result)
-            if not errors and is_passed_design_check(result):
-                state = "passed"
-            elif not errors and is_successful_result(result) and result.get("verdict") == "不通过":
-                state = "failed"
-            else:
-                state = "unknown"
-            assessments.append({
-                "candidate_id": result.get("candidate_id"),
-                "session_candidate_id": result.get("session_candidate_id"),
-                "state": state, "semantic_errors": list(errors),
-            })
-        confirmed_ultimate_results = [
-            result for result in results if not complete_case_result_errors(result)
-            and verified_capacity_pressure(result) is not None
-            and result.get("ultimate_pressure_MPa") is not None
-            and result.get("riks_limit_point_confirmed") is True
-        ]
-        best_pressure = max(
-            confirmed_ultimate_results,
-            key=lambda item: float(item["ultimate_pressure_MPa"]),
-            default=None,
-        )
-        lightest = min(results, key=lambda item: float(item.get("weight_kg_per_m2") or 1e9), default=None)
+        working_pressure = task_payload["load_conditions"]["external_pressure_MPa"]
+        evaluated = [self._assess_design_result(result, working_pressure) for result in results]
+        assessments = [assessment for assessment, _ in evaluated]
         return {
             "session_task_id": task.get("task_id"),
             "application": task_payload["application"],
             "load_conditions": describe_load_conditions(task_payload["load_conditions"]),
-            "external_pressure_MPa": task_payload["load_conditions"]["external_pressure_MPa"],
+            "external_pressure_MPa": working_pressure,
             "boundary_conditions": describe_boundary_conditions(task_payload["boundary_conditions"]),
             "imperfection_ratio": task_imperfection_ratio(task_payload),
             "imperfection_source": describe_imperfection_source(task_payload),
@@ -279,11 +277,7 @@ class ReportGenAgent(BaseAgent):
             "failed_count": sum(item["state"] == "failed" for item in assessments),
             "unknown_count": sum(item["state"] == "unknown" for item in assessments),
             "result_assessments": assessments,
-            "recommendation": self._recommendation_facts(task_payload, results, candidates),
-            "best_pressure_candidate": best_pressure.get("candidate_id") if best_pressure else None,
-            "best_pressure_MPa": best_pressure.get("ultimate_pressure_MPa") if best_pressure else None,
-            "lightest_candidate": lightest.get("candidate_id") if lightest else None,
-            "lightest_weight_kg_per_m2": lightest.get("weight_kg_per_m2") if lightest else None,
+            "recommendation": self._recommendation_facts(task_payload, results, candidates, evaluated),
             "all_candidates": [
                 self._compact_candidate_record(candidate)
                 for candidate in candidates
@@ -301,8 +295,8 @@ class ReportGenAgent(BaseAgent):
                     "solved_geometry": active_geometry(result["solved_design"]) if result.get("solved_design") else {},
                     "material": ((result.get("solved_design") or {}).get("material_system") or {}).get("name"),
                     "layup": ((result.get("solved_design") or {}).get("layup") or {}).get("layup"),
-                    "ultimate_pressure_MPa": result.get("ultimate_pressure_MPa"),
-                    "verified_capacity": not complete_case_result_errors(result) and verified_capacity_pressure(result) is not None,
+                    "ultimate_pressure_MPa": capacity if capacity is not None else result.get("ultimate_pressure_MPa"),
+                    "verified_capacity": capacity is not None,
                     "linear_buckling_pressure_MPa": result.get("linear_buckling_pressure_MPa"),
                     "ultimate_pressure_basis": result.get("ultimate_pressure_basis"),
                     "riks_lpf_max": result.get("riks_lpf_max"),
@@ -329,23 +323,28 @@ class ReportGenAgent(BaseAgent):
                     "capacity_assessment_status": result.get("capacity_assessment_status"),
                     "diagnosis_summary": result.get("diagnosis_summary"),
                 }
-                for result in results
+                for result, (_, capacity) in zip(results, evaluated, strict=True)
             ],
         }
 
-    def _recommendation_facts(self, task_payload: Dict, results: List[Dict], candidates: List[Dict]) -> Dict:
+    def _recommendation_facts(
+        self, task_payload: Dict, results: List[Dict], candidates: List[Dict],
+        evaluated: List[tuple[Dict, float | None]],
+    ) -> Dict:
         """按完整求解证据和任务目标排序，供报告正文与模型解释共同使用。"""
-        working_pressure = float(task_payload["load_conditions"]["external_pressure_MPa"])
         objective = str(task_payload["design_targets"]["primary_objective"])
         defect = task_imperfection_ratio(task_payload)
         ranked, excluded = [], []
-        for result in results:
-            reasons = list(complete_case_result_errors(result))
-            if not is_passed_design_check(result):
-                reasons.append("设计校核没有通过")
-            capacity = verified_capacity_pressure(result)
-            if capacity is None or capacity < working_pressure:
-                reasons.append("确认极限压力未达到工作压力")
+        for result, (assessment, capacity) in zip(results, evaluated, strict=True):
+            identity = {"candidate_id": assessment["candidate_id"], "session_candidate_id": assessment["session_candidate_id"]}
+            if assessment["state"] != "passed":
+                reasons = assessment["semantic_errors"] or [
+                    "工作压力校核不通过" if result.get("service_pressure_check_status") == "failed"
+                    else "确认极限压力低于工作压力"
+                ]
+                excluded.append({**identity, "reasons": reasons})
+                continue
+            reasons = []
             candidate = next((item for item in candidates if str(item.get("candidate_id")) in {
                 str(result.get("session_candidate_id")), str(result.get("candidate_id")),
             }), {})
@@ -354,7 +353,7 @@ class ReportGenAgent(BaseAgent):
             if solved_geometry.get("imperfection_ratio") not in (None, defect):
                 reasons.append("求解缺陷条件与任务不一致")
             if objective == "最大极限压力":
-                score = -capacity if capacity is not None else float("inf")
+                score = -capacity
             elif objective == "最小厚度":
                 score = float(geometry.get("thickness_mm") or float("inf"))
             else:
@@ -372,8 +371,6 @@ class ReportGenAgent(BaseAgent):
                         score = float("inf")
             if not math.isfinite(score):
                 reasons.append("缺少目标比较数据")
-            identity = {"candidate_id": result.get("candidate_id"),
-                        "session_candidate_id": result.get("session_candidate_id")}
             if reasons:
                 excluded.append({**identity, "reasons": reasons})
             else:
@@ -506,7 +503,7 @@ class ReportGenAgent(BaseAgent):
                 "result_diagnostics": "result_diagnostics 只保存未在 facts 中重复出现的完整诊断字段；数值、单位和推荐依据以 facts 为准。",
                 "recommendation": "selected 为按任务目标选出的推荐对象，ranked 为具备完整证据且可比较的方案，excluded 记录未入选原因。",
                 "layup": "symmetric 和 balanced 是逐层核查结果；false 表示属性不满足，null 表示没有记录。",
-                "pressure_checks": "工作压力下检查应力与首层失效；极限压力由含损伤 Riks 分析的已确认极限点确定，并与工作压力比较。",
+                "pressure_checks": "工作压力校核不通过即判定设计不通过。通过该阶段后，含损伤 Riks 确认的极限压力与工作压力比较。",
                 "progressive_damage_complete": "容量分析是否包含场变量损伤退化。",
                 "damage_state_maxima": "局部损伤触发标志的最大值，不表示整体损伤程度。",
                 "riks_lpf_max": "Riks 路径的最大载荷比例系数。",
@@ -655,13 +652,17 @@ class ReportGenAgent(BaseAgent):
         lines.extend(["", "## 有限元校核结果", ""])
         if not results:
             lines.append("- 当前没有有限元结果，不能作出最终通过或推荐结论。")
-        for result in results:
-            capacity = result.get("ultimate_pressure_MPa")
+        for result, projected, assessment in zip(results, summary["results"], summary["result_assessments"], strict=True):
+            capacity = projected["ultimate_pressure_MPa"]
             solved_defect = ((result.get("solved_design") or {}).get("geometry") or {}).get("imperfection_ratio")
-            confirmed = not complete_case_result_errors(result) and verified_capacity_pressure(result) is not None
-            capacity_check = (
-                "满足" if float(capacity) >= working_pressure else "不满足"
-            ) if capacity is not None and confirmed else "未确认容量，不作容量通过判定"
+            confirmed = projected["verified_capacity"]
+            service_status = result.get("service_pressure_check_status")
+            if confirmed:
+                capacity_check = "满足" if capacity >= working_pressure else "不满足"
+            elif result.get("capacity_assessment_status") == "not_run_service_check_failed":
+                capacity_check = "未执行容量分析"
+            else:
+                capacity_check = "未确认容量，不作容量通过判定"
             lines.extend([
                 "", f"### {result.get('session_candidate_id') or '-'} / {result.get('candidate_id')}",
                 f"- 作业状态：{result.get('status') or '-'}",
@@ -670,7 +671,8 @@ class ReportGenAgent(BaseAgent):
                 f"- 实际求解缺陷比：{self._field_text(solved_defect, '未记录')}",
                 f"- 实际缺陷幅值：{format_number(result.get('imperfection_amplitude_mm'), missing='未记录')} mm；缺陷比按中面半径归一化。",
                 f"- 求解缺陷条件与任务：{'未记录' if solved_defect is None else '一致' if solved_defect == summary['imperfection_ratio'] else '不一致'}",
-                f"- 工作压力校核：{result.get('service_pressure_check_status') or '-'}",
+                f"- 工作压力校核：{DESIGN_CHECK_LABELS.get(service_status, service_status or '未判定')}；"
+                f"检查压力 {format_number(result.get('service_pressure_checked_MPa'))} MPa",
                 f"- 工作压力最大 Hashin 指数：{self._field_text(result.get('service_hashin_index_max'))}",
                 f"- 线性屈曲压力：{format_number(result.get('linear_buckling_pressure_MPa'))} MPa",
                 f"- {'确认渐进损伤容量' if confirmed else '容量路径峰值（未确认）'}：{format_number(capacity)} MPa",
@@ -683,7 +685,7 @@ class ReportGenAgent(BaseAgent):
                 f"- 损伤状态变量：{self._field_text(result.get('damage_state_maxima'))}",
                 f"- 工作压力应力覆盖：{self._field_text(result.get('service_stress_coverage'))}",
                 f"- 后峰终止依据：{result.get('riks_termination_reason') or '-'}",
-                f"- 结论：{result.get('verdict') or '未判定'}",
+                f"- 结论：{DESIGN_CHECK_LABELS[assessment['state']]}",
                 f"- 诊断说明：{self._field_text(result.get('diagnosis_summary') or result.get('error_log'))}",
                 f"- 模态云图数据：{self._report_asset_path(result.get('visualization_json'))}",
             ])

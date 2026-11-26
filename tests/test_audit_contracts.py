@@ -173,7 +173,9 @@ def test_report_model_review_and_rejection_are_separate_from_export(monkeypatch)
     current = task()
     current["design_targets"]["primary_objective"] = "最小厚度"
     current["load_conditions"]["external_pressure_MPa"] = 30
-    summary = agent._build_structured_summary(current, [_result(1, 10)], [])
+    result = _result(1, 10)
+    result["service_pressure_checked_MPa"] = current["load_conditions"]["external_pressure_MPa"]
+    summary = agent._build_structured_summary(current, [result], [])
     def respond(_system, user, **kwargs):
         assert kwargs["json_mode"] is True
         payload = json.loads(user)
